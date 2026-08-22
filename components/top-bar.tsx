@@ -1,0 +1,81 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { Bookmark, Home, Settings, Wrench } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+/**
+ * The sketch's `window-chrome` block: centred title, app icon on the left,
+ * Manage / Saved / Settings plus an avatar on the right, compact, translucent
+ * over the page (`solid: false`), no window controls.
+ *
+ * Icon note: the sketch names two Material Symbols (`ms.handyman` for Manage,
+ * `ms.videogame_asset` and `ms.deployed_code_update` in the bottom nav). This
+ * app ships lucide only — bundling a second icon font for three glyphs is not
+ * worth a self-hosted font file — so the nearest lucide equivalents stand in.
+ */
+const ACTIONS = [
+  { href: "/manage", label: "Manage", Icon: Wrench },
+  { href: "/saved", label: "Saved", Icon: Bookmark },
+  { href: "/settings", label: "Settings", Icon: Settings },
+];
+
+export default function TopBar() {
+  const pathname = usePathname();
+
+  return (
+    <header className="sticky top-0 z-30 border-b border-[color:var(--border)] bg-[var(--bar)] backdrop-blur">
+      <div className="mx-auto flex max-w-5xl items-center gap-2.5 px-3 py-1.5">
+        <Link
+          href="/"
+          aria-label="App Store home"
+          className="flex h-[21px] w-[21px] shrink-0 items-center justify-center rounded-[6px]"
+          style={{
+            backgroundImage:
+              "linear-gradient(135deg, color-mix(in srgb, var(--accent), transparent 40%), var(--card-2))",
+          }}
+        >
+          <Home size={10} />
+        </Link>
+
+        <span className="min-w-0 flex-1 text-center">
+          <span className="block truncate text-[13px] font-semibold tracking-wide">
+            APPSTORE
+          </span>
+        </span>
+
+        <span className="flex shrink-0 items-center gap-1.5">
+          {ACTIONS.map(({ href, label, Icon }) => (
+            <Link
+              key={href}
+              href={href}
+              aria-label={label}
+              title={label}
+              className={cn(
+                "rounded-[var(--radius-sm)] p-1 transition hover:bg-[var(--card-2)]",
+                pathname === href
+                  ? "text-[color:var(--fg)]"
+                  : "text-[color:var(--muted-2)]"
+              )}
+            >
+              <Icon size={13} />
+            </Link>
+          ))}
+          {/* Account stand-in. There is no sign-in yet; the sketch asks for the
+              avatar slot, so the slot is here and the identity comes later. */}
+          <span
+            aria-hidden
+            className="ml-0.5 flex h-[18px] w-[18px] items-center justify-center rounded-full text-[9px] font-semibold text-white/90"
+            style={{
+              backgroundImage:
+                "linear-gradient(135deg, hsl(266 45% 42% / 0.9), hsl(314 45% 24% / 0.9))",
+            }}
+          >
+            T
+          </span>
+        </span>
+      </div>
+    </header>
+  );
+}
