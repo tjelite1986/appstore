@@ -182,6 +182,13 @@ traefik network) and comes back as an account. `role === "admin"` opens the
 routes; answers are cached 30 s. Manage tries this first and only shows a
 token form when it comes back 401.
 
+A cookie is the one credential a browser attaches on its own, so writes
+authenticated that way also have to come from this store's own pages: the
+`Origin` on an unsafe method must match the host. `SameSite=lax` is not enough
+on its own here — every host under `example.com` counts as the same site, so a
+sibling service, or a file this store serves back, would otherwise be trusted.
+Reads skip the check; a cross-site navigation cannot read what it gets.
+
 **A timer sends a token.** `scripts/cron.sh` has no browser and no session, so
 `STORE_ADMIN_TOKEN` stays as the machine credential in the
 `x-store-admin-token` header.

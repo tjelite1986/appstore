@@ -25,6 +25,11 @@ import { eliteUser, ssoConfigured } from "@/lib/sso";
 
 const HEADER = "x-store-admin-token";
 
+// Origin is sent on every request a browser considers unsafe, and on none of
+// the safe ones — so a same-origin GET legitimately has no Origin header, and
+// requiring one there would break Manage's own reads.
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
 export function tokenConfigured(): boolean {
   return !!process.env.STORE_ADMIN_TOKEN;
 }
@@ -32,6 +37,30 @@ export function tokenConfigured(): boolean {
 /** True when any way in is configured at all. */
 export function adminConfigured(): boolean {
   return tokenConfigured() || ssoConfigured();
+}
+
+/**
+ * Whether a state-changing request came from this store's own pages.
+ *
+ * The cookie is the one credential here a browser attaches by itself, which is
+ * what makes it worth stealing: any page can make the visitor's browser POST.
+ * `SameSite=lax` stops that from another *site*, but every host under
+ * example.com is the same site, so a page on a sibling service — or a file
+ * this store itself serves back — would be trusted without this check.
+ *
+ * Reads are left alone deliberately. A cross-site navigation can reach one
+ * with the cookie attached, but the response is not readable from the page
+ * that caused it, and nothing changes.
+ */
+function sameOrigin(req: Request): boolean {
+  if (SAFE_METHODS.has(req.method)) return true;
+  const origin = req.headers.get("origin");
+  if (!origin) return false;
+  try {
+    return new URL(origin).host === req.headers.get("host");
+  } catch {
+    return false;
+  }
 }
 
 function tokenMatches(given: string): boolean {
@@ -63,7 +92,15 @@ export async function requireAdmin(req: Request): Promise<Response | null> {
   if (given && tokenConfigured() && tokenMatches(given)) return null;
 
   const user = await eliteUser(req);
-  if (user?.role === "admin") return null;
+  if (user?.role === "admin") {
+    if (!sameOrigin(req)) {
+      return Response.json(
+        { error: "Cross-origin writes are not accepted for a session" },
+        { status: 403 }
+      );
+    }
+    return null;
+  }
   if (user) {
     return Response.json(
       { error: "This account is not a store admin" },
