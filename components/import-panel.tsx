@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { RefreshCw, Upload } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { RefreshCw, Send, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   buttonClass,
@@ -9,9 +10,11 @@ import {
   type ButtonVariant,
 } from "@/components/primitives";
 import type { ImportSummary, ReviewItem } from "@/lib/import";
+import type { TelegramRun } from "@/lib/telegram";
 
 /**
- * The import folder and its review queue, on the Manage page.
+ * Everything on Manage that writes to the library: the Telegram feed, the
+ * import folder, and the review queue the two of them fill.
  *
  * Client-side because it is the only interactive surface in the app, and in
  * its own file for the reason `thumb-image.tsx` exists: "use client" is
@@ -81,8 +84,10 @@ export default function ImportPanel({ storePath, waiting, apps }: Props) {
   const [draftToken, setDraftToken] = useState("");
   const [items, setItems] = useState<ReviewItem[] | null>(null);
   const [summary, setSummary] = useState<ImportSummary | null>(null);
+  const [telegram, setTelegram] = useState<TelegramStatus | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
 
   useEffect(() => {
     try {
@@ -123,17 +128,44 @@ export default function ImportPanel({ storePath, waiting, apps }: Props) {
   const refresh = useCallback(async () => {
     if (!token) return;
     try {
-      const data = await call("/api/import/review");
+      const [data, tg] = await Promise.all([
+        call("/api/import/review"),
+        call("/api/telegram"),
+      ]);
       setItems(data.items ?? []);
+      setTelegram(tg);
       setError(null);
+      // The count of files still waiting is rendered by the server component
+      // around this one, so it goes stale the moment a scan moves anything.
+      router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, [call, token]);
+  }, [call, router, token]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // A sync downloads up to 400 MB a file and then waits out the importer's
+  // quiet period, so it finishes long after the request that started it.
+  useEffect(() => {
+    if (!telegram?.running) return;
+    const timer = setInterval(() => void refresh(), 5000);
+    return () => clearInterval(timer);
+  }, [telegram?.running, refresh]);
+
+  async function syncTelegram() {
+    setBusy("telegram");
+    setError(null);
+    try {
+      setTelegram(await call("/api/telegram", { method: "POST" }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function scan() {
     setBusy("scan");
@@ -210,6 +242,8 @@ export default function ImportPanel({ storePath, waiting, apps }: Props) {
 
   return (
     <div className="flex flex-col gap-3">
+      {telegram && <TelegramCard status={telegram} busy={busy === "telegram"} onSync={syncTelegram} />}
+
       <div className={cn(CARD_CLS, "flex flex-col gap-2 p-3.5")}>
         <p className="text-sm">
           Drop <span className="font-mono text-xs">.apk</span> or{" "}
@@ -273,6 +307,79 @@ export default function ImportPanel({ storePath, waiting, apps }: Props) {
       )}
       {items && items.length === 0 && (
         <p className={cn("px-1 text-xs", MUTED_CLS)}>Nothing waiting for a decision.</p>
+      )}
+    </div>
+  );
+}
+
+type TelegramStatus = {
+  configured: boolean;
+  running: boolean;
+  channels: { name: string; cursor: number; lastSyncedAt?: string; lastStatus?: string }[];
+  run: TelegramRun;
+};
+
+/**
+ * The Telegram feed: what it last did, and a button to make it do it again.
+ *
+ * The run log is shown rather than a status word because the interesting
+ * outcomes are all "nothing happened, and here is which nothing" — no new
+ * posts, a file over the size cap, a transfer that failed and will be retried
+ * next run.
+ */
+function TelegramCard({
+  status,
+  busy,
+  onSync,
+}: {
+  status: TelegramStatus;
+  busy: boolean;
+  onSync: () => void;
+}) {
+  const when = status.run.finishedAt ?? status.run.startedAt;
+  return (
+    <div className={cn(CARD_CLS, "flex flex-col gap-2 p-3.5")}>
+      <p className="text-sm">Telegram feed</p>
+      {!status.configured ? (
+        <p className={cn("text-xs", MUTED_CLS)}>
+          Not configured — <code>TELEGRAM_API_ID</code>,{" "}
+          <code>TELEGRAM_API_HASH</code> and <code>TELEGRAM_SESSION</code> are
+          unset.
+        </p>
+      ) : (
+        <p className={cn("text-xs", MUTED_CLS)}>
+          {status.channels
+            .map(
+              (c) =>
+                `@${c.name} — ${c.cursor ? `read up to post ${c.cursor}` : "never synced"}`
+            )
+            .join(" · ")}
+        </p>
+      )}
+      <div className="mt-1 flex flex-wrap items-center gap-2">
+        <ActionButton
+          variant="secondary"
+          disabled={!status.configured || busy || status.running}
+          onClick={onSync}
+        >
+          <Send size={13} />{" "}
+          {status.running ? "Syncing…" : busy ? "Starting…" : "Sync now"}
+        </ActionButton>
+        {when && !status.running && (
+          <span className={cn("text-xs", MUTED_CLS)}>
+            Last run {new Date(when).toLocaleString("sv-SE")} —{" "}
+            {status.run.downloaded} file(s)
+          </span>
+        )}
+      </div>
+      {status.run.log.length > 0 && (
+        <ul className={cn("mt-1 flex flex-col gap-0.5 text-xs", MUTED_CLS)}>
+          {status.run.log.slice(-6).map((line, i) => (
+            <li key={i} className="break-all">
+              {line.replace(/^\S+ /, "")}
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

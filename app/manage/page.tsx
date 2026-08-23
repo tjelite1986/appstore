@@ -5,7 +5,7 @@ import AppRows from "@/components/app-rows";
 import RowCard from "@/components/rows";
 import { Button, CARD, MUTED, SectionTitle } from "@/components/primitives";
 import ImportPanel from "@/components/import-panel";
-import { STORE_ROOT, STORE_DIRS } from "@/lib/storage";
+import { STORE_DIRS, STORE_HOST_ROOT } from "@/lib/storage";
 import { getCatalog, pendingImports } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
@@ -57,9 +57,9 @@ export default async function ManagePage() {
       </section>
 
       <section className="px-[var(--pad)]">
-        <SectionTitle title="Import folder" />
+        <SectionTitle title="Import" />
         <ImportPanel
-          storePath={`${STORE_ROOT}/${STORE_DIRS.import}`}
+          storePath={`${STORE_HOST_ROOT}/${STORE_DIRS.import}`}
           waiting={waiting}
           // Placeholder rows are not folders on disk — offering them as attach
           // targets would create an app named after an example.

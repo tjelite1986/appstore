@@ -28,11 +28,16 @@ Point `STORE_ROOT` at a directory to run against a different library.
 ├── banners/      <slug>.jpg
 ├── screenshots/  <slug>/<n>.jpg
 ├── meta/         <slug>.json
-└── _import/      drop zone; _review/ holds what needs a decision
+├── _import/      drop zone; _review/ holds what needs a decision,
+│                 _discarded/ what was rejected
+└── _state/       bookkeeping, not content: the Telegram cursor
 ```
 
-`lib/storage.ts` is the only place those paths are named; `lib/store.ts` is the
-only thing that reads them. Override the root with `STORE_ROOT`.
+`lib/storage.ts` is the only place those paths are named; `lib/store.ts` reads
+the content half and `lib/import.ts` is the only thing that writes any of it.
+Override the root with `STORE_ROOT`; `STORE_HOST_ROOT` is what Manage shows
+people, since inside Docker the root is `/store` and that is not a path they
+can drop a file into.
 
 **An app is a slug with an `apks/<slug>/` directory, a `meta/<slug>.json`, or
 both.** A folder of APKs with no meta file still appears — named after its slug,
@@ -130,14 +135,47 @@ Discard moves the file to `_import/_discarded/` rather than deleting it, as
 does a version folder's previous binary when one is replaced. A wrong click on
 a 200 MB APK should not be final; the folder is trivial to empty by hand.
 
+### The Telegram feed
+
+A public channel posts APKs; `lib/telegram.ts` pulls the new ones into
+`_import/` and the importer takes over from there. **Sync now** on Manage, or
+`POST /api/telegram`.
+
+MTProto with a *user* session, not the Bot API and not a bot: `getFile` caps a
+bot at 20 MB and the channel posts 100–200 MB files. Credentials come from the
+environment — `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_SESSION`,
+`TELEGRAM_CHANNELS` — and an empty session makes the sync a no-op rather than
+an error. The session string is made once by `scripts/telegram-login.mjs` over
+in elite-v2; this app never logs in.
+
+`POST` returns as soon as the run starts. A run downloads up to five files of
+up to 400 MB and then sits out the importer's 60-second quiet period before
+scanning, which is minutes — no proxy would hold that request open. Progress is
+read back with `GET`, and Manage polls it while a run is going.
+
+The cursor and the file ledger live in `_state/telegram.json` (elite-v2 kept
+them in two SQLite tables; this is the only thing in the standalone store that
+wanted a database). Written through a temp file and renamed, because a
+half-written state file reads as *no* state — which would reset every cursor
+and re-download the channel. A first sync looks only at the newest 20 posts;
+after that the cursor drives it, oldest-first, so a run cut short by the file
+cap resumes where it stopped. Failed transfers sit behind the cursor and are
+retried by message id for three runs.
+
+**elite-v2 syncs the same channel on its own 15-minute job.** The two carry
+independent cursors, so both download the same posts into their own libraries.
+That is a decision to make, not a bug here.
+
 ### Who may run it
 
 There is no login yet, and the store answers on a public hostname, so the write
-routes are gated on a shared `STORE_ADMIN_TOKEN` (`x-store-admin-token`
-header). **Unset means closed**, not open — a missing variable must not read as
-"no gate configured, let it through". Manage keeps the token in `localStorage`;
-a host timer can post to `/api/import/scan` with the same header. `lib/admin.ts`
-is the only file that changes when the auth question is answered.
+routes — the import scan, the review decisions and the Telegram sync — are
+gated on a shared `STORE_ADMIN_TOKEN` (`x-store-admin-token` header). **Unset
+means closed**, not open — a missing variable must not read as "no gate
+configured, let it through". Manage keeps the token in `localStorage`; a host
+timer can post to `/api/import/scan` or `/api/telegram` with the same header.
+`lib/admin.ts` is the only file that changes when the auth question is
+answered.
 
 ## Serving files
 
@@ -232,9 +270,9 @@ importer:
   Off a real library they are empty, and the screens say so. The Install,
   Save and Share buttons are still shapes — Install on the detail page is not:
   it is a link to the APK.
-- **A scheduler.** The scan runs when someone asks for one. elite-v2 ran it as
-  a job every 300 s; here it wants a host timer posting to
-  `/api/import/scan`.
+- **A scheduler.** The scan and the Telegram sync run when someone asks for
+  one. elite-v2 ran them as jobs every 300 s and 15 min; here they want a host
+  timer posting to `/api/import/scan` and `/api/telegram`.
 - **The external sources.** GitHub, F-Droid, Play, APKPure and the mod sites —
   metadata, auto-update and downloads — all still live in elite-v2. Manage's
   "Add an app" form and the source toggles are the layout for them.

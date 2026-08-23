@@ -14,12 +14,23 @@
  *                                                     category, versions)
  *   _import/                                          drop zone: new APKs
  *   _import/_review/                                  parked, needs a decision
+ *   _state/                                           bookkeeping, not content
+ *                                                     (the Telegram cursor)
  *
  * In a container this is one bind mount at STORE_ROOT, so the subdirectories
  * stay relative to it and nothing outside this file needs to know the host
  * path.
  */
 export const STORE_ROOT = process.env.STORE_ROOT ?? "/srv/appstore/library";
+
+/**
+ * The same library as the machine outside the container sees it.
+ *
+ * Manage tells people where to drop APKs, and inside Docker `STORE_ROOT` is
+ * `/store` — a path that does not exist on the host doing the dropping. Only
+ * for display; nothing reads or writes through it.
+ */
+export const STORE_HOST_ROOT = process.env.STORE_HOST_ROOT ?? STORE_ROOT;
 
 export const STORE_DIRS = {
   apks: "apks",
@@ -29,4 +40,6 @@ export const STORE_DIRS = {
   meta: "meta",
   import: "_import",
   review: "_import/_review",
+  /** Not content — where a feature keeps its own bookkeeping. */
+  state: "_state",
 } as const;

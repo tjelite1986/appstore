@@ -20,6 +20,10 @@ const nextConfig = {
   // see compose/appstore. Deploy is `npm run build` + `docker restart`.
   output: "standalone",
   reactStrictMode: true,
+  // teleproto is a large MTProto stack full of dynamic requires; bundling it
+  // breaks it. Left external, the standalone tracer copies it into the output
+  // instead — see lib/telegram.ts.
+  serverExternalPackages: ["teleproto"],
   async headers() {
     return [
       {
