@@ -14,7 +14,7 @@ import { runImportScan } from "@/lib/import";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request): Promise<Response> {
-  const refusal = requireAdmin(req);
+  const refusal = await requireAdmin(req);
   if (refusal) return refusal;
 
   try {

@@ -3,8 +3,7 @@
 A standalone store front for the APK archive — the section that used to live
 inside elite-v2 at `/store`, rebuilt as its own app.
 
-**The catalog is read off disk. There is still no database, no auth and no
-importer.** Apps come from the library at `/srv/appstore/library`: the APKs
+**The catalog is read off disk. There is still no database of its own.** Apps come from the library at `/srv/appstore/library`: the APKs
 decide which versions exist, `meta/<slug>.json` supplies the words, and the
 images come out of `icons/`, `banners/` and `screenshots/`. Nothing writes to
 the library yet — files get there by hand.
@@ -17,7 +16,7 @@ npm run dev      # http://localhost:3030
 ```
 
 Point `STORE_ROOT` at a directory to run against a different library.
-`STORE_ADMIN_TOKEN` gates the import routes — see below.
+`ELITE_VERIFY_URL` and `STORE_ADMIN_TOKEN` gate the import routes — see below.
 
 ## The library
 
@@ -168,14 +167,28 @@ That is a decision to make, not a bug here.
 
 ### Who may run it
 
-There is no login yet, and the store answers on a public hostname, so the write
-routes — the import scan, the review decisions and the Telegram sync — are
-gated on a shared `STORE_ADMIN_TOKEN` (`x-store-admin-token` header). **Unset
-means closed**, not open — a missing variable must not read as "no gate
-configured, let it through". Manage keeps the token in `localStorage`; a host
-timer can post to `/api/import/scan` or `/api/telegram` with the same header.
-`lib/admin.ts` is the only file that changes when the auth question is
-answered.
+The store answers on a public hostname, and the write routes — the import scan,
+the review decisions and the Telegram sync — move and discard files. Browsing
+and downloading need nothing; those three need an admin.
+
+**A person signs in to elite-v2.** The store shares that login rather than
+keeping accounts of its own: elite-v2 scopes its session cookie to
+`.example.com` (`SESSION_COOKIE_DOMAIN` there), so a browser logged in at
+accounts.example.com sends the same cookie to store.example.com. Verifying it
+locally would take elite-v2's signing secret and would still miss a revoked
+session — that row is in elite-v2's database — so the token goes back to
+`POST /api/auth/verify` (`ELITE_VERIFY_URL`, the container name over the
+traefik network) and comes back as an account. `role === "admin"` opens the
+routes; answers are cached 30 s. Manage tries this first and only shows a
+token form when it comes back 401.
+
+**A timer sends a token.** `scripts/cron.sh` has no browser and no session, so
+`STORE_ADMIN_TOKEN` stays as the machine credential in the
+`x-store-admin-token` header.
+
+**Unset means closed**, not open — with neither configured the routes refuse
+everything, because a missing variable must not read as "no gate configured,
+let it through". `lib/admin.ts` and `lib/sso.ts` are the whole of it.
 
 ## Serving files
 
@@ -257,22 +270,29 @@ npm run build && docker restart appstore
 
 The library is mounted at `/store` (`STORE_ROOT=/store`), writable since the
 importer landed, and the container runs as uid 1000 so imported files keep the
-same ownership as the rest of the tree. A compose change — a volume, or
-`STORE_ADMIN_TOKEN` in the `.env` beside it — needs `docker compose up -d` from
-the compose dir instead of a restart.
+same ownership as the rest of the tree. A compose change — a volume,
+`ELITE_VERIFY_URL`, or `STORE_ADMIN_TOKEN` in the `.env` beside it — needs
+`docker compose up -d` from the compose dir instead of a restart.
+
+### The scheduled jobs
+
+There is no scheduler in the app. Two host timers post into it instead —
+`appstore-sync.timer` every 30 min and `appstore-scan.timer` every 15 min, both
+running `scripts/cron.sh`, which reads `STORE_ADMIN_TOKEN` out of the compose
+`.env` so rotating it is one edit. Units and installation in
+`scripts/systemd/`; follow a run with `journalctl -u appstore-sync -f`.
 
 ## What is deliberately missing
 
-Auth is the open design question, and everything below waits on it or on the
-importer:
+Sign-in is answered; per-user *storage* is not. The store knows who is browsing
+when they are logged in to elite-v2, but keeps nothing about them:
 
-- **Per-user state.** Installed, Saved and Updates are facts about a person.
+- **Per-user state.** Installed, Saved and Updates are facts about a person,
+  and there is nowhere to put them yet — the identity now exists, the table
+  does not.
   Off a real library they are empty, and the screens say so. The Install,
   Save and Share buttons are still shapes — Install on the detail page is not:
   it is a link to the APK.
-- **A scheduler.** The scan and the Telegram sync run when someone asks for
-  one. elite-v2 ran them as jobs every 300 s and 15 min; here they want a host
-  timer posting to `/api/import/scan` and `/api/telegram`.
 - **The external sources.** GitHub, F-Droid, Play, APKPure and the mod sites —
   metadata, auto-update and downloads — all still live in elite-v2. Manage's
   "Add an app" form and the source toggles are the layout for them.

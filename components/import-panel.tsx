@@ -22,10 +22,16 @@ import type { TelegramRun } from "@/lib/telegram";
  * on the client and the server components importing it break — silently, in
  * the case of a plain string export.
  *
- * The admin token lives in localStorage rather than a cookie. There is no
- * session to hang it on yet (see `lib/admin.ts`), and a value the browser
- * never attaches to a request on its own cannot be used by a page on another
- * origin that talks this store into a POST.
+ * Getting in is normally not this panel's problem: an admin signed in to
+ * elite-v2 is signed in here too, because that session cookie is scoped to the
+ * parent domain both hosts share. So the panel asks for the queue first and
+ * only falls back to the token form when the answer is 401 — someone browsing
+ * the store logged out, or a second browser.
+ *
+ * That fallback token lives in localStorage rather than a cookie: it is the
+ * same shared secret the host timers use (see `lib/admin.ts`), and a value the
+ * browser never attaches to a request on its own cannot be used by a page on
+ * another origin that talks this store into a POST.
  */
 
 const TOKEN_KEY = "store-admin-token";
@@ -82,6 +88,11 @@ type Props = {
 export default function ImportPanel({ storePath, waiting, apps }: Props) {
   const [token, setToken] = useState("");
   const [draftToken, setDraftToken] = useState("");
+  // null while the first request is still out: the panel cannot tell "signed
+  // in through elite-v2" from "needs a token" until something has answered,
+  // and guessing either way flashes the wrong UI on every load.
+  const [locked, setLocked] = useState<boolean | null>(null);
+  const [hydrated, setHydrated] = useState(false);
   const [items, setItems] = useState<ReviewItem[] | null>(null);
   const [summary, setSummary] = useState<ImportSummary | null>(null);
   const [telegram, setTelegram] = useState<TelegramStatus | null>(null);
@@ -95,6 +106,11 @@ export default function ImportPanel({ storePath, waiting, apps }: Props) {
     } catch {
       /* private mode — the token just will not persist */
     }
+    // Reading localStorage has to wait for the client (the server render has
+    // no such thing, and seeding state from it would not match on hydration),
+    // so the first fetch waits for this rather than firing tokenless and
+    // bouncing off a 401 that a stored token would have passed.
+    setHydrated(true);
   }, []);
 
   /** One place to turn a response into either data or a readable message. */
@@ -104,18 +120,26 @@ export default function ImportPanel({ storePath, waiting, apps }: Props) {
         ...init,
         headers: {
           ...(init?.body ? { "Content-Type": "application/json" } : {}),
-          "x-store-admin-token": token,
+          // Omitted when there is none: the session cookie the browser sends
+          // on its own is the normal way in, and an empty header would only
+          // ever be a failed guess at the shared token.
+          ...(token ? { "x-store-admin-token": token } : {}),
         },
       });
       const data = await res.json().catch(() => ({}));
       if (res.status === 401) {
         setToken("");
+        setLocked(true);
         try {
           window.localStorage.removeItem(TOKEN_KEY);
         } catch {
           /* ignore */
         }
-        throw new Error("That token was not accepted");
+        throw new Error(
+          token
+            ? "That token was not accepted"
+            : "Sign in to elite-v2 as an admin, or use a token"
+        );
       }
       if (!res.ok && res.status !== 409) {
         throw new Error(data.error || `Request failed (${res.status})`);
@@ -126,7 +150,6 @@ export default function ImportPanel({ storePath, waiting, apps }: Props) {
   );
 
   const refresh = useCallback(async () => {
-    if (!token) return;
     try {
       const [data, tg] = await Promise.all([
         call("/api/import/review"),
@@ -134,6 +157,7 @@ export default function ImportPanel({ storePath, waiting, apps }: Props) {
       ]);
       setItems(data.items ?? []);
       setTelegram(tg);
+      setLocked(false);
       setError(null);
       // The count of files still waiting is rendered by the server component
       // around this one, so it goes stale the moment a scan moves anything.
@@ -141,11 +165,12 @@ export default function ImportPanel({ storePath, waiting, apps }: Props) {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, [call, router, token]);
+  }, [call, router]);
 
   useEffect(() => {
+    if (!hydrated) return;
     void refresh();
-  }, [refresh]);
+  }, [hydrated, refresh]);
 
   // A sync downloads up to 400 MB a file and then waits out the importer's
   // quiet period, so it finishes long after the request that started it.
@@ -201,13 +226,22 @@ export default function ImportPanel({ storePath, waiting, apps }: Props) {
     }
   }
 
-  if (!token) {
+  if (locked === null) {
+    return (
+      <div className={cn(CARD_CLS, "p-3.5")}>
+        <p className={cn("text-sm", MUTED_CLS)}>Checking your access…</p>
+      </div>
+    );
+  }
+
+  if (locked) {
     return (
       <div className={cn(CARD_CLS, "flex flex-col gap-2 p-3.5")}>
-        <p className="text-sm">Admin token</p>
+        <p className="text-sm">Sign in to import</p>
         <p className={cn("text-xs", MUTED_CLS)}>
-          The import routes are gated on <code>STORE_ADMIN_TOKEN</code> until
-          there is a login. Kept in this browser only.
+          Signing in to elite-v2 as an admin unlocks this panel — the two share
+          one login. Failing that, the shared <code>STORE_ADMIN_TOKEN</code>
+          also opens it, and is kept in this browser only.
         </p>
         <form
           className="mt-1 flex gap-2"

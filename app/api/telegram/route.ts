@@ -36,13 +36,13 @@ async function status() {
 }
 
 export async function GET(req: Request): Promise<Response> {
-  const refusal = requireAdmin(req);
+  const refusal = await requireAdmin(req);
   if (refusal) return refusal;
   return Response.json(await status());
 }
 
 export async function POST(req: Request): Promise<Response> {
-  const refusal = requireAdmin(req);
+  const refusal = await requireAdmin(req);
   if (refusal) return refusal;
 
   if (!telegramConfigured()) {

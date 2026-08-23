@@ -15,13 +15,13 @@ export const dynamic = "force-dynamic";
 const ACTIONS: ReviewAction[] = ["attach", "create-new", "discard"];
 
 export async function GET(req: Request): Promise<Response> {
-  const refusal = requireAdmin(req);
+  const refusal = await requireAdmin(req);
   if (refusal) return refusal;
   return Response.json({ items: await listReview() });
 }
 
 export async function POST(req: Request): Promise<Response> {
-  const refusal = requireAdmin(req);
+  const refusal = await requireAdmin(req);
   if (refusal) return refusal;
 
   let body: unknown;
