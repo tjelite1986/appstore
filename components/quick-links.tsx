@@ -3,12 +3,13 @@ import {
   Clapperboard,
   Images,
   MessageSquare,
+  Package,
   Store,
   Users,
   type LucideIcon,
 } from "lucide-react";
 import { SectionTitle } from "@/components/primitives";
-import { CATEGORIES } from "@/lib/catalog";
+import { categoryTiles } from "@/lib/store";
 
 /** The icon names the sketch writes on each quick-link item. */
 const ICONS: Record<string, LucideIcon> = {
@@ -17,18 +18,21 @@ const ICONS: Record<string, LucideIcon> = {
   users: Users,
   message: MessageSquare,
   store: Store,
+  package: Package,
 };
 
 /**
  * The sketch's `quick-links`: icon tiles in a 3-column grid that jump into a
  * category.
  */
-export default function QuickLinks({ title }: { title: string }) {
+export default async function QuickLinks({ title }: { title: string }) {
+  const categories = await categoryTiles();
+
   return (
     <section className="px-[var(--pad)]">
       <SectionTitle title={title} />
       <div className="grid grid-cols-3 gap-[var(--gap)]">
-        {CATEGORIES.map(({ label, icon }) => {
+        {categories.map(({ label, icon }) => {
           const Icon = ICONS[icon] ?? Store;
           return (
             <Link

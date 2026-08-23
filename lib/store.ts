@@ -1,0 +1,496 @@
+/**
+ * The catalog, read off disk.
+ *
+ * Two things decide what the store contains, and neither of them is a
+ * database:
+ *
+ *   apks/<slug>/<version>/<file>.apk   the binaries — the source of truth for
+ *                                      which versions exist and how big they are
+ *   meta/<slug>.json                   the editorial half: name, developer,
+ *                                      category, tagline, description
+ *
+ * An app needs only one of the two. A folder of APKs with no meta file still
+ * appears (named after its slug), so a fresh drop into `_import/` is visible
+ * before anyone has written a description for it.
+ *
+ * Components never see any of this: they take `StoreApp`, exactly as they did
+ * when the catalog was hand-written, so the layout build and this one render
+ * the same blocks.
+ *
+ * When the library is empty the placeholder catalog stands in — see
+ * `getCatalog`.
+ */
+import { promises as fs } from "node:fs";
+import path from "node:path";
+import { STORE_DIRS, STORE_ROOT } from "./storage";
+import { PLACEHOLDER_APPS, PLACEHOLDER_CHANGELOG } from "./catalog";
+
+export type Category =
+  | "Editor"
+  | "Media"
+  | "Entertainment"
+  | "Communication"
+  | "Games"
+  | "Adults"
+  | "Other";
+
+export type AppVersion = {
+  version: string;
+  /** File name inside apks/<slug>/<version>/. */
+  file: string;
+  bytes: number;
+  /** `bytes`, rendered the way the UI shows it ("48 MB"). */
+  size: string;
+  /** ISO date the file landed — its mtime. */
+  added: string;
+  /** Ready-to-use href for this exact version. */
+  href: string;
+};
+
+export type StoreApp = {
+  slug: string;
+  name: string;
+  developer: string;
+  category: Category;
+  /** One line under the name on the detail page. */
+  tagline: string;
+  /** The long text on the detail page. Absent until someone writes one. */
+  description?: string;
+  packageName?: string;
+  /** The newest version, and its size — what every list row shows. */
+  version: string;
+  size: string;
+  rating: number;
+  ratingCount: number;
+  /** Seeds the fallback artwork, so an app without an icon keeps its colours. */
+  seed: number;
+  /** Per-user state. Nothing sets these until there is a user — see README. */
+  installed?: boolean;
+  saved?: boolean;
+  updateTo?: string;
+  /** Media hrefs, already cache-busted. Absent when the file is not on disk. */
+  icon?: string;
+  banner?: string;
+  screenshots: string[];
+  /** Newest first. Empty when the app has meta but no APK yet. */
+  versions: AppVersion[];
+  /** ISO date the app was first seen. Empty for placeholder rows. */
+  added: string;
+};
+
+/** What `lib/catalog.ts` holds — the same app, minus everything disk-derived. */
+export type PlaceholderApp = Omit<
+  StoreApp,
+  "screenshots" | "versions" | "added"
+>;
+
+/** The category tiles the sketch draws, in its order. */
+export const CATEGORIES: { label: Category; icon: string }[] = [
+  { label: "Editor", icon: "images" },
+  { label: "Media", icon: "clapperboard" },
+  { label: "Entertainment", icon: "users" },
+  { label: "Communication", icon: "message" },
+  { label: "Adults", icon: "store" },
+];
+
+const KNOWN_CATEGORIES: Category[] = [
+  "Editor",
+  "Media",
+  "Entertainment",
+  "Communication",
+  "Games",
+  "Adults",
+  "Other",
+];
+
+const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp", ".avif", ".gif"];
+const APK_EXTENSIONS = [".apk", ".xapk", ".apks", ".apkm"];
+
+/** What a meta/<slug>.json may carry. Every field is optional on purpose. */
+type MetaFile = {
+  name?: string;
+  developer?: string;
+  category?: string;
+  tagline?: string;
+  description?: string;
+  packageName?: string;
+  rating?: number;
+  ratingCount?: number;
+  /** Overrides the date derived from the files. */
+  added?: string;
+  /** Keeps the app out of the catalog without deleting it. */
+  hidden?: boolean;
+};
+
+/* ------------------------------------------------------------------ utils */
+
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 MB";
+  const mb = bytes / 1024 / 1024;
+  if (mb < 1) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  if (mb < 1024) return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`;
+  return `${(mb / 1024).toFixed(1)} GB`;
+}
+
+/**
+ * A stable colour for an app with no icon. The hand-written catalog set these
+ * by hand; a slug has to produce its own, and the same slug must always
+ * produce the same one or the app changes colour between screens.
+ */
+function seedFrom(slug: string): number {
+  let h = 0;
+  for (let i = 0; i < slug.length; i++) h = (h * 31 + slug.charCodeAt(i)) | 0;
+  return Math.abs(h) % 360;
+}
+
+/** "photo-editor-pro" -> "Photo Editor Pro", for an app with no meta file. */
+function titleFromSlug(slug: string): string {
+  return slug
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((w) => w[0].toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
+/** Newest first. Numeric where both sides are numeric, text otherwise. */
+export function compareVersions(a: string, b: string): number {
+  const pa = a.split(/[.\-+_]/);
+  const pb = b.split(/[.\-+_]/);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] ?? "";
+    const y = pb[i] ?? "";
+    const nx = Number(x);
+    const ny = Number(y);
+    if (Number.isFinite(nx) && Number.isFinite(ny) && x !== "" && y !== "") {
+      if (nx !== ny) return ny - nx;
+    } else if (x !== y) {
+      return y.localeCompare(x);
+    }
+  }
+  return 0;
+}
+
+function normaliseCategory(raw: string | undefined): Category {
+  if (!raw) return "Other";
+  const hit = KNOWN_CATEGORIES.find(
+    (c) => c.toLowerCase() === raw.trim().toLowerCase()
+  );
+  return hit ?? "Other";
+}
+
+/** Directory entries, or nothing at all if the directory is missing. */
+async function listDir(abs: string): Promise<string[]> {
+  try {
+    return await fs.readdir(abs);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Media goes through the route handler, not /public — the library lives
+ * outside the repo. `?v=` is the file's mtime, so a replaced icon gets a new
+ * URL and the immutable cache on the route stays safe.
+ */
+function mediaHref(rel: string, mtimeMs: number): string {
+  const encoded = rel.split("/").map(encodeURIComponent).join("/");
+  return `/api/media/${encoded}?v=${Math.round(mtimeMs).toString(36)}`;
+}
+
+/* ------------------------------------------------------------------- read */
+
+/** slug -> file name, for a flat directory of `<slug>.<ext>` images. */
+async function indexImageDir(
+  dir: string
+): Promise<Map<string, { file: string; mtimeMs: number }>> {
+  const abs = path.join(STORE_ROOT, dir);
+  const out = new Map<string, { file: string; mtimeMs: number }>();
+  for (const file of await listDir(abs)) {
+    const ext = path.extname(file).toLowerCase();
+    if (!IMAGE_EXTENSIONS.includes(ext)) continue;
+    const slug = path.basename(file, ext);
+    if (out.has(slug)) continue; // first extension wins, deterministically
+    try {
+      const st = await fs.stat(path.join(abs, file));
+      out.set(slug, { file, mtimeMs: st.mtimeMs });
+    } catch {
+      /* vanished between readdir and stat */
+    }
+  }
+  return out;
+}
+
+async function readScreenshots(slug: string): Promise<string[]> {
+  const rel = `${STORE_DIRS.screenshots}/${slug}`;
+  const abs = path.join(STORE_ROOT, STORE_DIRS.screenshots, slug);
+  const files = (await listDir(abs))
+    .filter((f) => IMAGE_EXTENSIONS.includes(path.extname(f).toLowerCase()))
+    // "2.jpg" before "10.jpg" — a plain sort puts them the other way round.
+    .sort((a, b) =>
+      a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })
+    );
+  const out: string[] = [];
+  for (const file of files) {
+    try {
+      const st = await fs.stat(path.join(abs, file));
+      out.push(mediaHref(`${rel}/${file}`, st.mtimeMs));
+    } catch {
+      /* vanished */
+    }
+  }
+  return out;
+}
+
+/** One directory per version, one binary inside it. */
+async function readVersions(slug: string): Promise<AppVersion[]> {
+  const base = path.join(STORE_ROOT, STORE_DIRS.apks, slug);
+  const out: AppVersion[] = [];
+  for (const version of await listDir(base)) {
+    if (version.startsWith(".")) continue;
+    const dir = path.join(base, version);
+    let files: string[];
+    try {
+      if (!(await fs.stat(dir)).isDirectory()) continue;
+      files = await fs.readdir(dir);
+    } catch {
+      continue;
+    }
+    const file = files.find((f) =>
+      APK_EXTENSIONS.includes(path.extname(f).toLowerCase())
+    );
+    if (!file) continue;
+    try {
+      const st = await fs.stat(path.join(dir, file));
+      out.push({
+        version,
+        file,
+        bytes: st.size,
+        size: formatBytes(st.size),
+        added: new Date(st.mtimeMs).toISOString(),
+        href: `/api/download/${encodeURIComponent(slug)}?v=${encodeURIComponent(version)}`,
+      });
+    } catch {
+      /* vanished */
+    }
+  }
+  return out.sort((a, b) => compareVersions(a.version, b.version));
+}
+
+async function readMeta(slug: string): Promise<MetaFile | null> {
+  const abs = path.join(STORE_ROOT, STORE_DIRS.meta, `${slug}.json`);
+  let raw: string;
+  try {
+    raw = await fs.readFile(abs, "utf8");
+  } catch {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? (parsed as MetaFile) : null;
+  } catch (err) {
+    // A hand-edited meta file with a trailing comma must not take the whole
+    // catalog down — drop this one app and say so in the log.
+    console.error(`[store] ${slug}.json is not valid JSON:`, err);
+    return null;
+  }
+}
+
+async function readFromDisk(): Promise<StoreApp[]> {
+  const [metaFiles, apkDirs, icons, banners] = await Promise.all([
+    listDir(path.join(STORE_ROOT, STORE_DIRS.meta)),
+    listDir(path.join(STORE_ROOT, STORE_DIRS.apks)),
+    indexImageDir(STORE_DIRS.icons),
+    indexImageDir(STORE_DIRS.banners),
+  ]);
+
+  const slugs = new Set<string>();
+  for (const f of metaFiles) {
+    if (f.endsWith(".json")) slugs.add(path.basename(f, ".json"));
+  }
+  for (const d of apkDirs) {
+    if (!d.startsWith(".")) slugs.add(d);
+  }
+
+  const apps = await Promise.all(
+    [...slugs].map(async (slug): Promise<StoreApp | null> => {
+      const meta = await readMeta(slug);
+      if (meta?.hidden) return null;
+
+      const [versions, screenshots] = await Promise.all([
+        readVersions(slug),
+        readScreenshots(slug),
+      ]);
+
+      // Nothing to describe it and nothing to download: this slug came from a
+      // meta file that would not parse. Listing it would put a row named after
+      // the file name in the catalog.
+      if (!meta && versions.length === 0) return null;
+      const latest = versions[0];
+      const icon = icons.get(slug);
+      const banner = banners.get(slug);
+
+      const firstSeen =
+        meta?.added ??
+        versions.map((v) => v.added).sort()[0] ??
+        "";
+
+      return {
+        slug,
+        name: meta?.name?.trim() || titleFromSlug(slug),
+        developer: meta?.developer?.trim() || "Unknown",
+        category: normaliseCategory(meta?.category),
+        tagline: meta?.tagline?.trim() || "",
+        description: meta?.description?.trim() || undefined,
+        packageName: meta?.packageName,
+        version: latest?.version ?? "—",
+        size: latest?.size ?? "—",
+        rating: typeof meta?.rating === "number" ? meta.rating : 0,
+        ratingCount:
+          typeof meta?.ratingCount === "number" ? meta.ratingCount : 0,
+        seed: seedFrom(slug),
+        icon: icon
+          ? mediaHref(`${STORE_DIRS.icons}/${icon.file}`, icon.mtimeMs)
+          : undefined,
+        banner: banner
+          ? mediaHref(`${STORE_DIRS.banners}/${banner.file}`, banner.mtimeMs)
+          : undefined,
+        screenshots,
+        versions,
+        added: firstSeen,
+      };
+    })
+  );
+
+  return apps
+    .filter((a): a is StoreApp => a !== null)
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/* ------------------------------------------------------------------ cache */
+
+export type Catalog = {
+  apps: StoreApp[];
+  /** True when nothing is on disk and the hand-written stand-in is showing. */
+  placeholder: boolean;
+};
+
+const CACHE_MS = Number(process.env.STORE_CACHE_MS ?? 10_000);
+let cache: { at: number; value: Catalog } | null = null;
+
+function fromPlaceholder(p: PlaceholderApp): StoreApp {
+  return { ...p, screenshots: [], versions: [], added: "" };
+}
+
+/**
+ * The catalog, at most `STORE_CACHE_MS` old.
+ *
+ * With an empty library every screen would be blank, which says nothing about
+ * whether the layout works — so the placeholder catalog stands in until the
+ * first app lands on disk, and `placeholder` says which of the two is showing.
+ */
+export async function getCatalog(): Promise<Catalog> {
+  const now = Date.now();
+  if (cache && now - cache.at < CACHE_MS) return cache.value;
+
+  let apps: StoreApp[] = [];
+  try {
+    apps = await readFromDisk();
+  } catch (err) {
+    console.error("[store] could not read the library:", err);
+  }
+
+  const value: Catalog =
+    apps.length > 0
+      ? { apps, placeholder: false }
+      : { apps: PLACEHOLDER_APPS.map(fromPlaceholder), placeholder: true };
+
+  cache = { at: now, value };
+  return value;
+}
+
+/** Drops the cache — for whatever writes to the library next. */
+export function invalidateCatalog(): void {
+  cache = null;
+}
+
+/* ---------------------------------------------------------------- queries */
+
+export async function getApps(): Promise<StoreApp[]> {
+  return (await getCatalog()).apps;
+}
+
+export async function findApp(slug: string): Promise<StoreApp | undefined> {
+  return (await getApps()).find((a) => a.slug === slug);
+}
+
+export async function byCategory(category: Category): Promise<StoreApp[]> {
+  return (await getApps()).filter((a) => a.category === category);
+}
+
+/**
+ * The five tiles the sketch draws, plus "Other" only when something is in it —
+ * an imported APK with no category lands there and needs somewhere to be found.
+ */
+export async function categoryTiles(): Promise<
+  { label: Category; icon: string }[]
+> {
+  const apps = await getApps();
+  const hasOther = apps.some((a) => a.category === "Other");
+  return hasOther
+    ? [...CATEGORIES, { label: "Other" as Category, icon: "package" }]
+    : CATEGORIES;
+}
+
+/** Newest first by the date the app was first seen. */
+export async function recentlyAdded(limit = 6): Promise<StoreApp[]> {
+  const { apps, placeholder } = await getCatalog();
+  if (placeholder) return apps.slice(0, limit);
+  return [...apps]
+    .sort((a, b) => (b.added ?? "").localeCompare(a.added ?? ""))
+    .slice(0, limit);
+}
+
+/**
+ * Per-user state. Which apps are installed, saved or due an update is a fact
+ * about a person, and there is no login yet — so off disk these are empty and
+ * the screens show their empty state. The placeholder rows keep their flags so
+ * the layout can still be judged.
+ */
+export async function updates(): Promise<StoreApp[]> {
+  return (await getApps()).filter((a) => a.updateTo);
+}
+
+export async function installed(): Promise<StoreApp[]> {
+  return (await getApps()).filter((a) => a.installed);
+}
+
+export async function saved(): Promise<StoreApp[]> {
+  return (await getApps()).filter((a) => a.saved);
+}
+
+/** "v9.4.1 | 20 August | Photo Editor Pro, new update" */
+export async function changelog(limit = 3): Promise<string[]> {
+  const { apps, placeholder } = await getCatalog();
+  if (placeholder) return PLACEHOLDER_CHANGELOG.slice(0, limit);
+
+  return apps
+    .flatMap((app) => app.versions.map((v) => ({ app, v })))
+    .sort((a, b) => b.v.added.localeCompare(a.v.added))
+    .slice(0, limit)
+    .map(({ app, v }) => {
+      const date = new Date(v.added).toLocaleDateString("en-GB", {
+        day: "numeric",
+        month: "long",
+        timeZone: "Europe/Stockholm",
+      });
+      return `v${v.version} | ${date} | ${app.name}, new update`;
+    });
+}
+
+/** How many files are sitting in `_import/`, waiting for the importer. */
+export async function pendingImports(): Promise<number> {
+  const files = await listDir(path.join(STORE_ROOT, STORE_DIRS.import));
+  return files.filter((f) =>
+    APK_EXTENSIONS.includes(path.extname(f).toLowerCase())
+  ).length;
+}

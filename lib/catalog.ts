@@ -1,39 +1,18 @@
 /**
- * Placeholder catalog. This build has no database and no importer — every row
- * here is invented so the layout can be judged with realistic text lengths
- * (long names truncate, short ones do not). When the real store lands, this
- * module is replaced by a reader over `meta/` and the components stay as they
- * are: they only ever see `StoreApp`.
+ * The stand-in catalog.
+ *
+ * These rows are invented. They exist so the layout can be judged with
+ * realistic text lengths — long names truncate, short ones do not — and so a
+ * store with an empty library still has something on screen. `lib/store.ts`
+ * falls back to them when `meta/` and `apks/` are both empty, and drops them
+ * the moment a real app lands on disk.
+ *
+ * Nothing here has artwork or a binary: the placeholder rows render the
+ * gradient thumbnails and their buttons do not download anything.
  */
-export type Category =
-  | "Editor"
-  | "Media"
-  | "Entertainment"
-  | "Communication"
-  | "Games"
-  | "Adults";
+import type { PlaceholderApp } from "./store";
 
-export type StoreApp = {
-  slug: string;
-  name: string;
-  developer: string;
-  category: Category;
-  /** One line under the name on the detail page. */
-  tagline: string;
-  version: string;
-  /** Human size, as it will read once a real APK backs the row. */
-  size: string;
-  rating: number;
-  ratingCount: number;
-  /** Seeds the placeholder artwork so an app keeps its colours everywhere. */
-  seed: number;
-  installed?: boolean;
-  saved?: boolean;
-  /** Set when a newer version is waiting — drives the Updates screen. */
-  updateTo?: string;
-};
-
-export const APPS: StoreApp[] = [
+export const PLACEHOLDER_APPS: PlaceholderApp[] = [
   { slug: "photo-editor-pro", name: "Photo Editor Pro", developer: "Lumen Labs", category: "Editor", tagline: "Layers, masks and curves on your phone", version: "9.4.1", size: "48 MB", rating: 4.6, ratingCount: 128, seed: 1 },
   { slug: "snapedit", name: "SnapEdit", developer: "Snap Tools", category: "Editor", tagline: "Remove anything from a photo", version: "7.7.4", size: "62 MB", rating: 4.4, ratingCount: 96, seed: 2, installed: true, updateTo: "7.8.0" },
   { slug: "vector-studio", name: "Vector Studio", developer: "Northline", category: "Editor", tagline: "Draw and export clean SVG", version: "3.2.0", size: "31 MB", rating: 4.8, ratingCount: 42, seed: 3 },
@@ -65,43 +44,8 @@ export const APPS: StoreApp[] = [
   { slug: "lanternfall", name: "Lanternfall", developer: "Studio Nine", category: "Games", tagline: "A quiet game about light", version: "1.0.3", size: "155 MB", rating: 4.9, ratingCount: 76, seed: 25 },
 ];
 
-export const CATEGORIES: { label: Category; icon: string }[] = [
-  { label: "Editor", icon: "images" },
-  { label: "Media", icon: "clapperboard" },
-  { label: "Entertainment", icon: "users" },
-  { label: "Communication", icon: "message" },
-  { label: "Adults", icon: "store" },
-];
-
-export function byCategory(category: Category): StoreApp[] {
-  return APPS.filter((a) => a.category === category);
-}
-
-export function findApp(slug: string): StoreApp | undefined {
-  return APPS.find((a) => a.slug === slug);
-}
-
-/**
- * Newest first. Hand-picked across categories here; the real one sorts on the
- * date the importer first saw the APK.
- */
-export const RECENTLY_ADDED = [
-  "snapedit",
-  "lanternfall",
-  "signalbox",
-  "shelf",
-  "vector-studio",
-  "reelbox",
-].map((slug) => APPS.find((a) => a.slug === slug)!);
-
-export const UPDATES = APPS.filter((a) => a.updateTo);
-
-export const INSTALLED = APPS.filter((a) => a.installed);
-
-export const SAVED = APPS.filter((a) => a.saved);
-
 /** Feeds the changelog block on Home. `version | date | summary`. */
-export const CHANGELOG: string[] = [
+export const PLACEHOLDER_CHANGELOG: string[] = [
   "v1.4.0 | 28 July | Photo Editor Pro, new update",
   "v1.3.0 | 21 July | Streamdeck, new update",
   "v1.2.1 | 14 July | Signalbox, new update",

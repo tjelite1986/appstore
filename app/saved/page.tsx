@@ -1,13 +1,20 @@
 import { Screen, ScreenTitle } from "@/components/screen";
 import AppGrid from "@/components/app-grid";
-import { SAVED } from "@/lib/catalog";
+import { saved } from "@/lib/store";
 
-/** Saved — reached from the top bar's bookmark, not from the bottom nav. */
-export default function SavedPage() {
+export const dynamic = "force-dynamic";
+
+/**
+ * Saved — reached from the top bar's bookmark, not from the bottom nav.
+ *
+ * What a person kept is a fact about that person, and there is no login yet, so
+ * off a real library this is empty by design.
+ */
+export default async function SavedPage() {
   return (
     <Screen>
       <ScreenTitle title="Saved" subtitle="Apps you kept for later" />
-      <AppGrid apps={SAVED} empty="Nothing saved yet." />
+      <AppGrid apps={await saved()} empty="Nothing saved yet." />
     </Screen>
   );
 }

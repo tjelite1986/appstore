@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Bookmark, Share2, Star } from "lucide-react";
+import { ArrowLeft, Bookmark, Download, Share2, Star } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Screen } from "@/components/screen";
 import CoverShelf from "@/components/cover-shelf";
@@ -11,7 +11,9 @@ import {
   SectionTitle,
   Thumb,
 } from "@/components/primitives";
-import { APPS, findApp } from "@/lib/catalog";
+import { findApp, getApps } from "@/lib/store";
+
+export const dynamic = "force-dynamic";
 
 /**
  * App detail. Not one of the sketch's screens — it only describes what tapping
@@ -24,19 +26,26 @@ export default async function AppDetailPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const app = findApp(slug);
+  const app = await findApp(slug);
   if (!app) notFound();
 
-  const related = APPS.filter(
-    (a) => a.category === app.category && a.slug !== app.slug
-  ).slice(0, 6);
+  const related = (await getApps())
+    .filter((a) => a.category === app.category && a.slug !== app.slug)
+    .slice(0, 6);
+
+  const latest = app.versions[0];
+  const older = app.versions.slice(1);
 
   return (
     <Screen flush>
-      {/* Banner. A real one comes out of banners/<slug>.jpg; until then the
-          same deterministic gradient the icon uses, so the page is coherent. */}
+      {/* banners/<slug>.jpg when there is one; otherwise the same deterministic
+          gradient the icon falls back to, so the page stays coherent. */}
       <div className="relative">
-        <Thumb seed={app.seed + 4} className="h-40 w-full sm:h-56" />
+        <Thumb
+          seed={app.seed + 4}
+          src={app.banner}
+          className="h-40 w-full sm:h-56"
+        />
         <div className="absolute inset-0 bg-gradient-to-t from-[#100913] via-transparent to-transparent" />
         <Link
           href="/"
@@ -50,6 +59,8 @@ export default async function AppDetailPage({
       <div className="-mt-10 flex items-end gap-3 px-[var(--pad)]">
         <Thumb
           seed={app.seed}
+          src={app.icon}
+          alt={app.name}
           className="h-20 w-20 shrink-0 rounded-[var(--radius)] border border-[color:var(--border)] shadow-xl"
         />
         <div className="min-w-0 flex-1 pb-1">
@@ -59,9 +70,19 @@ export default async function AppDetailPage({
       </div>
 
       <div className="flex items-center gap-2 px-[var(--pad)]">
-        <Button className="flex-1 justify-center">
-          {app.installed ? "Open" : "Install"}
-        </Button>
+        {latest ? (
+          // A plain link, so the browser's own download manager handles it and
+          // an interrupted transfer can resume — the route serves ranges.
+          <a href={latest.href} className="flex-1">
+            <Button className="w-full justify-center">
+              <Download size={15} /> Install {latest.version}
+            </Button>
+          </a>
+        ) : (
+          <Button variant="ghost" className="flex-1 justify-center">
+            No download yet
+          </Button>
+        )}
         <Button variant="secondary" aria-label="Save">
           <Bookmark size={15} />
         </Button>
@@ -75,9 +96,10 @@ export default async function AppDetailPage({
         <div className={cn(CARD, "grid grid-cols-3 divide-x divide-[color:var(--border)]")}>
           {[
             {
-              value: app.rating.toFixed(1),
-              label: `${app.ratingCount} reviews`,
-              star: true,
+              value: app.ratingCount > 0 ? app.rating.toFixed(1) : "—",
+              label:
+                app.ratingCount > 0 ? `${app.ratingCount} reviews` : "No reviews",
+              star: app.ratingCount > 0,
             },
             { value: app.size, label: "Download" },
             { value: app.version, label: "Version" },
@@ -95,28 +117,73 @@ export default async function AppDetailPage({
         </div>
       </div>
 
-      <section className="px-[var(--pad)]">
-        <SectionTitle title="Screenshots" />
-        <div className="flex gap-3 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {[0, 1, 2, 3].map((i) => (
-            <Thumb
-              key={i}
-              seed={app.seed + i * 6}
-              className="aspect-[9/16] w-[110px] shrink-0 rounded-[var(--radius-sm)] sm:w-[140px]"
-            />
-          ))}
-        </div>
-      </section>
+      {app.screenshots.length > 0 && (
+        <section className="px-[var(--pad)]">
+          <SectionTitle title="Screenshots" />
+          <div className="flex gap-3 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {app.screenshots.map((src, i) => (
+              <Thumb
+                key={src}
+                seed={app.seed + i * 6}
+                src={src}
+                alt={`${app.name} screenshot ${i + 1}`}
+                className="aspect-[9/16] w-[110px] shrink-0 rounded-[var(--radius-sm)] sm:w-[140px]"
+              />
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="px-[var(--pad)]">
         <SectionTitle title="About" />
-        <p className="text-sm leading-relaxed text-[color:var(--muted-2)]">
-          {app.tagline}. This description is placeholder text standing in for
-          what the importer will read out of the source listing, so the block
-          can be judged at a realistic length before there is anything real to
-          put in it.
+        <p className="whitespace-pre-line text-sm leading-relaxed text-[color:var(--muted-2)]">
+          {app.description ??
+            app.tagline ??
+            "No description has been written for this app yet."}
         </p>
+        {app.packageName && (
+          <p className={cn("mt-3 break-all font-mono text-[11px]", MUTED)}>
+            {app.packageName}
+          </p>
+        )}
       </section>
+
+      {/* The point of an archive: the version you had still exists. */}
+      {older.length > 0 && (
+        <section className="px-[var(--pad)]">
+          <SectionTitle title="Older versions" />
+          <div className={cn(CARD, "overflow-hidden")}>
+            {older.map((v, i) => (
+              <a
+                key={v.version}
+                href={v.href}
+                className={cn(
+                  "flex items-center gap-3 px-3.5 py-3",
+                  i > 0 && "border-t border-[color:var(--border)]"
+                )}
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-mono text-sm">
+                    {v.version}
+                  </span>
+                  <span className={cn("block truncate text-xs", MUTED)}>
+                    {v.size} ·{" "}
+                    {new Date(v.added).toLocaleDateString("en-GB", {
+                      day: "numeric",
+                      month: "short",
+                      year: "numeric",
+                      timeZone: "Europe/Stockholm",
+                    })}
+                  </span>
+                </span>
+                <Button size="sm" variant="secondary">
+                  <Download size={13} /> Get
+                </Button>
+              </a>
+            ))}
+          </div>
+        </section>
+      )}
 
       {related.length > 0 && (
         <CoverShelf
@@ -128,8 +195,4 @@ export default async function AppDetailPage({
       )}
     </Screen>
   );
-}
-
-export function generateStaticParams() {
-  return APPS.map((a) => ({ slug: a.slug }));
 }

@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import ThumbImage from "@/components/thumb-image";
 
 export const CARD =
   "bg-[var(--card)] rounded-[var(--radius)] border border-[color:var(--border)]";
@@ -6,16 +7,24 @@ export const CARD =
 export const MUTED = "text-[color:var(--muted)]";
 
 /**
- * Deterministic gradient standing in for artwork. Every app carries a `seed`,
- * so the same app keeps the same colours on every surface — which is what a
- * real icon would do. Swap this for an <img> once `icons/` has files in it.
+ * Artwork, with a fallback.
+ *
+ * `src` is a real file out of the library. When there is none — the app has no
+ * icon yet, or the row is a placeholder — the deterministic gradient stands in.
+ * It is keyed on the app's `seed`, so the same app keeps the same colours on
+ * every surface, which is what a real icon would do. The gradient also sits
+ * behind the image, so a slow load is not a hole in the layout.
  */
 export function Thumb({
   seed = 0,
+  src,
+  alt = "",
   className,
   label,
 }: {
   seed?: number;
+  src?: string;
+  alt?: string;
   className?: string;
   label?: string;
 }) {
@@ -32,7 +41,9 @@ export function Thumb({
         } 45% 24% / 0.85))`,
       }}
     >
-      {label ? (
+      {src ? (
+        <ThumbImage src={src} alt={alt} />
+      ) : label ? (
         <span className="px-1 text-center text-[10px] font-medium text-white/80">
           {label}
         </span>

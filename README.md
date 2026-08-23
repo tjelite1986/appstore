@@ -3,10 +3,11 @@
 A standalone store front for the APK archive — the section that used to live
 inside elite-v2 at `/store`, rebuilt as its own app.
 
-**This build is layout only.** There is no database, no auth, no importer and no
-API. Every app on screen comes from `lib/catalog.ts`, a hand-written placeholder
-catalog, and every button is a shape. The point is to judge the layout before
-any of it is wired up.
+**The catalog is read off disk. There is still no database, no auth and no
+importer.** Apps come from the library at `/srv/appstore/library`: the APKs
+decide which versions exist, `meta/<slug>.json` supplies the words, and the
+images come out of `icons/`, `banners/` and `screenshots/`. Nothing writes to
+the library yet — files get there by hand.
 
 ## Running it
 
@@ -14,6 +15,82 @@ any of it is wired up.
 npm install
 npm run dev      # http://localhost:3030
 ```
+
+Point `STORE_ROOT` at a directory to run against a different library.
+
+## The library
+
+```
+/srv/appstore/library
+├── apks/         <slug>/<version>/<file>.apk|.xapk
+├── icons/        <slug>.png
+├── banners/      <slug>.jpg
+├── screenshots/  <slug>/<n>.jpg
+├── meta/         <slug>.json
+└── _import/      drop zone; _review/ holds what needs a decision
+```
+
+`lib/storage.ts` is the only place those paths are named; `lib/store.ts` is the
+only thing that reads them. Override the root with `STORE_ROOT`.
+
+**An app is a slug with an `apks/<slug>/` directory, a `meta/<slug>.json`, or
+both.** A folder of APKs with no meta file still appears — named after its slug,
+developer "Unknown" — so a fresh drop is visible before anyone has written a
+description for it. A meta file with no APKs appears too, with no download.
+
+Every field of a meta file is optional:
+
+```json
+{
+  "name": "Photo Editor Pro",
+  "developer": "Lumen Labs",
+  "category": "Editor",
+  "tagline": "Layers, masks and curves on your phone",
+  "description": "The long text on the detail page.",
+  "packageName": "com.lumen.photoeditor",
+  "rating": 4.6,
+  "ratingCount": 128,
+  "added": "2026-08-20T09:00:00Z",
+  "hidden": false
+}
+```
+
+`category` is matched case-insensitively against the six the sketch names;
+anything else lands in **Other**, whose tile only appears while something is in
+it. `added` overrides the date derived from the files. `hidden` keeps an app out
+of the catalog without deleting it. A meta file that will not parse is logged
+and skipped — the app still appears if it has APKs, and disappears if it does
+not.
+
+Sizes, versions and dates are never read from meta: they are the files. The
+newest version by numeric comparison is the one the catalog shows, and the rest
+stay reachable under "Older versions" on the detail page — that is what an
+archive is for.
+
+The catalog is cached in process for 10 seconds (`STORE_CACHE_MS`), so a page
+load does not restat the whole library and a new import shows up on its own.
+
+### When the library is empty
+
+Every screen would be blank, which says nothing about whether the layout works,
+so `lib/catalog.ts` — the hand-written stand-in from the layout build — takes
+over until the first real app lands. Manage says which of the two is showing.
+
+## Serving files
+
+The library is outside the repo, so `public/` cannot reach it and two route
+handlers do the work instead:
+
+| Route | Serves |
+|---|---|
+| `/api/media/<dir>/<file>` | icons, banners and screenshots — and nothing else: `meta/` and `apks/` are not reachable through it |
+| `/api/download/<slug>?v=<version>` | the APK, `Content-Disposition` set, `Range` honoured so an interrupted phone download resumes |
+
+Media URLs carry `?v=<mtime>` and are served `immutable`: replacing an icon
+changes its URL, so nothing serves stale bytes under a fresh name. Both handlers
+resolve the path and refuse anything that lands outside `STORE_ROOT`, symlinks
+included. The version in a download URL is looked up in the catalog rather than
+trusted from the query string.
 
 ## Where it comes from
 
@@ -44,6 +121,9 @@ block in the sketch resolve to identical colours and spacing.
   equivalents stand in.
 - **App icon in the top bar.** The sketch sets `appIcon: "home"` — a house next
   to the word APPSTORE. Kept as drawn; likely worth a second look.
+- **Empty blocks are skipped.** A real library fills up unevenly, and a heading
+  over an empty grid reads as a bug, so Home only renders the sections that have
+  something in them.
 
 ### Screens
 
@@ -61,27 +141,34 @@ implies but does not draw:
 Installed is no longer a nav destination — it is the "Up to date" section of
 Updates.
 
-## Storage
+Search works: it is a plain GET form over the in-memory catalog, so the query
+lives in the URL. Every other chip row is still a shape.
 
-Files live outside the repo, under one root:
+## Deploying
+
+Built on the host and bind-mounted into a bare `node:20-slim` — the app has no
+native modules, so nothing needs compiling in Docker. Compose lives in
+`compose/appstore/`.
 
 ```
-/srv/appstore/library
-├── apks/         <slug>/<version>/<file>.apk|.xapk
-├── icons/        <slug>.png
-├── banners/      <slug>.jpg
-├── screenshots/  <slug>/<n>.jpg
-├── meta/         <slug>.json
-└── _import/      drop zone; _review/ holds what needs a decision
+npm run build && docker restart appstore
 ```
 
-`lib/storage.ts` is the only place those paths are named. Nothing reads from
-disk yet — it exists so the feature work has one file to open, and so no path
-gets hard-coded inline later. Override the root with `STORE_ROOT`.
+The library is mounted read-only at `/store` (`STORE_ROOT=/store`). The
+importer will need that `:ro` dropped.
 
 ## What is deliberately missing
 
-Auth, a database, the APK importer and manifest parser, signature verification,
-the external sources (GitHub / F-Droid / Play / APKPure / mod sites), the update
-checker, the Telegram feed, downloads, reviews, and the 18+ gate. All of that
-exists in elite-v2 and is the next conversation, not this one.
+Auth is the open design question, and everything below waits on it or on the
+importer:
+
+- **Per-user state.** Installed, Saved and Updates are facts about a person.
+  Off a real library they are empty, and the screens say so. The Install,
+  Save and Share buttons are still shapes — Install on the detail page is not:
+  it is a link to the APK.
+- **The importer.** `_import/` is counted on Manage and otherwise untouched.
+  Manifest parsing, signature verification and the external sources
+  (GitHub / F-Droid / Play / APKPure / mod sites) all still live in elite-v2.
+- **Reviews, ratings and the 18+ gate.** `rating` and `ratingCount` are read
+  from meta and shown; nothing collects them.
+- **The update checker and the Telegram feed.**

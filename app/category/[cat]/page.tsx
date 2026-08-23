@@ -1,7 +1,9 @@
 import { notFound } from "next/navigation";
 import { Screen, ScreenTitle } from "@/components/screen";
 import AppGrid from "@/components/app-grid";
-import { CATEGORIES, byCategory, type Category } from "@/lib/catalog";
+import { byCategory, categoryTiles, type Category } from "@/lib/store";
+
+export const dynamic = "force-dynamic";
 
 /** One category, reached from the Categories tiles on Home and Apps. */
 export default async function CategoryPage({
@@ -10,10 +12,12 @@ export default async function CategoryPage({
   params: Promise<{ cat: string }>;
 }) {
   const { cat } = await params;
-  const match = CATEGORIES.find((c) => c.label.toLowerCase() === cat);
+  const match = (await categoryTiles()).find(
+    (c) => c.label.toLowerCase() === cat.toLowerCase()
+  );
   if (!match) notFound();
 
-  const apps = byCategory(match.label as Category);
+  const apps = await byCategory(match.label as Category);
 
   return (
     <Screen>
@@ -24,8 +28,4 @@ export default async function CategoryPage({
       <AppGrid apps={apps} empty="This category is empty." />
     </Screen>
   );
-}
-
-export function generateStaticParams() {
-  return CATEGORIES.map((c) => ({ cat: c.label.toLowerCase() }));
 }

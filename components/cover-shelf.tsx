@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { MUTED, SectionTitle, Thumb } from "@/components/primitives";
-import type { StoreApp } from "@/lib/catalog";
+import type { StoreApp } from "@/lib/store";
 
 /**
  * The sketch's `album-shelf`: a grid of square covers with a title and a
@@ -49,6 +49,8 @@ export default function CoverShelf({
           <Link key={app.slug} href={`/app/${app.slug}`} className="min-w-0">
             <Thumb
               seed={app.seed}
+              src={app.icon}
+              alt={app.name}
               className={cn(
                 "aspect-square w-full shadow-lg",
                 rounded && "rounded-[var(--radius-sm)]"

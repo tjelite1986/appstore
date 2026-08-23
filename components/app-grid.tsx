@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { MUTED, SectionTitle, Thumb, metaLine } from "@/components/primitives";
-import type { StoreApp } from "@/lib/catalog";
+import type { StoreApp } from "@/lib/store";
 
 /**
  * The catalog grid the browse screens are built from — Apps, Games, a category
@@ -34,6 +34,8 @@ export default function AppGrid({
             >
               <Thumb
                 seed={app.seed}
+                src={app.icon}
+                alt={app.name}
                 className="h-14 w-14 shrink-0 rounded-[var(--radius-sm)] shadow-lg"
               />
               <span className="min-w-0 flex-1">

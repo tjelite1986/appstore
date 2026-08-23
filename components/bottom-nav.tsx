@@ -11,7 +11,6 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MUTED } from "@/components/primitives";
-import { UPDATES } from "@/lib/catalog";
 
 /**
  * The sketch's `bottom-nav`: five tabs, `variant: "indicator"` (the active tab
@@ -26,9 +25,9 @@ const TABS = [
   { href: "/updates", label: "Updates", Icon: PackageCheck },
 ];
 
-export default function BottomNav() {
+/** `pending` is counted in the layout — this bar runs on the client. */
+export default function BottomNav({ pending = 0 }: { pending?: number }) {
   const pathname = usePathname();
-  const pending = UPDATES.length;
 
   return (
     <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-[color:var(--border)] bg-[var(--bar)] backdrop-blur">

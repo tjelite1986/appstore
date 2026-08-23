@@ -4,20 +4,31 @@ import { Screen, ScreenTitle } from "@/components/screen";
 import AppRows from "@/components/app-rows";
 import RowCard from "@/components/rows";
 import { Button, CARD, MUTED, SectionTitle } from "@/components/primitives";
-import { APPS } from "@/lib/catalog";
 import { STORE_ROOT, STORE_DIRS } from "@/lib/storage";
+import { getCatalog, pendingImports } from "@/lib/store";
+
+export const dynamic = "force-dynamic";
 
 /**
  * Manage — the admin surface, reached from the top bar. Laid out here, wired to
  * nothing: the add form does not submit, the review queue is a static example
  * and the toggles do not persist.
  */
-export default function ManagePage() {
+export default async function ManagePage() {
+  const [{ apps, placeholder }, waiting] = await Promise.all([
+    getCatalog(),
+    pendingImports(),
+  ]);
+
   return (
     <Screen>
       <ScreenTitle
         title="Manage"
-        subtitle={`${APPS.length} apps in the catalog`}
+        subtitle={
+          placeholder
+            ? "The library is empty — showing the placeholder catalog"
+            : `${apps.length} ${apps.length === 1 ? "app" : "apps"} in the catalog`
+        }
       />
 
       <section className="px-[var(--pad)]">
@@ -56,7 +67,11 @@ export default function ManagePage() {
             <Button size="sm" variant="secondary">
               <Upload size={13} /> Scan now
             </Button>
-            <span className={cn("text-xs", MUTED)}>Nothing waiting</span>
+            <span className={cn("text-xs", MUTED)}>
+              {waiting === 0
+                ? "Nothing waiting"
+                : `${waiting} ${waiting === 1 ? "file" : "files"} waiting`}
+            </span>
           </div>
         </div>
       </section>
@@ -70,7 +85,9 @@ export default function ManagePage() {
         ]}
       />
 
-      <AppRows title="Catalog" apps={APPS.slice(0, 6)} button="Edit" />
+      {apps.length > 0 && (
+        <AppRows title="Catalog" apps={apps.slice(0, 6)} button="Edit" />
+      )}
     </Screen>
   );
 }

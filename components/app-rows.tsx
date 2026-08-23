@@ -8,7 +8,7 @@ import {
   Thumb,
   metaLine,
 } from "@/components/primitives";
-import type { StoreApp } from "@/lib/catalog";
+import type { StoreApp } from "@/lib/store";
 
 /**
  * The sketch's `app-card`: one bordered card holding a list of apps, each with
@@ -45,6 +45,8 @@ export default function AppRows({
             <Link href={`/app/${app.slug}`} className="shrink-0">
               <Thumb
                 seed={app.seed}
+                src={app.icon}
+                alt={app.name}
                 className="h-12 w-12 rounded-[var(--radius-sm)]"
               />
             </Link>

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { MUTED, SectionTitle, Thumb } from "@/components/primitives";
-import type { StoreApp } from "@/lib/catalog";
+import type { StoreApp } from "@/lib/store";
 
 /**
  * The sketch's `carousel`: a scrolling row of landscape cards with the text
@@ -44,6 +44,8 @@ export default function Carousel({
           >
             <Thumb
               seed={app.seed + 4}
+              src={app.banner ?? app.icon}
+              alt={app.name}
               className="aspect-video w-full rounded-[var(--radius-sm)]"
             />
             <div className="flex flex-col">
