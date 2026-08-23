@@ -1,18 +1,21 @@
-import { Plus, Upload } from "lucide-react";
+import { Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Screen, ScreenTitle } from "@/components/screen";
 import AppRows from "@/components/app-rows";
 import RowCard from "@/components/rows";
 import { Button, CARD, MUTED, SectionTitle } from "@/components/primitives";
+import ImportPanel from "@/components/import-panel";
 import { STORE_ROOT, STORE_DIRS } from "@/lib/storage";
 import { getCatalog, pendingImports } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Manage — the admin surface, reached from the top bar. Laid out here, wired to
- * nothing: the add form does not submit, the review queue is a static example
- * and the toggles do not persist.
+ * Manage — the admin surface, reached from the top bar.
+ *
+ * The import folder is real: `ImportPanel` scans it, and resolves what the
+ * scan would not decide on its own. The rest is still layout — the add form
+ * does not submit and the source toggles do not persist.
  */
 export default async function ManagePage() {
   const [{ apps, placeholder }, waiting] = await Promise.all([
@@ -55,25 +58,17 @@ export default async function ManagePage() {
 
       <section className="px-[var(--pad)]">
         <SectionTitle title="Import folder" />
-        <div className={cn(CARD, "flex flex-col gap-2 p-3.5")}>
-          <p className="text-sm">
-            Drop <span className="font-mono text-xs">.apk</span> or{" "}
-            <span className="font-mono text-xs">.xapk</span> files here:
-          </p>
-          <p className={cn("break-all font-mono text-xs", MUTED)}>
-            {STORE_ROOT}/{STORE_DIRS.import}
-          </p>
-          <div className="mt-1 flex flex-wrap items-center gap-2">
-            <Button size="sm" variant="secondary">
-              <Upload size={13} /> Scan now
-            </Button>
-            <span className={cn("text-xs", MUTED)}>
-              {waiting === 0
-                ? "Nothing waiting"
-                : `${waiting} ${waiting === 1 ? "file" : "files"} waiting`}
-            </span>
-          </div>
-        </div>
+        <ImportPanel
+          storePath={`${STORE_ROOT}/${STORE_DIRS.import}`}
+          waiting={waiting}
+          // Placeholder rows are not folders on disk — offering them as attach
+          // targets would create an app named after an example.
+          apps={
+            placeholder
+              ? []
+              : apps.map((a) => ({ slug: a.slug, name: a.name }))
+          }
+        />
       </section>
 
       <RowCard

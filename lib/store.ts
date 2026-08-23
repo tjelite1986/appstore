@@ -57,6 +57,12 @@ export type StoreApp = {
   /** The long text on the detail page. Absent until someone writes one. */
   description?: string;
   packageName?: string;
+  /**
+   * The SHA-256 of the signer certificate the importer pinned on the first
+   * APK it saw for this app. A later drop signed with a different key is
+   * refused rather than served — see `lib/import.ts`.
+   */
+  signingCert?: string;
   /** The newest version, and its size — what every list row shows. */
   version: string;
   size: string;
@@ -114,6 +120,8 @@ type MetaFile = {
   tagline?: string;
   description?: string;
   packageName?: string;
+  /** Written by the importer, not by hand. */
+  signingCert?: string;
   rating?: number;
   ratingCount?: number;
   /** Overrides the date derived from the files. */
@@ -342,6 +350,7 @@ async function readFromDisk(): Promise<StoreApp[]> {
         tagline: meta?.tagline?.trim() || "",
         description: meta?.description?.trim() || undefined,
         packageName: meta?.packageName,
+        signingCert: meta?.signingCert,
         version: latest?.version ?? "—",
         size: latest?.size ?? "—",
         rating: typeof meta?.rating === "number" ? meta.rating : 0,

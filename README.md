@@ -17,6 +17,7 @@ npm run dev      # http://localhost:3030
 ```
 
 Point `STORE_ROOT` at a directory to run against a different library.
+`STORE_ADMIN_TOKEN` gates the import routes — see below.
 
 ## The library
 
@@ -75,6 +76,68 @@ load does not restat the whole library and a new import shows up on its own.
 Every screen would be blank, which says nothing about whether the layout works,
 so `lib/catalog.ts` — the hand-written stand-in from the layout build — takes
 over until the first real app lands. Manage says which of the two is showing.
+
+## The importer
+
+Drop `.apk` / `.xapk` files in `_import/` and press **Scan now** on Manage (or
+`POST /api/import/scan`). This is the only part of the app that writes to the
+library, which is why the mount is no longer read-only.
+
+For each file the scan reads the *real* identity out of the binary
+`AndroidManifest.xml` — package id, versionName, versionCode — with no aapt
+involved: `lib/apk-manifest.ts` walks the zip's central directory and inflates
+only the manifest entry, so a 244 MB APK costs a few windowed reads rather than
+244 MB of RAM. `lib/apk-verify.ts` pulls the signer certificate out of the APK
+Signing Block (v2/v3) and hashes it — the same fingerprint `apksigner` reports.
+The filename is parsed too, as a fallback and as a corrective: a mod APK that
+declares `versionName` "9999" so it never looks outdated loses to the version
+in its own name.
+
+Then it decides, and the decision is deliberately narrow:
+
+| | |
+|---|---|
+| package id matches exactly one app | attach |
+| every non-noise name token is covered by exactly one app | attach |
+| anything else | park it in `_import/_review/` |
+
+"Noise" is the release-name vocabulary that says nothing about *which* app it
+is — Pro, Mod, Premium, Unlocked, v2, the site credit in the filename — so
+`CCleaner Pro v26.12.1 - androforever.com.apk` still finds CCleaner.
+
+Attaching moves the file to `apks/<slug>/<version>/` and fills the two gaps in
+`meta/<slug>.json` that are facts about the binary — `packageName` and
+`signingCert` — without touching anything a person wrote there. The signer is
+trust-on-first-use: the first APK pins the certificate, and a later drop signed
+with a **different key is refused**, because that is how a repackaged APK would
+take over an app someone has already installed. Only an explicit *Attach
+anyway* from the review queue re-pins it.
+
+A file younger than 60 seconds is left alone — a Samba or SFTP drop appears in
+the directory at its first byte, and importing half an APK would park a corrupt
+file with a plausible-looking entry.
+
+### The review queue
+
+A parked file gets a `.json` sidecar beside it holding what the scan worked
+out. The sidecar *is* the queue — there is no index to drift out of sync with
+the folder — and its file name is the item's identity. Manage lists them with
+the reasons spelled out (`no_match`, `ambiguous`, `duplicate`,
+`signer_mismatch`) and offers: attach to a suggested or chosen app, create a
+new app from the drop, or discard.
+
+Discard moves the file to `_import/_discarded/` rather than deleting it, as
+does a version folder's previous binary when one is replaced. A wrong click on
+a 200 MB APK should not be final; the folder is trivial to empty by hand.
+
+### Who may run it
+
+There is no login yet, and the store answers on a public hostname, so the write
+routes are gated on a shared `STORE_ADMIN_TOKEN` (`x-store-admin-token`
+header). **Unset means closed**, not open — a missing variable must not read as
+"no gate configured, let it through". Manage keeps the token in `localStorage`;
+a host timer can post to `/api/import/scan` with the same header. `lib/admin.ts`
+is the only file that changes when the auth question is answered.
 
 ## Serving files
 
@@ -154,8 +217,11 @@ native modules, so nothing needs compiling in Docker. Compose lives in
 npm run build && docker restart appstore
 ```
 
-The library is mounted read-only at `/store` (`STORE_ROOT=/store`). The
-importer will need that `:ro` dropped.
+The library is mounted at `/store` (`STORE_ROOT=/store`), writable since the
+importer landed, and the container runs as uid 1000 so imported files keep the
+same ownership as the rest of the tree. A compose change — a volume, or
+`STORE_ADMIN_TOKEN` in the `.env` beside it — needs `docker compose up -d` from
+the compose dir instead of a restart.
 
 ## What is deliberately missing
 
@@ -166,9 +232,18 @@ importer:
   Off a real library they are empty, and the screens say so. The Install,
   Save and Share buttons are still shapes — Install on the detail page is not:
   it is a link to the APK.
-- **The importer.** `_import/` is counted on Manage and otherwise untouched.
-  Manifest parsing, signature verification and the external sources
-  (GitHub / F-Droid / Play / APKPure / mod sites) all still live in elite-v2.
+- **A scheduler.** The scan runs when someone asks for one. elite-v2 ran it as
+  a job every 300 s; here it wants a host timer posting to
+  `/api/import/scan`.
+- **The external sources.** GitHub, F-Droid, Play, APKPure and the mod sites —
+  metadata, auto-update and downloads — all still live in elite-v2. Manage's
+  "Add an app" form and the source toggles are the layout for them.
+- **Editorial metadata on import.** A created app gets a name, a package id and
+  a pinned signer. Category, tagline, description, icon and screenshots are
+  still hand-written into `meta/<slug>.json` and the media folders. Note too
+  that the manifest's `versionName` is the version, so two builds of one
+  release — elitev3 kept Instagram Piko as `439.0.0.37.89-1` and `-3` — land
+  as the same version and the second is a `duplicate` decision.
 - **Reviews, ratings and the 18+ gate.** `rating` and `ratingCount` are read
   from meta and shown; nothing collects them.
 - **The update checker and the Telegram feed.**

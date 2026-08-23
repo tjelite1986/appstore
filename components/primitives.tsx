@@ -84,6 +84,34 @@ export function Pad({
   return <div className={cn("px-[var(--pad)]", className)}>{children}</div>;
 }
 
+export type ButtonVariant = "primary" | "secondary" | "ghost";
+export type ButtonSize = "sm" | "md";
+
+/**
+ * The button's look, without the element.
+ *
+ * `Button` below renders a `<span>`: on every screen but Manage these are
+ * labels in a layout, and a span cannot be tabbed to or pressed by mistake.
+ * The parts that really do something — the import controls — need a real
+ * `<button>`, so the classes are shared and the element is the caller's
+ * choice, rather than giving every decorative button a disabled handler.
+ */
+export function buttonClass(
+  variant: ButtonVariant = "primary",
+  size: ButtonSize = "md",
+  className?: string
+): string {
+  return cn(
+    "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full font-medium",
+    size === "sm" ? "px-3 py-1.5 text-xs" : "px-4 py-2 text-sm",
+    variant === "primary" && "bg-[var(--accent)] text-white",
+    variant === "secondary" &&
+      "bg-[var(--card-2)] text-[color:var(--fg)] border border-[color:var(--border)]",
+    variant === "ghost" && cn("border border-[color:var(--border)]", MUTED),
+    className
+  );
+}
+
 export function Button({
   children,
   variant = "primary",
@@ -91,24 +119,12 @@ export function Button({
   className,
 }: {
   children: React.ReactNode;
-  variant?: "primary" | "secondary" | "ghost";
-  size?: "sm" | "md";
+  variant?: ButtonVariant;
+  size?: ButtonSize;
   className?: string;
 }) {
   return (
-    <span
-      className={cn(
-        "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full font-medium",
-        size === "sm" ? "px-3 py-1.5 text-xs" : "px-4 py-2 text-sm",
-        variant === "primary" && "bg-[var(--accent)] text-white",
-        variant === "secondary" &&
-          "bg-[var(--card-2)] text-[color:var(--fg)] border border-[color:var(--border)]",
-        variant === "ghost" && cn("border border-[color:var(--border)]", MUTED),
-        className
-      )}
-    >
-      {children}
-    </span>
+    <span className={buttonClass(variant, size, className)}>{children}</span>
   );
 }
 
