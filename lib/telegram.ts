@@ -54,17 +54,24 @@ const DOWNLOAD_TRIES = 3;
  * there reads as one clean attempt.
  */
 const TRANSIENT_TRIES = 8;
-const IS_MIGRATE = /stored in DC \d|FILE_MIGRATE/i;
+const IS_MIGRATE = /stored in DC (\d+)|FILE_MIGRATE_(\d+)/i;
 const FLOOD_WAIT = /(?:wait|FLOOD_WAIT_)\s*(\d+)\s*(?:seconds?)?/i;
 
-/** Seconds to wait, or null when the error is a real failure. */
-function transientDelay(err: unknown): number | null {
+/** How long to wait and what to call it, or null for a real failure. */
+function transient(err: unknown): { seconds: number; what: string } | null {
   const message = err instanceof Error ? err.message : String(err);
-  if (IS_MIGRATE.test(message)) return 1;
+  const migrate = IS_MIGRATE.exec(message);
+  if (migrate) {
+    // Group 1 is the prose form ("stored in DC 5"), group 2 the code form.
+    const dc = migrate[1] ?? migrate[2] ?? "?";
+    return { seconds: 1, what: `data centre redirect (DC ${dc})` };
+  }
   const flood = FLOOD_WAIT.exec(message);
   // A flood wait long enough to be a rate-limit ban is not worth sitting out
   // inside a request-triggered run; let it fail and be retried next run.
-  if (flood && Number(flood[1]) <= 60) return Number(flood[1]) + 1;
+  if (flood && Number(flood[1]) <= 60) {
+    return { seconds: Number(flood[1]) + 1, what: "rate limited" };
+  }
   return null;
 }
 /** The importer ignores files younger than this — see `lib/import.ts`. */
@@ -360,8 +367,8 @@ async function run(): Promise<void> {
 
     let lastError: unknown;
     let attempt = 0;
-    let transient = 0;
-    while (attempt < DOWNLOAD_TRIES && transient < TRANSIENT_TRIES) {
+    let waits = 0;
+    while (attempt < DOWNLOAD_TRIES && waits < TRANSIENT_TRIES) {
       try {
         await client.downloadMedia(message, { outputFile: partPath });
         const size = (await fs.stat(partPath)).size;
@@ -374,14 +381,14 @@ async function run(): Promise<void> {
         lastError = err;
         await fs.rm(partPath, { force: true });
 
-        const delay = transientDelay(err);
-        if (delay !== null) {
-          transient += 1;
+        const wait = transient(err);
+        if (wait) {
+          waits += 1;
           say(
-            `  ${fileName}: ${msgOf(err).slice(0, 60)} — waiting ${delay}s ` +
-              `(${transient}/${TRANSIENT_TRIES}, does not count as a try)`
+            `  ${fileName}: ${wait.what}, waiting ${wait.seconds}s ` +
+              `(${waits}/${TRANSIENT_TRIES}, not counted as a try)`
           );
-          await sleep(delay * 1000);
+          await sleep(wait.seconds * 1000);
           continue;
         }
 
