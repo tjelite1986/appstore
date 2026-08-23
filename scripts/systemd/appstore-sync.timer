@@ -1,0 +1,13 @@
+[Unit]
+Description=Run appstore-sync every 30 minutes
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=30min
+AccuracySec=1min
+# A missed window (the Pi was down, or a long run overran) is picked up on the
+# next boot rather than waiting out a full interval.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

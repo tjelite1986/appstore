@@ -1,0 +1,16 @@
+# Import whatever has been dropped into the App Store's _import/ folder by
+# hand. A Telegram run scans by itself when it downloads something; this is
+# for everything else that lands there.
+[Unit]
+Description=App Store import scan
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=appstore
+Group=appstore
+TimeoutStartSec=5min
+ExecStart=/opt/appstore/scripts/cron.sh scan
+Nice=10
+IOSchedulingClass=idle

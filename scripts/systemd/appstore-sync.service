@@ -1,0 +1,16 @@
+# Pull new APKs from the Telegram channel into the App Store's drop folder.
+[Unit]
+Description=App Store Telegram sync
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=appstore
+Group=appstore
+# The script waits out the run, so this covers a 400 MB download plus the
+# importer's 60 s quiet period, with room for a retry pass over old failures.
+TimeoutStartSec=45min
+ExecStart=/opt/appstore/scripts/cron.sh sync
+Nice=10
+IOSchedulingClass=idle
