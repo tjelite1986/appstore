@@ -285,7 +285,7 @@ async function readMetaRaw(slug: string): Promise<Record<string, unknown>> {
   }
 }
 
-async function writeMeta(
+export async function writeMeta(
   slug: string,
   patch: Record<string, unknown>
 ): Promise<void> {
@@ -310,7 +310,7 @@ export function slugify(name: string): string {
 }
 
 /** A slug no app is using — checked against both halves of the library. */
-async function uniqueSlug(name: string): Promise<string> {
+export async function uniqueSlug(name: string): Promise<string> {
   const base = slugify(name) || "app";
   for (let n = 1; ; n++) {
     const slug = n === 1 ? base : `${base}-${n}`;
@@ -429,7 +429,10 @@ export type ReviewItem = {
   versionCode: number | null;
   signer: string | null;
   fileSize: number;
-  /** "no_match" | "ambiguous" | "duplicate" | "signer_mismatch" */
+  /**
+   * "no_match" | "ambiguous" | "duplicate" | "signer_mismatch", or
+   * "now_matches" — parked when nothing fitted, and something does now.
+   */
   reason: string;
   matchedSlug: string | null;
   suggestions: Suggestion[];
@@ -460,8 +463,22 @@ async function parkForReview(
  * along with its sidecar, so the queue never offers a decision about a file
  * that is not there.
  */
+/**
+ * The review queue, matched against the catalog as it is now.
+ *
+ * The sidecar records what the file *is* — name, version, package id, signer,
+ * when it landed. It also recorded who it might be, and that part goes stale
+ * the moment the catalog changes: almost everything parks as "no matching app"
+ * precisely when the catalog is empty, and adding the app afterwards would
+ * leave the queue insisting there is still nothing to attach to. So the facts
+ * are replayed and the verdict is recomputed.
+ *
+ * An item that now matches exactly is not attached from here — a read does not
+ * move files. It is shown as a match the decision can take in one click.
+ */
 export async function listReview(): Promise<ReviewItem[]> {
   const files = await fs.readdir(REVIEW_DIR).catch(() => [] as string[]);
+  const apps = await realApps();
   const out: ReviewItem[] = [];
   for (const file of files) {
     if (!file.endsWith(".json")) continue;
@@ -471,8 +488,26 @@ export async function listReview(): Promise<ReviewItem[]> {
       continue;
     }
     try {
-      const parsed = JSON.parse(await fs.readFile(path.join(REVIEW_DIR, file), "utf8"));
-      out.push({ ...parsed, id: path.basename(apk) } as ReviewItem);
+      const parsed = JSON.parse(
+        await fs.readFile(path.join(REVIEW_DIR, file), "utf8")
+      ) as ReviewFields & { parkedAt?: string };
+      const item: ReviewItem = { ...parsed, id: path.basename(apk) } as ReviewItem;
+
+      // "duplicate" and "signer_mismatch" are statements about the file and
+      // the app it already belongs to, not about a search that failed — only
+      // the two "we could not place this" verdicts are worth redoing.
+      if (item.reason === "no_match" || item.reason === "ambiguous") {
+        const match = matchApps(
+          item.parsedName ?? "",
+          item.packageName,
+          item.signer,
+          apps
+        );
+        item.matchedSlug = match.auto?.slug ?? null;
+        item.suggestions = match.suggestions;
+        if (match.auto) item.reason = "now_matches";
+      }
+      out.push(item);
     } catch {
       /* an unreadable sidecar hides one file, not the whole queue */
     }

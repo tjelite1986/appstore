@@ -130,9 +130,41 @@ the reasons spelled out (`no_match`, `ambiguous`, `duplicate`,
 `signer_mismatch`) and offers: attach to a suggested or chosen app, create a
 new app from the drop, or discard.
 
+The sidecar records what the file *is*; who it might be is worked out again on
+every read. A verdict of "no app looks like this" is a statement about the
+catalog at the moment the file landed, and the catalog is at its emptiest
+exactly then — a queue that kept the old answer would insist there is nothing
+to attach to long after the app was added. An item that now resolves is listed
+as `now_matches` with the target preselected; nothing is moved by a read.
+
 Discard moves the file to `_import/_discarded/` rather than deleting it, as
 does a version folder's previous binary when one is replaced. A wrong click on
 a 200 MB APK should not be final; the folder is trivial to empty by hand.
+
+### Adding an app from Google Play
+
+Manage searches Play (`google-play-scraper`, `lib/sources/play.ts`) and turns a
+listing into `meta/<slug>.json` plus `icons/`, `banners/` and up to eight
+`screenshots/`. **No APK is ever fetched** — Google does not serve them to
+anyone but the Play client, and this store hosts what it was given.
+
+So what it creates is an entry with no versions: a shelf with the label already
+printed. That is the useful part. The importer matches a drop on its package
+id, and an empty catalog is exactly why every download parks as "no matching
+app" — describing the app first is what lets the next one attach itself.
+
+A package already in the catalog is refused rather than added twice: two rows
+for one package id read as ambiguous to the matcher, which would quietly stop
+*every* future drop of that app from attaching.
+
+Play's genres map onto the store's own categories in a small table, and the
+guess is meant to be overridden by hand in the meta file. Nothing maps to
+Adults — Play has no such listings.
+
+Search results are admin-gated, the outbound request included: it is made in
+this server's name, and an open one is a scraping proxy. Their icons come
+through `/api/sources/play/icon`, because the CSP is `img-src 'self'` and
+widening it for one admin screen would weaken every page.
 
 ### The Telegram feed
 

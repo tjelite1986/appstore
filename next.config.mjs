@@ -20,10 +20,13 @@ const nextConfig = {
   // see compose/appstore. Deploy is `npm run build` + `docker restart`.
   output: "standalone",
   reactStrictMode: true,
-  // teleproto is a large MTProto stack full of dynamic requires; bundling it
-  // breaks it. Left external, the standalone tracer copies it into the output
-  // instead — see lib/telegram.ts.
-  serverExternalPackages: ["teleproto"],
+  // Left out of the bundle so the standalone tracer copies them into the
+  // output instead. teleproto is a large MTProto stack full of dynamic
+  // requires that bundling breaks (see lib/telegram.ts);
+  // google-play-scraper is ESM reached through a dynamic import, which the
+  // tracer does not follow on its own — without this the search route throws
+  // MODULE_NOT_FOUND in the container and nowhere else.
+  serverExternalPackages: ["teleproto", "google-play-scraper"],
   async headers() {
     return [
       {

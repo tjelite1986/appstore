@@ -11,6 +11,7 @@ import {
 } from "@/components/primitives";
 import type { ImportSummary, ReviewItem } from "@/lib/import";
 import type { TelegramRun } from "@/lib/telegram";
+import { ADMIN_TOKEN_KEY, adminHeaders } from "@/lib/admin-token";
 
 /**
  * Everything on Manage that writes to the library: the Telegram feed, the
@@ -34,7 +35,6 @@ import type { TelegramRun } from "@/lib/telegram";
  * another origin that talks this store into a POST.
  */
 
-const TOKEN_KEY = "store-admin-token";
 const CARD_CLS =
   "bg-[var(--card)] rounded-[var(--radius)] border border-[color:var(--border)]";
 const MUTED_CLS = "text-[color:var(--muted)]";
@@ -102,7 +102,7 @@ export default function ImportPanel({ storePath, waiting, apps }: Props) {
 
   useEffect(() => {
     try {
-      setToken(window.localStorage.getItem(TOKEN_KEY) ?? "");
+      setToken(window.localStorage.getItem(ADMIN_TOKEN_KEY) ?? "");
     } catch {
       /* private mode — the token just will not persist */
     }
@@ -123,7 +123,7 @@ export default function ImportPanel({ storePath, waiting, apps }: Props) {
           // Omitted when there is none: the session cookie the browser sends
           // on its own is the normal way in, and an empty header would only
           // ever be a failed guess at the shared token.
-          ...(token ? { "x-store-admin-token": token } : {}),
+          ...adminHeaders(token),
         },
       });
       const data = await res.json().catch(() => ({}));
@@ -131,7 +131,7 @@ export default function ImportPanel({ storePath, waiting, apps }: Props) {
         setToken("");
         setLocked(true);
         try {
-          window.localStorage.removeItem(TOKEN_KEY);
+          window.localStorage.removeItem(ADMIN_TOKEN_KEY);
         } catch {
           /* ignore */
         }
@@ -249,7 +249,7 @@ export default function ImportPanel({ storePath, waiting, apps }: Props) {
             e.preventDefault();
             if (!draftToken) return;
             try {
-              window.localStorage.setItem(TOKEN_KEY, draftToken);
+              window.localStorage.setItem(ADMIN_TOKEN_KEY, draftToken);
             } catch {
               /* ignore */
             }
@@ -330,7 +330,10 @@ export default function ImportPanel({ storePath, waiting, apps }: Props) {
         <div className="flex flex-col gap-2">
           {items.map((item) => (
             <ReviewCard
-              key={item.id}
+              // The verdict is recomputed on every read, so a card whose
+              // match changed has to remount — its target dropdown seeds from
+              // the match and would otherwise keep the stale choice.
+              key={`${item.id}:${item.matchedSlug ?? ""}`}
               item={item}
               apps={apps}
               busy={busy === item.id}
@@ -424,6 +427,9 @@ const REASONS: Record<string, string> = {
   ambiguous: "More than one app could be the target",
   duplicate: "That version exists already, with different content",
   signer_mismatch: "Signed with a different key than the one pinned",
+  // Recomputed at read time: nothing fitted when it landed, something does
+  // now — usually because the app was added to the catalog since.
+  now_matches: "Matches an app that has been added since",
 };
 
 function ReviewCard({
