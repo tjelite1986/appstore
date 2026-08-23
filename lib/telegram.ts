@@ -142,12 +142,20 @@ export type TelegramState = {
   channels: Record<string, ChannelState>;
   /** Keyed "<channel>#<messageId>". */
   ledger: Record<string, LedgerEntry>;
+  /**
+   * Which data centre a document really lives in, keyed by document id.
+   *
+   * Learned once and kept, because it is a property of the file rather than of
+   * the run — see `resolveDc()`.
+   */
+  dcById: Record<string, number>;
   run: TelegramRun;
 };
 
 const EMPTY_STATE: TelegramState = {
   channels: {},
   ledger: {},
+  dcById: {},
   run: { running: false, downloaded: 0, log: [] },
 };
 
@@ -167,7 +175,7 @@ export async function readState(): Promise<TelegramState> {
  * written JSON file reads as no state at all — which would reset every cursor
  * and re-download the channel from scratch.
  */
-async function writeState(state: TelegramState): Promise<void> {
+async function writeOnce(state: TelegramState): Promise<void> {
   await fs.mkdir(path.dirname(STATE_FILE), { recursive: true });
 
   const entries = Object.entries(state.ledger);
@@ -176,9 +184,36 @@ async function writeState(state: TelegramState): Promise<void> {
     state = { ...state, ledger: Object.fromEntries(entries.slice(0, LEDGER_CAP)) };
   }
 
-  const tmp = `${STATE_FILE}.tmp`;
-  await fs.writeFile(tmp, JSON.stringify(state, null, 2) + "\n", "utf8");
-  await fs.rename(tmp, STATE_FILE);
+  // Its own temp name, so that two writes in flight cannot rename the same
+  // file — see `writeState()`.
+  const tmp = `${STATE_FILE}.${process.pid}.${writeSeq++}.tmp`;
+  try {
+    await fs.writeFile(tmp, JSON.stringify(state, null, 2) + "\n", "utf8");
+    await fs.rename(tmp, STATE_FILE);
+  } catch (err) {
+    await fs.rm(tmp, { force: true }).catch(() => {});
+    throw err;
+  }
+}
+
+let writeQueue: Promise<void> = Promise.resolve();
+let writeSeq = 0;
+
+/**
+ * One writer at a time.
+ *
+ * The log flush in `say()` runs unawaited beside the ledger write at the end
+ * of a download, and both used one temp file name: the second rename found
+ * nothing there, and that ENOENT ended a run mid-channel with three healthy
+ * downloads already behind it. Queueing them also means the file always holds
+ * a whole snapshot rather than whichever writer happened to land last.
+ */
+function writeState(state: TelegramState): Promise<void> {
+  writeQueue = writeQueue.then(
+    () => writeOnce(state),
+    () => writeOnce(state)
+  );
+  return writeQueue;
 }
 
 /* --------------------------------------------------------------------- run */
@@ -315,8 +350,9 @@ async function run(): Promise<void> {
 
   // Loaded here, not at module scope: it is a large MTProto stack and every
   // other route in the app would pay for it on a cold start.
-  const { TelegramClient } = await import("teleproto");
+  const { TelegramClient, Api } = await import("teleproto");
   const { StringSession } = await import("teleproto/sessions/index.js");
+  const bigInt = (await import("big-integer")).default;
 
   const client = new TelegramClient(
     new StringSession(cfg.session),
@@ -337,10 +373,84 @@ async function run(): Promise<void> {
     );
     if (!nameAttr?.fileName) return null;
     return {
+      doc,
       documentId: String(doc.id),
       fileName: nameAttr.fileName as string,
       fileSize: Number(doc.size),
+      /** What the *message* claims. `resolveDc()` is the one that knows. */
+      homeDc: Number(doc.dcId) || 0,
     };
+  }
+
+  /* ------------------------------------------------------- data centres --- */
+
+  /**
+   * The location a download reads from, built by hand.
+   *
+   * `downloadMedia()` builds this itself and takes no `dcId`, and pinning the
+   * data centre is the whole point below — so the document is unwrapped here
+   * and `downloadFile()` is called directly instead.
+   */
+  function fileLocation(doc: any) {
+    return new Api.InputDocumentFileLocation({
+      id: doc.id,
+      accessHash: doc.accessHash,
+      fileReference: doc.fileReference,
+      thumbSize: "",
+    });
+  }
+
+  /** The data centre a FILE_MIGRATE points at, or null if that is not the error. */
+  function migratedDc(err: unknown): number | null {
+    const newDc = (err as any)?.newDc;
+    if (typeof newDc === "number" && newDc > 0) return newDc;
+    const m = IS_MIGRATE.exec(msgOf(err));
+    const dc = Number(m?.[1] ?? m?.[2]);
+    return Number.isFinite(dc) && dc > 0 ? dc : null;
+  }
+
+  /**
+   * Where the file actually is, asked once.
+   *
+   * The document carries a `dcId` and for some of these files it is not where
+   * the bytes are: the server answers FILE_MIGRATE. teleproto recovers from
+   * that *within a single chunk request* and then throws the answer away — the
+   * transfer keeps starting every chunk at the wrong data centre, so a 100 MB
+   * file pays the redirect a couple of hundred times, re-exports authorisation
+   * for the right one over and over, and any chunk that spends its five
+   * internal retries on redirects fails the whole download, which then restarts
+   * from zero. That is what wrote off Plague-Inc twice at 11-14 MB in.
+   *
+   * So: one 4 KB read up front asks the question once, and the answer is
+   * pinned for the whole transfer and remembered in the state file, where a
+   * later run — or a repost of the same document — picks it up for free.
+   */
+  async function resolveDc(info: { doc: any; documentId: string; homeDc: number }): Promise<number> {
+    const known = state.dcById[info.documentId];
+    if (known) return known;
+
+    const home = info.homeDc || client.session.dcId;
+    let dc = home;
+    try {
+      await client.invoke(
+        new Api.upload.GetFile({
+          location: fileLocation(info.doc),
+          offset: bigInt.zero,
+          limit: 4096,
+          precise: true,
+        }),
+        home
+      );
+    } catch (err) {
+      const moved = migratedDc(err);
+      // Anything else — a flood wait, a dead reference — is the download's
+      // problem to report, not the probe's. It falls back to the home DC.
+      if (moved) dc = moved;
+    }
+
+    state.dcById[info.documentId] = dc;
+    if (dc !== home) say(`  ${info.documentId}: file lives in DC ${dc}, not DC ${home}`);
+    return dc;
   }
 
   /**
@@ -352,7 +462,7 @@ async function run(): Promise<void> {
    */
   async function download(
     message: any,
-    info: { fileName: string; fileSize: number }
+    info: { doc: any; documentId: string; homeDc: number; fileName: string; fileSize: number }
   ): Promise<string> {
     await fs.mkdir(DROP_DIR, { recursive: true });
     let fileName = safeName(info.fileName);
@@ -365,12 +475,20 @@ async function run(): Promise<void> {
     }
     const partPath = path.join(DROP_DIR, `.${fileName}.part`);
 
+    // Pinned for the whole transfer: every chunk starts at the right data
+    // centre instead of rediscovering the redirect one chunk at a time.
+    let dc = await resolveDc(info);
+
     let lastError: unknown;
     let attempt = 0;
     let waits = 0;
     while (attempt < DOWNLOAD_TRIES && waits < TRANSIENT_TRIES) {
       try {
-        await client.downloadMedia(message, { outputFile: partPath });
+        await client.downloadFile(fileLocation(info.doc), {
+          outputFile: partPath,
+          fileSize: info.doc.size,
+          dcId: dc,
+        });
         const size = (await fs.stat(partPath)).size;
         if (size !== info.fileSize) {
           throw new Error(`size mismatch: got ${size}, expected ${info.fileSize}`);
@@ -380,6 +498,20 @@ async function run(): Promise<void> {
       } catch (err) {
         lastError = err;
         await fs.rm(partPath, { force: true });
+
+        // A redirect the probe did not see. Take the answer, keep it, and go
+        // again pinned there — the transfer restarts, but only this once.
+        const moved = migratedDc(err);
+        if (moved && moved !== dc) {
+          dc = moved;
+          state.dcById[info.documentId] = moved;
+          waits += 1;
+          say(
+            `  ${fileName}: redirected to DC ${moved} mid-transfer, retrying pinned there ` +
+              `(${waits}/${TRANSIENT_TRIES}, not counted as a try)`
+          );
+          continue;
+        }
 
         const wait = transient(err);
         if (wait) {
