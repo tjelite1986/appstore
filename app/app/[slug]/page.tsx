@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Download, Share2, Star } from "lucide-react";
+import { ArrowLeft, Download, ExternalLink, Share2, Star } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Screen } from "@/components/screen";
 import CoverShelf from "@/components/cover-shelf";
@@ -39,6 +39,11 @@ export default async function AppDetailPage({
 
   const latest = app.versions[0];
   const older = app.versions.slice(1);
+
+  // A listing added from Play carries no binary. Sending the person upstream is
+  // the only honest action for it — a dead "no download yet" button says the
+  // file is coming, and for these it is not.
+  const shelfOnly = !latest && app.source?.kind === "play" ? app.source : null;
 
   // The per-user controls are simply absent without a session rather than
   // present and inert: this store is browsable by anyone, and a bookmark that
@@ -88,6 +93,17 @@ export default async function AppDetailPage({
               <Download size={15} /> Install {latest.version}
             </Button>
           </a>
+        ) : shelfOnly ? (
+          <a
+            href={shelfOnly.url}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="flex-1"
+          >
+            <Button variant="secondary" className="w-full justify-center">
+              <ExternalLink size={15} /> Get it on Google Play
+            </Button>
+          </a>
         ) : (
           <Button variant="ghost" className="flex-1 justify-center">
             No download yet
@@ -101,7 +117,9 @@ export default async function AppDetailPage({
         </Button>
       </div>
 
-      {userId !== null && (
+      {/* Nothing to install from here means nothing to mark as installed — the
+          card would offer no button at all. */}
+      {userId !== null && latest && (
         <InstalledControl
           slug={app.slug}
           latest={latest?.version ?? null}
@@ -120,7 +138,11 @@ export default async function AppDetailPage({
               star: app.ratingCount > 0,
             },
             { value: app.size, label: "Download" },
-            { value: app.version, label: "Version" },
+            shelfOnly?.playVersion
+              ? // The library holds no file, so "Version" would be a dash. What
+                // upstream showed is worth saying, as long as it says whose.
+                { value: shelfOnly.playVersion, label: "On Play" }
+              : { value: app.version, label: "Version" },
           ].map((cell) => (
             <div key={cell.label} className="px-2 py-3 text-center">
               <p className="flex items-center justify-center gap-1 text-sm font-semibold">

@@ -128,7 +128,16 @@ export function Button({
   );
 }
 
-/** "4.6 ★ · 24 MB" — the one-line meta under an app name. */
+/**
+ * "4.6 ★ · 24 MB" — the one-line meta under an app name.
+ *
+ * A missing rating is left out rather than printed as "0.0 ★", and so is the
+ * dash a shelf listing has instead of a file size: both would read as facts
+ * about the app rather than as gaps.
+ */
 export function metaLine(rating: number, size: string): string {
-  return `${rating.toFixed(1)} ★ · ${size}`;
+  const parts: string[] = [];
+  if (rating > 0) parts.push(`${rating.toFixed(1)} ★`);
+  if (size && size !== "—") parts.push(size);
+  return parts.length > 0 ? parts.join(" · ") : "No file yet";
 }

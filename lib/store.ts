@@ -47,6 +47,19 @@ export type AppVersion = {
   href: string;
 };
 
+/**
+ * Where the listing came from. Written by `lib/sources/*` when an app is put
+ * on the shelf from an upstream store; absent for an app that arrived as a
+ * dropped APK.
+ */
+export type AppSource = {
+  kind: "play";
+  url: string;
+  /** What upstream showed when the listing was added — not a claim about this library. */
+  playVersion?: string;
+  addedFrom?: string;
+};
+
 export type StoreApp = {
   slug: string;
   name: string;
@@ -57,6 +70,8 @@ export type StoreApp = {
   /** The long text on the detail page. Absent until someone writes one. */
   description?: string;
   packageName?: string;
+  /** Set when the listing came from an upstream store rather than a dropped APK. */
+  source?: AppSource;
   /**
    * The SHA-256 of the signer certificate the importer pinned on the first
    * APK it saw for this app. A later drop signed with a different key is
@@ -120,6 +135,8 @@ type MetaFile = {
   tagline?: string;
   description?: string;
   packageName?: string;
+  /** Written by the source that added the listing, not by hand. */
+  source?: AppSource;
   /** Written by the importer, not by hand. */
   signingCert?: string;
   rating?: number;
@@ -350,6 +367,7 @@ async function readFromDisk(): Promise<StoreApp[]> {
         tagline: meta?.tagline?.trim() || "",
         description: meta?.description?.trim() || undefined,
         packageName: meta?.packageName,
+        source: meta?.source?.kind === "play" ? meta.source : undefined,
         signingCert: meta?.signingCert,
         version: latest?.version ?? "—",
         size: latest?.size ?? "—",
