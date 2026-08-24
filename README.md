@@ -142,12 +142,42 @@ Discard moves the file to `_import/_discarded/` rather than deleting it, as
 does a version folder's previous binary when one is replaced. A wrong click on
 a 200 MB APK should not be final; the folder is trivial to empty by hand.
 
-### Adding an app from Google Play
+### Adding an app from a source
 
-Manage searches Play (`google-play-scraper`, `lib/sources/play.ts`) and turns a
-listing into `meta/<slug>.json` plus `icons/`, `banners/` and up to eight
-`screenshots/`. **No APK is ever fetched** — Google does not serve them to
-anyone but the Play client, and this store hosts what it was given.
+Manage's "Add an app" takes one address and works out who it belongs to
+(`lib/sources/detect.ts`): a github.com URL or `owner/name` is GitHub, an
+f-droid.org page is F-Droid, and anything else is a Play search. A bare package
+id could be either store, so both ways stay one click apart rather than being
+guessed at.
+
+The three differ in one way that decides everything else — whether they hand
+out binaries.
+
+| Source | Words and pictures | The APK |
+|--------|--------------------|---------|
+| Google Play | name, description, icon, banner, screenshots | never |
+| GitHub releases | repo name and description | newest release with an APK |
+| F-Droid | name, summary, full description, icon | the recommended build |
+
+An app added from GitHub or F-Droid therefore arrives complete: the file is
+downloaded, checked and on the shelf before the request answers. The download
+is staged under `_import/_sources/` and handed to `attachApk` — the importer
+owns the signer pin and the layout under `apks/`, and a source may not talk its
+way past a signer mismatch any more than a dropped file can. What lands is
+named from the manifest inside the APK, not from the release tag: the two
+disagree often, and a tag is what the author called the release.
+
+Two hazards get the same treatment in both directions (`lib/sources/net.ts`):
+`content-length` is a claim, so bytes are counted as they arrive, and a login
+page is served with HTTP 200 like anything else, so a download is checked for
+being a zip before anything trusts it.
+
+#### Play, in particular
+
+Play (`google-play-scraper`, `lib/sources/play.ts`) turns a listing into
+`meta/<slug>.json` plus `icons/`, `banners/` and up to eight `screenshots/`.
+**No APK is ever fetched** — Google does not serve them to anyone but the Play
+client, and this store hosts what it was given.
 
 So what it creates is an entry with no versions: a shelf with the label already
 printed. That is the useful part. The importer matches a drop on its package
@@ -166,6 +196,27 @@ Search results are admin-gated, the outbound request included: it is made in
 this server's name, and an open one is a scraping proxy. Their icons come
 through `/api/sources/play/icon`, because the CSP is `img-src 'self'` and
 widening it for one admin screen would weaken every page.
+
+A Play listing keeps no download button on its detail page — it links to Play
+instead, and the stat cell says "On Play" rather than dressing an upstream
+version up as one this library holds.
+
+### Keeping a source up to date
+
+The Sources card on Manage counts the apps each source carries and asks them
+what they have now (`lib/sources/updates.ts`, `GET /api/sources/check`).
+Fetching is a separate button, named after what the check found: a check is a
+handful of API calls, a fetch is every new release downloaded over a home line.
+
+"Newer" is decided by the upstream's own name for a release — a GitHub tag, an
+F-Droid version code — which each install records in `source.releaseTag`.
+Comparing version strings instead would re-fetch the same 200 MB file every six
+hours, because the manifest rarely says what the tag says.
+
+`appstore-sources.timer` runs the same thing with `install` on, every six
+hours. `GITHUB_TOKEN` in the compose env file is worth setting once more than a
+handful of repositories are watched: anonymous GitHub requests are 60 an hour
+for the whole machine, and that limit is the first thing a timer hits.
 
 ### The Telegram feed
 
@@ -372,11 +423,12 @@ same ownership as the rest of the tree. A compose change — a volume,
 
 ### The scheduled jobs
 
-There is no scheduler in the app. Two host timers post into it instead —
-`appstore-sync.timer` every 30 min and `appstore-scan.timer` every 15 min, both
-running `scripts/cron.sh`, which reads `STORE_ADMIN_TOKEN` out of the compose
-`.env` so rotating it is one edit. Units and installation in
-`scripts/systemd/`; follow a run with `journalctl -u appstore-sync -f`.
+There is no scheduler in the app. Three host timers post into it instead —
+`appstore-sync.timer` every 30 min, `appstore-scan.timer` every 15 min and
+`appstore-sources.timer` every 6 h — all running `scripts/cron.sh`, which reads
+`STORE_ADMIN_TOKEN` out of the compose `.env` so rotating it is one edit. Units
+and installation in `scripts/systemd/`; follow a run with
+`journalctl -u appstore-sync -f`.
 
 ## What is deliberately missing
 
@@ -384,9 +436,10 @@ Sign-in and per-user storage are both answered. What is left:
 
 - **Share.** Still a shape. Install on the detail page never was one — it is a
   link to the APK.
-- **The external sources.** GitHub, F-Droid, Play, APKPure and the mod sites —
-  metadata, auto-update and downloads — all still live in elite-v2. Manage's
-  "Add an app" form and the source toggles are the layout for them.
+- **APKPure and the mod sites.** Play, GitHub and F-Droid are answered; the
+  Cloudflare-gated sites elite-v2 reaches through curl-impersonate are not, and
+  neither is the split-XAPK merge an APKPure download needs to be
+  tap-installable.
 - **Editorial metadata on import.** A created app gets a name, a package id and
   a pinned signer. Category, tagline, description, icon and screenshots are
   still hand-written into `meta/<slug>.json` and the media folders. Note too
@@ -395,4 +448,5 @@ Sign-in and per-user storage are both answered. What is left:
   as the same version and the second is a `duplicate` decision.
 - **Reviews, ratings and the 18+ gate.** `rating` and `ratingCount` are read
   from meta and shown; nothing collects them.
-- **The update checker and the Telegram feed.**
+- **Per-app update controls.** The source check is all-or-nothing from Manage;
+  there is no "fetch just this one" on an app's own page.
