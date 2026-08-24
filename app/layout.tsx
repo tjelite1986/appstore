@@ -3,7 +3,8 @@ import "./globals.css";
 import { FONT_STACK, THEME_VARS } from "@/lib/theme";
 import TopBar from "@/components/top-bar";
 import BottomNav from "@/components/bottom-nav";
-import { updates } from "@/lib/store";
+import { currentUser } from "@/lib/current-user";
+import { updatableApps } from "@/lib/user-state";
 
 export const metadata: Metadata = {
   title: "App Store",
@@ -19,7 +20,12 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const pending = (await updates()).length;
+  // Per account: the badge counts what *this* person is behind on, so a
+  // signed-out visitor sees no number rather than somebody else's. The header
+  // gets the same answer as a prop rather than asking again from the client —
+  // one lookup, and no frame where the avatar is wrong.
+  const user = await currentUser();
+  const pending = (await updatableApps(user?.id ?? null)).length;
 
   return (
     <html lang="en">
@@ -29,7 +35,7 @@ export default async function RootLayout({
         <style dangerouslySetInnerHTML={{ __html: THEME_VARS }} />
       </head>
       <body style={{ fontFamily: FONT_STACK }}>
-        <TopBar />
+        <TopBar email={user?.email} />
         {children}
         <BottomNav pending={pending} />
       </body>

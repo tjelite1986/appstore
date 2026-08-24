@@ -26,7 +26,15 @@ const nextConfig = {
   // google-play-scraper is ESM reached through a dynamic import, which the
   // tracer does not follow on its own — without this the search route throws
   // MODULE_NOT_FOUND in the container and nowhere else.
-  serverExternalPackages: ["teleproto", "google-play-scraper"],
+  // better-sqlite3 is a compiled .node binary: bundling it rewrites the require
+  // that finds it, and the file is not JavaScript to trace in the first place.
+  // It also has to be built against the *container's* glibc, not this host's —
+  // see `npm run rebuild:native`.
+  serverExternalPackages: [
+    "teleproto",
+    "google-play-scraper",
+    "better-sqlite3",
+  ],
   async headers() {
     return [
       {

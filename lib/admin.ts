@@ -21,7 +21,7 @@
  * it through", which is how this kind of gate usually fails.
  */
 import { timingSafeEqual } from "node:crypto";
-import { eliteUser, ssoConfigured } from "@/lib/sso";
+import { eliteUser, ssoConfigured, type EliteUser } from "@/lib/sso";
 
 const HEADER = "x-store-admin-token";
 
@@ -109,4 +109,38 @@ export async function requireAdmin(req: Request): Promise<Response | null> {
   }
 
   return Response.json({ error: "Unauthorized" }, { status: 401 });
+}
+
+/**
+ * The gate for the per-user routes: any signed-in account, not just an admin.
+ *
+ * Different question from `requireAdmin`, so it is a different function rather
+ * than a flag. Saving an app changes only that person's own rows, so the bar
+ * is a session — but it is still a write, so it still has to come from this
+ * store's own pages: `SameSite=lax` does not separate two hosts under one
+ * parent domain, and elite-v2's cookie reaches every one of them.
+ *
+ * The shared admin token is deliberately not accepted here. It belongs to the
+ * timers, and a timer is not a person — there is no account for its writes to
+ * be about.
+ */
+export async function requireUser(
+  req: Request
+): Promise<{ user: EliteUser } | Response> {
+  if (!ssoConfigured()) {
+    return Response.json(
+      { error: "Sign-in is not configured — per-user state is unavailable" },
+      { status: 503 }
+    );
+  }
+
+  const user = await eliteUser(req);
+  if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  if (!sameOrigin(req)) {
+    return Response.json(
+      { error: "Cross-origin writes are not accepted for a session" },
+      { status: 403 }
+    );
+  }
+  return { user };
 }

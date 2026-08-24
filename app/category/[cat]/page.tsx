@@ -1,7 +1,9 @@
 import { notFound } from "next/navigation";
 import { Screen, ScreenTitle } from "@/components/screen";
 import AppGrid from "@/components/app-grid";
-import { byCategory, categoryTiles, type Category } from "@/lib/store";
+import { categoryTiles } from "@/lib/store";
+import { currentUserId } from "@/lib/current-user";
+import { catalogFor } from "@/lib/user-state";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +19,9 @@ export default async function CategoryPage({
   );
   if (!match) notFound();
 
-  const apps = await byCategory(match.label as Category);
+  const apps = (await catalogFor(await currentUserId())).filter(
+    (a) => a.category === match.label
+  );
 
   return (
     <Screen>

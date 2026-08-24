@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ArrowUpCircle, Bookmark, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MUTED, SectionTitle, Thumb, metaLine } from "@/components/primitives";
 import type { StoreApp } from "@/lib/store";
@@ -48,6 +49,30 @@ export default function AppGrid({
                 <span className={cn("block truncate text-[11px]", MUTED)}>
                   {metaLine(app.rating, app.size)}
                 </span>
+                {/* Only ever set for a signed-in visitor — `catalogFor` leaves
+                    the flags off otherwise, so this line simply is not there
+                    rather than being there and always false. */}
+                {(app.installed || app.saved) && (
+                  <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-[color:var(--accent-text)]">
+                    {app.installed &&
+                      (app.updateTo ? (
+                        <span className="flex items-center gap-1">
+                          <ArrowUpCircle size={11} /> {app.updateTo}
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1">
+                          <Check size={11} /> Installed
+                        </span>
+                      ))}
+                    {app.saved && (
+                      <Bookmark
+                        size={11}
+                        className="fill-current"
+                        aria-label="Saved"
+                      />
+                    )}
+                  </span>
+                )}
               </span>
             </Link>
           ))}

@@ -1,0 +1,193 @@
+/**
+ * What one account did with the catalog: what it kept, and what it has.
+ *
+ * `lib/store.ts` reads the library and knows nothing about people; the three
+ * per-user flags on `StoreApp` have been declared-but-never-set since the
+ * layout build. This is the module that fills them in, and it is the only one
+ * that joins a person to an app — the catalog stays a pure function of disk,
+ * so a signed-out visitor still gets the same pages, minus the flags.
+ *
+ * An update is derived, not stored: the catalog knows the newest file, a row
+ * here knows which version the person installed, and an app is due an update
+ * when the first is newer than the second. Nothing has to be recomputed when a
+ * new APK lands — the next read simply answers differently.
+ */
+import { db } from "./db";
+import {
+  compareVersions,
+  getApps,
+  getCatalog,
+  installed as placeholderInstalled,
+  saved as placeholderSaved,
+  updates as placeholderUpdates,
+  type StoreApp,
+} from "./store";
+
+export type UserState = {
+  /** Slugs the person saved. */
+  saved: Set<string>;
+  /** Slug to the version they have installed. */
+  installed: Map<string, string>;
+};
+
+const EMPTY: UserState = { saved: new Set(), installed: new Map() };
+
+export function readState(userId: number): UserState {
+  const conn = db();
+  const saved = conn
+    .prepare("SELECT slug FROM user_saved WHERE user_id = ?")
+    .all(userId) as { slug: string }[];
+  const installed = conn
+    .prepare("SELECT slug, version FROM user_installed WHERE user_id = ?")
+    .all(userId) as { slug: string; version: string }[];
+
+  return {
+    saved: new Set(saved.map((r) => r.slug)),
+    installed: new Map(installed.map((r) => [r.slug, r.version])),
+  };
+}
+
+/**
+ * Save or unsave. Idempotent on purpose: the button is a toggle backed by an
+ * optimistic UI, so the same state can arrive twice and the second one must
+ * not be an error.
+ */
+export function setSaved(userId: number, slug: string, on: boolean): void {
+  const conn = db();
+  if (on) {
+    conn
+      .prepare(
+        `INSERT INTO user_saved (user_id, slug, saved_at) VALUES (?, ?, ?)
+         ON CONFLICT (user_id, slug) DO NOTHING`
+      )
+      .run(userId, slug, new Date().toISOString());
+  } else {
+    conn
+      .prepare("DELETE FROM user_saved WHERE user_id = ? AND slug = ?")
+      .run(userId, slug);
+  }
+}
+
+/**
+ * Record which version of an app the person has, or `null` to forget it.
+ *
+ * Re-marking an app that is already installed rewrites the version rather than
+ * doing nothing — that is exactly what happens after an update, and it is the
+ * write that makes the app stop appearing on Updates.
+ */
+export function setInstalled(
+  userId: number,
+  slug: string,
+  version: string | null
+): void {
+  const conn = db();
+  if (version) {
+    conn
+      .prepare(
+        `INSERT INTO user_installed (user_id, slug, version, installed_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT (user_id, slug)
+         DO UPDATE SET version = excluded.version,
+                       installed_at = excluded.installed_at`
+      )
+      .run(userId, slug, version, new Date().toISOString());
+  } else {
+    conn
+      .prepare("DELETE FROM user_installed WHERE user_id = ? AND slug = ?")
+      .run(userId, slug);
+  }
+}
+
+/** Forget everything about one account — what Settings offers. */
+export function clearState(userId: number): void {
+  const conn = db();
+  conn.transaction(() => {
+    conn.prepare("DELETE FROM user_saved WHERE user_id = ?").run(userId);
+    conn.prepare("DELETE FROM user_installed WHERE user_id = ?").run(userId);
+  })();
+}
+
+/**
+ * The catalog, with this person's flags on it.
+ *
+ * Returns new objects rather than mutating the cached catalog rows — those are
+ * shared by every request, and writing a visitor's flags onto them would show
+ * one person's library to the next one.
+ */
+export function decorate(apps: StoreApp[], state: UserState): StoreApp[] {
+  return apps.map((app) => {
+    const have = state.installed.get(app.slug);
+    const newest = app.versions[0]?.version ?? app.version;
+    const updateTo =
+      have && newest && compareVersions(newest, have) < 0 ? newest : undefined;
+    return {
+      ...app,
+      saved: state.saved.has(app.slug),
+      installed: !!have,
+      // The version shown on an installed row is the one they have, not the
+      // one on the shelf — otherwise "1.4 → 1.4" is what an update reads as.
+      version: have ?? app.version,
+      updateTo,
+    };
+  });
+}
+
+/**
+ * The catalog as this request should see it.
+ *
+ * With no account, the flags stay as the catalog left them: off a real library
+ * that means all false, and off the placeholder catalog it means the hand-set
+ * flags survive, so the screens can still be judged on an empty install.
+ */
+export async function catalogFor(userId: number | null): Promise<StoreApp[]> {
+  const apps = await getApps();
+  if (userId === null) return apps;
+  return decorate(apps, readState(userId));
+}
+
+/* ------------------------------------------------------- the screens' lists */
+
+export async function savedApps(userId: number | null): Promise<StoreApp[]> {
+  if (userId === null) return placeholderSaved();
+  return (await catalogFor(userId)).filter((a) => a.saved);
+}
+
+export async function installedApps(userId: number | null): Promise<StoreApp[]> {
+  if (userId === null) return placeholderInstalled();
+  return (await catalogFor(userId)).filter((a) => a.installed);
+}
+
+export async function updatableApps(userId: number | null): Promise<StoreApp[]> {
+  if (userId === null) return placeholderUpdates();
+  return (await catalogFor(userId)).filter((a) => a.updateTo);
+}
+
+/**
+ * One app's flags, without decorating the whole catalog for a detail page.
+ */
+export function stateFor(
+  userId: number | null,
+  slug: string
+): { saved: boolean; installedVersion: string | null } {
+  if (userId === null) return { saved: false, installedVersion: null };
+  const conn = db();
+  const saved = conn
+    .prepare("SELECT 1 FROM user_saved WHERE user_id = ? AND slug = ?")
+    .get(userId, slug);
+  const row = conn
+    .prepare("SELECT version FROM user_installed WHERE user_id = ? AND slug = ?")
+    .get(userId, slug) as { version: string } | undefined;
+  return { saved: !!saved, installedVersion: row?.version ?? null };
+}
+
+/**
+ * Whether a slug is a real app. The routes take a slug from the browser and
+ * write it into a primary key; without this, a typo becomes a permanent row
+ * for an app that does not exist and every later read has to skip it.
+ */
+export async function isKnownSlug(slug: string): Promise<boolean> {
+  const { apps, placeholder } = await getCatalog();
+  return !placeholder && apps.some((a) => a.slug === slug);
+}
+
+export { EMPTY as EMPTY_STATE };

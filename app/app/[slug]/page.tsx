@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Bookmark, Download, Share2, Star } from "lucide-react";
+import { ArrowLeft, Download, Share2, Star } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Screen } from "@/components/screen";
 import CoverShelf from "@/components/cover-shelf";
@@ -11,7 +11,11 @@ import {
   SectionTitle,
   Thumb,
 } from "@/components/primitives";
+import SaveButton from "@/components/save-button";
+import InstalledControl from "@/components/installed-control";
 import { findApp, getApps } from "@/lib/store";
+import { currentUserId } from "@/lib/current-user";
+import { stateFor } from "@/lib/user-state";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +39,12 @@ export default async function AppDetailPage({
 
   const latest = app.versions[0];
   const older = app.versions.slice(1);
+
+  // The per-user controls are simply absent without a session rather than
+  // present and inert: this store is browsable by anyone, and a bookmark that
+  // silently keeps nothing is a worse answer than no bookmark.
+  const userId = await currentUserId();
+  const mine = stateFor(userId, app.slug);
 
   return (
     <Screen flush>
@@ -83,13 +93,21 @@ export default async function AppDetailPage({
             No download yet
           </Button>
         )}
-        <Button variant="secondary" aria-label="Save">
-          <Bookmark size={15} />
-        </Button>
+        {userId !== null && (
+          <SaveButton slug={app.slug} initialSaved={mine.saved} />
+        )}
         <Button variant="secondary" aria-label="Share">
           <Share2 size={15} />
         </Button>
       </div>
+
+      {userId !== null && (
+        <InstalledControl
+          slug={app.slug}
+          latest={latest?.version ?? null}
+          initialVersion={mine.installedVersion}
+        />
+      )}
 
       {/* The three facts a store page is expected to answer above the fold. */}
       <div className="px-[var(--pad)]">

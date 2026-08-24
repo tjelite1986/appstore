@@ -4,7 +4,8 @@ import ChipRow from "@/components/chip-row";
 import AppGrid from "@/components/app-grid";
 import { MUTED } from "@/components/primitives";
 import { cn } from "@/lib/utils";
-import { getApps } from "@/lib/store";
+import { currentUserId } from "@/lib/current-user";
+import { catalogFor } from "@/lib/user-state";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +21,7 @@ export default async function SearchPage({
 }) {
   const { q } = await searchParams;
   const query = (q ?? "").trim();
-  const apps = await getApps();
+  const apps = await catalogFor(await currentUserId());
 
   const needle = query.toLowerCase();
   const results = query

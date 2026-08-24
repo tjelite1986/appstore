@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import {
-  Button,
   CARD,
   MUTED,
   SectionTitle,
   Thumb,
+  buttonClass,
   metaLine,
 } from "@/components/primitives";
 import type { StoreApp } from "@/lib/store";
@@ -60,9 +60,16 @@ export default function AppRows({
                   : metaLine(app.rating, app.size)}
               </span>
             </Link>
-            <Button size="sm" variant="secondary">
+            {/* A link, not a button: everything this row could offer — the
+                file, the version list, the description — is on the app's own
+                page, and a button here would have to be a second way to do
+                the same thing. */}
+            <Link
+              href={`/app/${app.slug}`}
+              className={buttonClass("secondary", "sm")}
+            >
               {button}
-            </Button>
+            </Link>
           </div>
         ))}
       </div>

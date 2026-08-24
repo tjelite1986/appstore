@@ -21,7 +21,7 @@ const ACTIONS = [
   { href: "/settings", label: "Settings", Icon: Settings },
 ];
 
-export default function TopBar() {
+export default function TopBar({ email }: { email?: string }) {
   const pathname = usePathname();
 
   return (
@@ -62,17 +62,21 @@ export default function TopBar() {
               <Icon size={13} />
             </Link>
           ))}
-          {/* Account stand-in. There is no sign-in yet; the sketch asks for the
-              avatar slot, so the slot is here and the identity comes later. */}
+          {/* The sketch's avatar slot, now that there is an identity to put in
+              it. Signed out it stays a dash rather than someone's initial —
+              the store is browsable by anyone, and a letter there would be a
+              claim about who is looking. */}
           <span
-            aria-hidden
-            className="ml-0.5 flex h-[18px] w-[18px] items-center justify-center rounded-full text-[9px] font-semibold text-white/90"
+            title={email ?? "Not signed in"}
+            aria-label={email ? `Signed in as ${email}` : "Not signed in"}
+            className="ml-0.5 flex h-[18px] w-[18px] items-center justify-center rounded-full text-[9px] font-semibold uppercase text-white/90"
             style={{
-              backgroundImage:
-                "linear-gradient(135deg, hsl(266 45% 42% / 0.9), hsl(314 45% 24% / 0.9))",
+              backgroundImage: email
+                ? "linear-gradient(135deg, hsl(266 45% 42% / 0.9), hsl(314 45% 24% / 0.9))"
+                : "linear-gradient(135deg, hsl(266 10% 34% / 0.9), hsl(266 10% 22% / 0.9))",
             }}
           >
-            T
+            {email ? email[0] : "\u2013"}
           </span>
         </span>
       </div>

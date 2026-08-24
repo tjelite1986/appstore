@@ -29,7 +29,8 @@ Point `STORE_ROOT` at a directory to run against a different library.
 ├── meta/         <slug>.json
 ├── _import/      drop zone; _review/ holds what needs a decision,
 │                 _discarded/ what was rejected
-└── _state/       bookkeeping, not content: the Telegram cursor
+└── _state/       bookkeeping, not content: the Telegram cursor and
+                  store.db, the per-account saved/installed rows
 ```
 
 `lib/storage.ts` is the only place those paths are named; `lib/store.ts` reads
@@ -245,6 +246,54 @@ resolve the path and refuse anything that lands outside `STORE_ROOT`, symlinks
 included. The version in a download URL is looked up in the catalog rather than
 trusted from the query string.
 
+## What an account keeps
+
+Everything a person can *see* about an app is a file — that is the point of the
+library, and it is why the catalog is a directory tree rather than a database.
+What a person *did* is not like that. Saving an app and marking one installed
+are per-account facts with no natural file to live in, they are written far
+more often than the catalog changes, and two tabs can write them at the same
+moment. So there is one small SQLite database, `_state/store.db`, holding two
+tables keyed on the elite-v2 account id (`lib/db.ts`):
+
+| Table | Row |
+|---|---|
+| `user_saved` | this account keeps this slug |
+| `user_installed` | this account has *this version* of this slug |
+
+The version in `user_installed` is the whole reason that table is not a flag.
+An update is derived, never stored: the library knows the newest file, the row
+knows what the person took, and Updates lists the apps where the first is newer
+than the second (`lib/user-state.ts`). Nothing has to be recomputed when an APK
+lands — the next read simply answers differently.
+
+Nothing here can see the phone, so "installed" is a claim the person makes on
+the detail page rather than something discovered, and the UI says so. The
+routes still check it: a version that is not in the library is refused, or an
+app could sit on Updates forever claiming an update it already has.
+
+`user_id` is elite-v2's id with no foreign key to point it at — identity is
+resolved over HTTP, so this database cannot enforce it. An account deleted over
+there leaves rows nothing will ask for again; Settings offers to drop the ones
+belonging to the account that is looking.
+
+The per-user controls are absent for a signed-out visitor rather than present
+and inert. Browsing never needed a login and still does not; a bookmark that
+silently keeps nothing is a worse answer than no bookmark.
+
+| Route | Does |
+|---|---|
+| `GET /api/me` | who is here, plus their saved slugs and installed versions |
+| `DELETE /api/me` | forget everything about this account |
+| `POST /api/me/saved` | `{ slug, saved }` — the state to end in, not a toggle |
+| `POST /api/me/installed` | `{ slug, version }`, or `version: null` to forget |
+
+Writes take any signed-in account, not just an admin (`requireUser` in
+`lib/admin.ts`), and still require a same-origin `Origin` — `SameSite=lax` does
+not separate two hosts under one parent domain. The shared admin token is
+deliberately not accepted: it belongs to the timers, and a timer is not a
+person.
+
 ## Where it comes from
 
 The layout follows `code/docs/elitev3/app-store.json`, a Layout Studio export.
@@ -287,7 +336,7 @@ implies but does not draw:
 |---|---|
 | `/` Home | sketch, block for block |
 | `/apps`, `/games`, `/search`, `/updates` | sketch (only Games carried blocks) |
-| `/manage`, `/saved`, `/settings` | sketch (top bar, all three empty) |
+| `/manage`, `/saved`, `/settings` | sketch (top bar; Saved and the Account block are wired) |
 | `/app/[slug]` | not drawn; the sketch describes what tapping a cover opens |
 | `/category/[cat]` | not drawn; the Categories tiles have to land somewhere |
 
@@ -299,13 +348,21 @@ lives in the URL. Every other chip row is still a shape.
 
 ## Deploying
 
-Built on the host and bind-mounted into a bare `node:20-slim` — the app has no
-native modules, so nothing needs compiling in Docker. Compose lives in
+Built on the host and bind-mounted into a bare `node:20-slim`. Compose lives in
 `compose/appstore/`.
 
 ```
 npm run build && docker restart appstore
 ```
+
+**After any `npm install`, run `npm run rebuild:native` before building.**
+`better-sqlite3` is a compiled binary and npm builds it against *this* host —
+Ubuntu 24.04, glibc 2.39 — while the container is Debian bookworm on glibc
+2.36, so the freshly installed module loads here and fails to load there, and
+only there. `rebuild:native` compiles it inside a `node:20-slim` instead; the
+result needs nothing newer than glibc 2.34 and works in both places. There is
+no image build to catch this: the host's `node_modules` *is* what runs in the
+container.
 
 The library is mounted at `/store` (`STORE_ROOT=/store`), writable since the
 importer landed, and the container runs as uid 1000 so imported files keep the
@@ -323,15 +380,10 @@ running `scripts/cron.sh`, which reads `STORE_ADMIN_TOKEN` out of the compose
 
 ## What is deliberately missing
 
-Sign-in is answered; per-user *storage* is not. The store knows who is browsing
-when they are logged in to elite-v2, but keeps nothing about them:
+Sign-in and per-user storage are both answered. What is left:
 
-- **Per-user state.** Installed, Saved and Updates are facts about a person,
-  and there is nowhere to put them yet — the identity now exists, the table
-  does not.
-  Off a real library they are empty, and the screens say so. The Install,
-  Save and Share buttons are still shapes — Install on the detail page is not:
-  it is a link to the APK.
+- **Share.** Still a shape. Install on the detail page never was one — it is a
+  link to the APK.
 - **The external sources.** GitHub, F-Droid, Play, APKPure and the mod sites —
   metadata, auto-update and downloads — all still live in elite-v2. Manage's
   "Add an app" form and the source toggles are the layout for them.
