@@ -15,18 +15,14 @@
  * Play APKs are never fetched. Google does not serve them to anyone but the
  * Play client, and the store hosts what it was given, not what it scraped.
  */
-import { promises as fs } from "node:fs";
 import path from "node:path";
 import { STORE_DIRS, STORE_ROOT } from "@/lib/storage";
 import { uniqueSlug, writeMeta } from "@/lib/import";
 import { getApps, invalidateCatalog, type Category } from "@/lib/store";
+import { saveImage } from "@/lib/sources/net";
 
 const SEARCH_LIMIT = 12;
 const MAX_SCREENSHOTS = 8;
-const IMAGE_TIMEOUT_MS = 15_000;
-// A store listing image is a few hundred KB. Anything past this is not one,
-// and the library is not the place to find out what it is instead.
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
 export type PlayHit = {
   packageId: string;
@@ -116,48 +112,6 @@ export async function searchPlay(term: string): Promise<PlayHit[]> {
   }));
 }
 
-/**
- * One image into the library, or nothing.
- *
- * A listing that arrives without its screenshots is worth having; a create
- * that fails halfway because Google rate-limited the fourth thumbnail is not.
- * So every image failure is logged and swallowed — the meta file is the part
- * that has to land.
- */
-async function saveImage(url: string, destNoExt: string): Promise<boolean> {
-  try {
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(IMAGE_TIMEOUT_MS),
-      cache: "no-store",
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-    const type = (res.headers.get("content-type") ?? "").split(";")[0].trim();
-    const ext = {
-      "image/webp": ".webp",
-      "image/png": ".png",
-      "image/jpeg": ".jpg",
-      "image/gif": ".gif",
-      "image/avif": ".avif",
-    }[type];
-    // The extension is what the catalog indexes on, so a body of unknown type
-    // has nowhere to go — better absent than saved under a guessed name.
-    if (!ext) throw new Error(`unexpected content-type ${type || "(none)"}`);
-
-    const body = Buffer.from(await res.arrayBuffer());
-    if (body.byteLength > MAX_IMAGE_BYTES) {
-      throw new Error(`${body.byteLength} bytes is not a listing image`);
-    }
-
-    await fs.mkdir(path.dirname(destNoExt), { recursive: true });
-    await fs.writeFile(`${destNoExt}${ext}`, body);
-    return true;
-  } catch (err) {
-    console.error(`[play] could not save ${url}:`, err);
-    return false;
-  }
-}
-
 export type PlayAddResult = {
   slug: string;
   name: string;
@@ -219,12 +173,17 @@ export async function addFromPlay(packageId: string): Promise<PlayAddResult> {
 
   const icon =
     typeof app.icon === "string" &&
-    (await saveImage(app.icon, path.join(STORE_ROOT, STORE_DIRS.icons, slug)));
+    (await saveImage(
+      app.icon,
+      path.join(STORE_ROOT, STORE_DIRS.icons, slug),
+      "play"
+    ));
   const banner =
     typeof app.headerImage === "string" &&
     (await saveImage(
       app.headerImage,
-      path.join(STORE_ROOT, STORE_DIRS.banners, slug)
+      path.join(STORE_ROOT, STORE_DIRS.banners, slug),
+      "play"
     ));
 
   const shots: string[] = Array.isArray(app.screenshots)
@@ -240,7 +199,7 @@ export async function addFromPlay(packageId: string): Promise<PlayAddResult> {
       slug,
       String(i + 1).padStart(2, "0")
     );
-    if (await saveImage(url, dest)) saved++;
+    if (await saveImage(url, dest, "play")) saved++;
   }
 
   invalidateCatalog();

@@ -1,0 +1,13 @@
+[Unit]
+Description=Run appstore-sources every 6 hours
+
+[Timer]
+OnBootSec=20min
+OnUnitActiveSec=6h
+AccuracySec=5min
+# A missed window (the Pi was down, or a long run overran) is picked up on the
+# next boot rather than waiting out a full interval.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

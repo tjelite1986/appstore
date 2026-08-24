@@ -52,13 +52,31 @@ export type AppVersion = {
  * on the shelf from an upstream store; absent for an app that arrived as a
  * dropped APK.
  */
+export const SOURCE_KINDS = ["play", "github", "fdroid"] as const;
+
+export type SourceKind = (typeof SOURCE_KINDS)[number];
+
 export type AppSource = {
-  kind: "play";
+  kind: SourceKind;
   url: string;
   /** What upstream showed when the listing was added — not a claim about this library. */
   playVersion?: string;
+  /** GitHub: `owner/name`, and the tag the release carried when it was added. */
+  repo?: string;
+  releaseTag?: string;
+  /** F-Droid: the package id the repository is addressed by. */
+  package?: string;
   addedFrom?: string;
 };
+
+function readSource(raw: unknown): AppSource | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const source = raw as AppSource;
+  return typeof source.url === "string" &&
+    (SOURCE_KINDS as readonly string[]).includes(source.kind)
+    ? source
+    : undefined;
+}
 
 export type StoreApp = {
   slug: string;
@@ -367,7 +385,7 @@ async function readFromDisk(): Promise<StoreApp[]> {
         tagline: meta?.tagline?.trim() || "",
         description: meta?.description?.trim() || undefined,
         packageName: meta?.packageName,
-        source: meta?.source?.kind === "play" ? meta.source : undefined,
+        source: readSource(meta?.source),
         signingCert: meta?.signingCert,
         version: latest?.version ?? "—",
         size: latest?.size ?? "—",

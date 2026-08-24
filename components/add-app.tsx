@@ -3,20 +3,28 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Check, Plus, Search } from "lucide-react";
+import { Check, Download, Plus, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { buttonClass } from "@/components/primitives";
 import { adminHeaders, readAdminToken } from "@/lib/admin-token";
+import { detectSource } from "@/lib/sources/detect";
 import type { PlayAddResult, PlayHit } from "@/lib/sources/play";
+import type { GithubAddResult } from "@/lib/sources/github";
+import type { FdroidAddResult } from "@/lib/sources/fdroid";
 
 /**
- * "Add an app" — search Google Play, and put the listing on the shelf.
+ * "Add an app" — one address, and the store works out who it belongs to.
  *
- * What this creates has no APK in it, and that is the point. An entry carries
- * the package id, and the importer matches a dropped file on exactly that, so
- * describing the app first is what stops the next download parking as "no
- * matching app". The binary arrives from wherever it comes from; Play only
- * supplies the words and the pictures.
+ * The three sources answer different questions. Play supplies words and
+ * pictures and never a binary, so what it creates is a shelf with the label
+ * already printed: the entry carries the package id, the importer matches a
+ * dropped file on exactly that, and the next download attaches itself instead
+ * of parking as "no matching app". GitHub and F-Droid hand out their APKs, so
+ * an app added from those arrives with the newest release already on it.
+ *
+ * Which one is asked comes from the address itself — `detectSource` — because
+ * a source selector is one more thing to get wrong about an address that
+ * already says where it lives.
  *
  * Its own file because "use client" is file-wide — see `thumb-image.tsx`.
  */
@@ -26,6 +34,21 @@ const CARD_CLS =
 const MUTED_CLS = "text-[color:var(--muted)]";
 const INPUT_CLS =
   "w-full rounded-full border border-[color:var(--border)] bg-[var(--card-2)] px-4 py-2 text-sm outline-none focus:border-[color:var(--accent)]";
+
+type SourceLanding = {
+  kind: "github" | "fdroid";
+  slug: string;
+  name: string;
+  version: string;
+  /** What the importer made of the file it was handed. */
+  status: string;
+};
+
+const SOURCE_LABEL: Record<"github" | "fdroid" | "play", string> = {
+  github: "GitHub",
+  fdroid: "F-Droid",
+  play: "Play",
+};
 
 /** Play icons are on Google's CDN and the CSP is `img-src 'self'`. */
 function iconSrc(url: string): string {
@@ -39,7 +62,10 @@ export default function AddApp() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [added, setAdded] = useState<Record<string, PlayAddResult>>({});
+  const [landed, setLanded] = useState<SourceLanding | null>(null);
   const router = useRouter();
+
+  const detected = detectSource(term);
 
   useEffect(() => setToken(readAdminToken()), []);
 
@@ -65,6 +91,44 @@ export default function AddApp() {
     },
     [token]
   );
+
+  /**
+   * Add from a source that serves binaries.
+   *
+   * The request holds the line for as long as the download takes — a release
+   * is hundreds of megabytes and the answer worth having is "it landed, and
+   * this is the version", not "started".
+   */
+  async function addFromSource(kind: "github" | "fdroid", ref: string) {
+    setBusy(kind);
+    setError(null);
+    setLanded(null);
+    try {
+      const data: GithubAddResult | FdroidAddResult =
+        kind === "github"
+          ? await call("/api/sources/github", {
+              method: "POST",
+              body: JSON.stringify({ ref }),
+            })
+          : await call("/api/sources/fdroid", {
+              method: "POST",
+              body: JSON.stringify({ packageId: ref }),
+            });
+      setLanded({
+        kind,
+        slug: data.slug,
+        name: data.name,
+        version: data.installed.version,
+        status: data.installed.status,
+      });
+      setHits(null);
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function search() {
     const q = term.trim();
@@ -107,30 +171,69 @@ export default function AddApp() {
         className="flex gap-2"
         onSubmit={(e) => {
           e.preventDefault();
-          void search();
+          if (detected.kind === "play") void search();
+          else void addFromSource(detected.kind, detected.ref);
         }}
       >
         <input
           className={INPUT_CLS}
           value={term}
           onChange={(e) => setTerm(e.target.value)}
-          placeholder="Search Google Play, or paste a package id"
+          placeholder="Search Play, or paste a GitHub repo or F-Droid page"
           autoComplete="off"
         />
         <button
           type="submit"
           className={cn(buttonClass("primary", "sm"), "shrink-0")}
-          disabled={busy === "search" || !term.trim()}
+          disabled={busy !== null || !term.trim()}
         >
-          <Search size={13} /> {busy === "search" ? "Searching…" : "Search"}
+          {detected.kind === "play" ? (
+            <>
+              <Search size={13} /> {busy === "search" ? "Searching…" : "Search"}
+            </>
+          ) : (
+            <>
+              <Download size={13} />
+              {busy === detected.kind
+                ? "Fetching…"
+                : `Add from ${SOURCE_LABEL[detected.kind]}`}
+            </>
+          )}
         </button>
+        {/* A bare package id belongs to either store and the address does not
+            say which, so both ways stay one click away. */}
+        {detected.alternative === "fdroid" && (
+          <button
+            type="button"
+            className={cn(buttonClass("secondary", "sm"), "shrink-0")}
+            disabled={busy !== null || !term.trim()}
+            onClick={() => void addFromSource("fdroid", detected.ref)}
+          >
+            <Download size={13} />
+            {busy === "fdroid" ? "Fetching…" : "F-Droid"}
+          </button>
+        )}
       </form>
 
       <p className={cn("text-xs", MUTED_CLS)}>
-        Play supplies the name, description and pictures — never the APK. The
-        entry carries the package id, so the next matching drop attaches itself
-        instead of waiting in the review queue.
+        {detected.kind === "play"
+          ? "Play supplies the name, description and pictures — never the APK. The entry carries the package id, so the next matching drop attaches itself instead of waiting in the review queue."
+          : `${SOURCE_LABEL[detected.kind]} serves the binary too: the newest release is downloaded, checked against the app's pinned signer, and put on the shelf as it is added. Large releases take a while — this waits for the file.`}
       </p>
+
+      {landed && (
+        <p className={cn("text-xs", MUTED_CLS)}>
+          <strong className="font-normal text-[color:var(--fg)]">
+            {landed.name}
+          </strong>{" "}
+          added from {SOURCE_LABEL[landed.kind]} as{" "}
+          <Link href={`/app/${landed.slug}`} className="underline">
+            {landed.slug}
+          </Link>{" "}
+          — version {landed.version} is on the shelf
+          {landed.status === "ok" ? "" : ` (${landed.status})`}.
+        </p>
+      )}
 
       {error && (
         <p className="text-xs text-[color:var(--danger,#f87171)]">{error}</p>

@@ -1,0 +1,110 @@
+/**
+ * Putting a binary a source found onto the shelf it belongs to.
+ *
+ * GitHub and F-Droid differ in how they are addressed and what they can say
+ * about an app, but the moment an APK is in hand they are the same: the file
+ * has to be checked against what it claims to be, named from what is actually
+ * inside it, and handed to the importer — which owns the signer pin and the
+ * layout under `apks/`. Downloading straight into `apks/` would be a second
+ * implementation of those rules.
+ *
+ * The staging folder is a subdirectory of the drop zone on purpose: it is on
+ * the same filesystem, so the importer's move is a rename, and the scan only
+ * reads files at the top level, so a download in progress is never picked up
+ * as a drop.
+ */
+import { promises as fs } from "node:fs";
+import path from "node:path";
+import { STORE_DIRS, STORE_ROOT } from "@/lib/storage";
+import { attachApk, isPlaceholderVersion, parseApkFilename } from "@/lib/import";
+import { readApkInfo } from "@/lib/apk-manifest";
+import { downloadFile, looksLikeApk } from "@/lib/sources/net";
+
+const STAGING_DIR = path.join(STORE_ROOT, STORE_DIRS.import, "_sources");
+
+export type InstalledVersion = {
+  version: string;
+  /** What the importer made of the file — "ok", "unsigned", … */
+  status: string;
+  /** True when this is now the version the store serves. */
+  promoted: boolean;
+  bytes: number;
+  packageName: string | null;
+};
+
+/**
+ * Download one APK and attach it to `slug`.
+ *
+ * The version comes from the manifest inside the file rather than from the
+ * release tag: a tag is what the author called the release, and the two
+ * disagree often enough that trusting the tag would file an app under a
+ * version the phone will never report.
+ */
+export async function installFromUrl(
+  slug: string,
+  url: string,
+  opts: { fileName: string; tag: string; fallbackVersion?: string | null }
+): Promise<InstalledVersion> {
+  const staged = path.join(STAGING_DIR, slug, path.basename(opts.fileName));
+  const bytes = await downloadFile(url, staged, { tag: opts.tag });
+
+  try {
+    if (!(await looksLikeApk(staged))) {
+      throw new Error(
+        "that download is not an APK — the source served something else"
+      );
+    }
+
+    const manifest = await readApkInfo(staged);
+    const parsed = parseApkFilename(path.basename(opts.fileName));
+    const version =
+      (isPlaceholderVersion(manifest.versionName)
+        ? parsed.version ?? opts.fallbackVersion ?? null
+        : null) ||
+      manifest.versionName ||
+      opts.fallbackVersion ||
+      parsed.version ||
+      (manifest.versionCode ? `vc${manifest.versionCode}` : null) ||
+      "unknown";
+
+    const attached = await attachApk(slug, staged, {
+      version,
+      packageName: manifest.packageName,
+      fileName: path.basename(opts.fileName),
+    });
+    if (!attached.ok) {
+      // The importer refuses a file signed by a key this app has not seen
+      // before. That is the check that stops a repackaged build from taking
+      // over an app someone already installed, so a source may not talk its
+      // way past it — the review queue is where a person decides.
+      throw new Error(
+        attached.status === "signer_mismatch"
+          ? "the release is signed with a different key than the version already here — attach it from the review queue if that is expected"
+          : `the importer refused the file (${attached.status})`
+      );
+    }
+
+    return {
+      version: attached.version ?? version,
+      status: attached.status,
+      promoted: Boolean(attached.promoted),
+      bytes,
+      packageName: manifest.packageName,
+    };
+  } finally {
+    // On success the importer moved the file out; this clears the rest.
+    await fs.rm(path.join(STAGING_DIR, slug), { recursive: true, force: true });
+  }
+}
+
+/** True when the library already holds this version of the app. */
+export function alreadyHeld(
+  versions: { version: string }[],
+  version: string | null
+): boolean {
+  if (!version) return false;
+  const want = version.replace(/^v/i, "").trim().toLowerCase();
+  return versions.some(
+    (v) => v.version.replace(/^v/i, "").trim().toLowerCase() === want
+  );
+}

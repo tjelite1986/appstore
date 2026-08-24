@@ -1,0 +1,18 @@
+# Ask GitHub and F-Droid what they have, and fetch every release the library
+# does not hold yet. Apps added from Play are skipped: Play serves APKs to the
+# Play client and to nobody else, so there is never anything to fetch.
+[Unit]
+Description=App Store source check
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=appstore
+Group=appstore
+# Every new release, one after another, over a home line. The store runs one
+# check at a time, so an overrun cannot pile a second run on top of this.
+TimeoutStartSec=90min
+ExecStart=/opt/appstore/scripts/cron.sh sources
+Nice=10
+IOSchedulingClass=idle

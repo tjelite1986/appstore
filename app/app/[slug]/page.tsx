@@ -19,6 +19,12 @@ import { stateFor } from "@/lib/user-state";
 
 export const dynamic = "force-dynamic";
 
+const SOURCE_NAME: Record<string, string> = {
+  play: "Google Play",
+  github: "GitHub",
+  fdroid: "F-Droid",
+};
+
 /**
  * App detail. Not one of the sketch's screens — it only describes what tapping
  * a cover opens (cover, title, one action, room to describe the thing) — so
@@ -184,6 +190,23 @@ export default async function AppDetailPage({
         {app.packageName && (
           <p className={cn("mt-3 break-all font-mono text-[11px]", MUTED)}>
             {app.packageName}
+          </p>
+        )}
+        {/* Where the words, the pictures and — for GitHub and F-Droid — the
+            file itself came from. An archive that cannot say where a binary
+            came from is asking to be trusted for no reason. */}
+        {app.source && (
+          <p className={cn("mt-1 text-[11px]", MUTED)}>
+            From{" "}
+            <a
+              href={app.source.url}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="underline"
+            >
+              {SOURCE_NAME[app.source.kind]}
+            </a>
+            {app.source.repo ? ` · ${app.source.repo}` : ""}
           </p>
         )}
       </section>

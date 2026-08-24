@@ -1,8 +1,8 @@
 import { Screen, ScreenTitle } from "@/components/screen";
 import AppRows from "@/components/app-rows";
-import RowCard from "@/components/rows";
 import { SectionTitle } from "@/components/primitives";
 import AddApp from "@/components/add-app";
+import SourcesPanel from "@/components/sources-panel";
 import ImportPanel from "@/components/import-panel";
 import { STORE_DIRS, STORE_HOST_ROOT } from "@/lib/storage";
 import { getCatalog, pendingImports } from "@/lib/store";
@@ -13,8 +13,9 @@ export const dynamic = "force-dynamic";
  * Manage — the admin surface, reached from the top bar.
  *
  * The import folder is real: `ImportPanel` scans it and resolves what the scan
- * would not decide on its own, and `AddApp` searches Google Play for something
- * to attach a drop to. The source toggles below are still layout.
+ * would not decide on its own, `AddApp` takes an address and works out which
+ * source it belongs to, and `SourcesPanel` asks those sources what they have
+ * now. Nothing on this screen is layout any more.
  */
 export default async function ManagePage() {
   const [{ apps, placeholder }, waiting] = await Promise.all([
@@ -53,14 +54,16 @@ export default async function ManagePage() {
         />
       </section>
 
-      <RowCard
-        title="Sources"
-        rows={[
-          { label: "GitHub releases", value: "Not connected", toggle: true, on: false },
-          { label: "F-Droid", value: "Not connected", toggle: true, on: false },
-          { label: "Play Store metadata", value: "Not connected", toggle: true, on: false },
-        ]}
-      />
+      <section className="px-[var(--pad)]">
+        <SectionTitle title="Sources" />
+        <SourcesPanel
+          counts={{
+            github: apps.filter((a) => a.source?.kind === "github").length,
+            fdroid: apps.filter((a) => a.source?.kind === "fdroid").length,
+            play: apps.filter((a) => a.source?.kind === "play").length,
+          }}
+        />
+      </section>
 
       {apps.length > 0 && (
         <AppRows title="Catalog" apps={apps.slice(0, 6)} button="Edit" />
