@@ -6,7 +6,6 @@ import {
   Info,
   Palette,
   PackageCheck,
-  ShieldAlert,
   UserRound,
   Wifi,
 } from "lucide-react";
@@ -66,8 +65,6 @@ export default async function SettingsPage() {
         </div>
       )}
 
-      <AdultsToggle on={adultsAllowed(user?.id ?? null)} signedIn={!!user} />
-
       <RowCard
         title="Appearance"
         rows={[
@@ -86,12 +83,7 @@ export default async function SettingsPage() {
         ]}
       />
 
-      <RowCard
-        title="Content"
-        rows={[
-          { label: "Show 18+ apps", Icon: ShieldAlert, toggle: true, on: false },
-        ]}
-      />
+      <AdultsToggle on={adultsAllowed(user?.id ?? null)} signedIn={!!user} />
 
       <RowCard
         title="Storage"

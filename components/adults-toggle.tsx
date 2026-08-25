@@ -5,16 +5,21 @@
  *
  * Off, the Adults category is not merely hidden from the tiles: the apps are
  * absent from every list, their pages are 404 and their APKs will not download.
- * So this is not a display preference, and the copy does not pretend it is.
+ * So this is not a display preference — but it is answered where every other
+ * preference is, as one switch in a settings row, because a card of its own
+ * reads as a warning and invites the click it is trying to slow down.
  *
  * Turning it on asks first. Turning it off does not — a gate should never be
  * harder to close than to open.
+ *
+ * The row is hand-rolled rather than a `RowCard`: switching it needs state, and
+ * `rows.tsx` is imported by server components that must stay server-rendered.
  */
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ShieldCheck, ShieldOff } from "lucide-react";
+import { ShieldAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { buttonClass, CARD, MUTED, SectionTitle } from "@/components/primitives";
+import { CARD, MUTED, SectionTitle } from "@/components/primitives";
 
 export default function AdultsToggle({
   on,
@@ -56,43 +61,44 @@ export default function AdultsToggle({
   return (
     <section className="px-[var(--pad)]">
       <SectionTitle title="Content" />
-      <div className={cn(CARD, "space-y-2 p-3")}>
-        <div className="flex items-center gap-2">
-          {allowed ? (
-            <ShieldOff size={17} className="shrink-0 text-[color:var(--muted-2)]" />
-          ) : (
-            <ShieldCheck size={17} className="shrink-0 text-[color:var(--muted-2)]" />
+      <div className={cn(CARD, "overflow-hidden")}>
+        <button
+          type="button"
+          onClick={() => void set(!allowed)}
+          disabled={!signedIn || pending}
+          aria-pressed={allowed}
+          className="flex w-full items-center gap-3 px-3.5 py-3 text-left disabled:opacity-60"
+        >
+          <ShieldAlert
+            size={17}
+            className="shrink-0 text-[color:var(--muted-2)]"
+          />
+          <span className="min-w-0 flex-1 truncate text-sm">Show 18+ apps</span>
+          {signedIn ? null : (
+            <span className={cn("shrink-0 truncate text-xs", MUTED)}>
+              Sign in
+            </span>
           )}
-          <span className="min-w-0 flex-1 text-sm">Adult apps</span>
-          <span className={cn("shrink-0 text-xs", MUTED)}>
-            {allowed ? "Shown" : "Hidden"}
-          </span>
-        </div>
-        <p className={cn("text-[11px] leading-relaxed", MUTED)}>
-          {signedIn
-            ? "While this is off, apps filed under Adults are left out of every list, their pages are not found and their downloads are refused."
-            : "Sign in to answer this. A browser nobody is signed in on never sees apps filed under Adults."}
-        </p>
-        {signedIn && (
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => void set(!allowed)}
-              disabled={pending}
-              className={cn(
-                buttonClass(allowed ? "secondary" : "primary", "sm"),
-                "disabled:opacity-60"
-              )}
-            >
-              {allowed ? "Hide adult apps" : "I am 18 or older"}
-            </button>
-            {failed && (
-              <span className="text-xs text-[color:var(--danger,#f87171)]">
-                Could not save that.
-              </span>
+          <span
+            className={cn(
+              "flex h-5 w-9 shrink-0 items-center rounded-full px-0.5",
+              allowed ? "bg-[var(--accent)]" : "bg-[var(--card-2)]"
             )}
-          </div>
-        )}
+          >
+            <span
+              className={cn(
+                "h-4 w-4 rounded-full bg-white transition",
+                allowed && "translate-x-4"
+              )}
+            />
+          </span>
+        </button>
       </div>
+      {failed && (
+        <p className="mt-2 text-xs text-[color:var(--danger,#f87171)]">
+          Could not save that.
+        </p>
+      )}
     </section>
   );
 }
