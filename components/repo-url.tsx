@@ -17,7 +17,7 @@
  * state, and `rows.tsx` is imported by server components.
  */
 import { useEffect, useState } from "react";
-import { Copy, Check, RefreshCw, Smartphone } from "lucide-react";
+import { Copy, Check, RefreshCw, Smartphone, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CARD, MUTED, SectionTitle } from "@/components/primitives";
 
@@ -109,6 +109,19 @@ export default function RepoUrl({
           )}
         </button>
 
+        <a
+          href={`${current}/obtainium.json`}
+          className={cn(ROW, "border-t border-[color:var(--border)]")}
+        >
+          <Download size={17} className="shrink-0 text-[color:var(--muted-2)]" />
+          <span className="min-w-0 flex-1 truncate text-sm">
+            Import file for Obtainium
+          </span>
+          <span className={cn("shrink-0 truncate text-xs", MUTED)}>
+            Every app at once
+          </span>
+        </a>
+
         {signedIn && (
           <button
             type="button"
@@ -134,8 +147,8 @@ export default function RepoUrl({
       </div>
       <p className={cn("mt-2 text-xs", MUTED)}>
         {signedIn
-          ? "Add it to Obtainium as a third-party F-Droid repository. It carries your account, so treat it like a password."
-          : "Add it to Obtainium as a third-party F-Droid repository. Sign in for a URL of your own — this one shows what a signed-out visitor sees."}
+          ? "Add the URL to Obtainium as a third-party F-Droid repository, one app at a time — or take the import file to get all of them in one go. Both carry your account, so treat them like a password."
+          : "Add the URL to Obtainium as a third-party F-Droid repository. Sign in for one of your own — this is what a signed-out visitor sees."}
       </p>
       {failed && (
         <p className="mt-2 text-xs text-[color:var(--danger,#f87171)]">

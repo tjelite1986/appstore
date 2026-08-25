@@ -148,3 +148,61 @@ ${applications}
 </fdroid>
 `;
 }
+
+/* --------------------------------------------------- the Obtainium import */
+
+/**
+ * The shelf as an Obtainium export file.
+ *
+ * Adding apps one at a time is fine for one app and absurd for thirty: the
+ * client's search dialog is hardcoded to `onlyOneSelectionAllowed`, so a
+ * repository cannot hand it a batch no matter what the index says. Its
+ * import/export file can, and it is the only route in that names the source
+ * explicitly — which this one has to, because Obtainium's F-Droid repo source
+ * sets `neverAutoSelect`: hand it a bare URL list and it picks the generic
+ * HTML scraper instead, which would try to read `index.xml` as a web page.
+ * `overrideSource` is what skips that guess.
+ *
+ * Written to the oldest shape the importer still accepts — a bare array of
+ * apps, no `schemaVersion` — so it does not claim a schema version whose
+ * migrations this file has never seen. Two fields are JSON *inside* JSON
+ * (`apkUrls`, `additionalSettings`); that is the format, not a mistake.
+ */
+export function buildObtainiumImport(
+  apps: StoreApp[],
+  repoUrl: string
+): string {
+  const entries = apps
+    .filter((app) => app.packageName && app.versions.length > 0)
+    .map((app) => {
+      const latest = app.versions[0];
+      const id = app.packageName!;
+      return {
+        id,
+        // The `appId` query parameter is the one Obtainium's F-Droid source
+        // keeps; everything else it strips before it looks the app up.
+        url: `${repoUrl}?appId=${encodeURIComponent(id)}`,
+        author: app.developer,
+        name: app.name,
+        // What is on the phone is the phone's business — the importer fills
+        // this in from the installed package before it saves anything.
+        installedVersion: null,
+        latestVersion: latest.version,
+        apkUrls: JSON.stringify([
+          [apkFileName(app, latest), `${repoUrl}/${apkFileName(app, latest)}`],
+        ]),
+        preferredApkIndex: 0,
+        additionalSettings: JSON.stringify({
+          appIdOrName: id,
+          trySelectingSuggestedVersionCode: true,
+        }),
+        lastUpdateCheck: null,
+        pinned: false,
+        categories: ["App Store"],
+        overrideSource: "FDroidRepo",
+        allowIdChange: false,
+      };
+    });
+
+  return JSON.stringify(entries, null, 2);
+}

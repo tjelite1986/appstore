@@ -6,8 +6,10 @@
  *
  *     /fdroid/repo/index.xml            the shelf a signed-out browser sees
  *     /fdroid/repo/<name>.apk           a file from it
+ *     /fdroid/repo/obtainium.json       the same shelf, as an import file
  *     /fdroid/t/<token>/repo/index.xml  the shelf that account sees
  *     /fdroid/t/<token>/repo/<name>.apk
+ *     /fdroid/t/<token>/repo/obtainium.json
  *
  * Obtainium is given the directory — `…/fdroid/repo` — and appends
  * `index.xml` itself; it then builds every APK URL by replacing that last
@@ -22,7 +24,11 @@
  */
 import { promises as fs } from "node:fs";
 import { NextResponse } from "next/server";
-import { buildIndexXml, findByApkFileName } from "@/lib/fdroid-index";
+import {
+  buildIndexXml,
+  buildObtainiumImport,
+  findByApkFileName,
+} from "@/lib/fdroid-index";
 import { userForRepoToken } from "@/lib/repo-token";
 import { contentTypeFor, fileResponse, resolveInStore } from "@/lib/serve";
 import { STORE_DIRS } from "@/lib/storage";
@@ -32,6 +38,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const INDEX_FILE = "index.xml";
+const IMPORT_FILE = "obtainium.json";
 
 function notFound(): NextResponse {
   return new NextResponse("Not found", { status: 404 });
@@ -88,11 +95,26 @@ export async function GET(
 
   const apps = await catalogFor(target.userId);
   const url = new URL(req.url);
+  const dir = url.pathname.slice(0, url.pathname.lastIndexOf("/"));
+  const repoUrl = `${publicOrigin(req, url)}${dir}`;
+
+  // Every app at once, which the index cannot do — see buildObtainiumImport.
+  if (target.file === IMPORT_FILE) {
+    return new NextResponse(buildObtainiumImport(apps, repoUrl), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        // A phone browser renders JSON instead of saving it, and the file has
+        // to reach a file picker to be imported.
+        "Content-Disposition": 'attachment; filename="obtainium.json"',
+        "Cache-Control": "no-store",
+      },
+    });
+  }
 
   if (target.file === INDEX_FILE) {
-    const dir = url.pathname.slice(0, url.pathname.lastIndexOf("/"));
     const xml = buildIndexXml(apps, {
-      repoUrl: `${publicOrigin(req, url)}${dir}`,
+      repoUrl,
       repoName: "App Store",
       description:
         "A self-hosted shelf. Add this URL to Obtainium as a third-party F-Droid repository.",
