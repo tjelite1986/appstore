@@ -159,6 +159,8 @@ export type RepoFile = {
   path: string;
   /** Where the bytes are, for a file. A directory has none. */
   downloadUrl: string | null;
+  /** As the listing reports it. A directory is 0; so is anything unknown. */
+  size: number;
 };
 
 /**
@@ -184,7 +186,121 @@ export async function repoContents(
     type: f?.type === "dir" ? "dir" : "file",
     path: String(f?.path ?? ""),
     downloadUrl: f?.download_url ? String(f.download_url) : null,
+    size: Number(f?.size ?? 0),
   }));
+}
+
+/**
+ * Past this a file is the thing itself, not a pointer at it.
+ *
+ * A symlink's blob is the target path — tens of bytes. Nothing that is
+ * genuinely a screenshot or a logo lands under half a kilobyte, so the size in
+ * the listing is what decides whether it is worth a second look.
+ */
+const SYMLINK_MAX_BYTES = 512;
+
+/** The first bytes of the image formats this store accepts. */
+const IMAGE_MAGIC: Buffer[] = [
+  Buffer.from([0x89, 0x50, 0x4e, 0x47]), // PNG
+  Buffer.from([0xff, 0xd8, 0xff]), // JPEG
+  Buffer.from("GIF8", "latin1"),
+  Buffer.from("RIFF", "latin1"), // WebP
+];
+
+/**
+ * Rewrite a raw.githubusercontent URL to point at another path in the same
+ * repository, at the same commit-ish.
+ *
+ * The URL already carries owner, repo and ref, so the branch does not have to
+ * be looked up a second time — only the path after those three segments
+ * changes.
+ */
+function rawSibling(downloadUrl: string, target: string): string | null {
+  try {
+    const url = new URL(downloadUrl);
+    const parts = url.pathname.replace(/^\//, "").split("/");
+    if (parts.length < 4) return null;
+    url.pathname = `/${parts.slice(0, 3).join("/")}/${target}`;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+/** Where a relative link inside `from` lands, or null if it leaves the repo. */
+function resolveRepoPath(from: string, link: string): string | null {
+  if (link.startsWith("/")) return null;
+  const dir = from.split("/").slice(0, -1);
+  const out: string[] = [...dir];
+  for (const part of link.split("/")) {
+    if (part === "" || part === ".") continue;
+    if (part === "..") {
+      if (out.length === 0) return null;
+      out.pop();
+      continue;
+    }
+    out.push(part);
+  }
+  return out.length ? out.join("/") : null;
+}
+
+/**
+ * The file a listing entry really is, following a symlink if that is what it
+ * turns out to be.
+ *
+ * A directory listing reports a symlink as an ordinary `file` — the `symlink`
+ * type only appears when the path is asked for on its own — and its
+ * `download_url` serves the *pointer*, not what it points at. So a repository
+ * that keeps its real artwork in `assets/` and symlinks it into
+ * `fastlane/metadata/` (Obtainium does) hands out a candidate that fetches
+ * forty-one bytes of text where a logo should be, and the only hint in the
+ * listing is the size.
+ *
+ * Returns the entry unchanged when it is a real file, a rewritten one when it
+ * was a link this could follow, and null when it is a link that goes nowhere
+ * usable — a caller offering candidates should drop that rather than show a
+ * picture that will not load.
+ */
+export async function resolveRepoFile(
+  file: RepoFile
+): Promise<RepoFile | null> {
+  if (file.type !== "file" || !file.downloadUrl) return file;
+  if (file.size === 0 || file.size > SYMLINK_MAX_BYTES) return file;
+
+  let body: Buffer;
+  try {
+    const res = await fetch(file.downloadUrl, {
+      headers: { "user-agent": USER_AGENT },
+      signal: AbortSignal.timeout(API_TIMEOUT_MS),
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    body = Buffer.from(await res.arrayBuffer());
+  } catch (err) {
+    console.error(`[github] could not read ${file.path}:`, err);
+    return null;
+  }
+
+  // A very small file that is still an image is simply a very small image.
+  if (IMAGE_MAGIC.some((magic) => body.subarray(0, magic.length).equals(magic))) {
+    return file;
+  }
+
+  const link = body.toString("utf8").trim();
+  if (!link || link.length > SYMLINK_MAX_BYTES || /[\0\n\r]/.test(link)) return null;
+  const target = resolveRepoPath(file.path, link);
+  if (!target) return null;
+  const url = rawSibling(file.downloadUrl, target);
+  if (!url) return null;
+
+  return {
+    ...file,
+    path: target,
+    name: target.split("/").pop() ?? file.name,
+    downloadUrl: url,
+    // The listing's size was the pointer's; the target's is not known here.
+    size: 0,
+  };
 }
 
 /** The repository itself — its description, its owner, its avatar. */

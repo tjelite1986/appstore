@@ -27,6 +27,7 @@ import {
   parseRepoRef,
   repoContents,
   repoInfo,
+  resolveRepoFile,
   type RepoFile,
   type RepoRef,
 } from "@/lib/sources/github";
@@ -121,25 +122,25 @@ async function fastlaneArtwork(
   const out: ArtworkCandidate[] = [];
   const where = `${locale.name}/images`;
 
+  // The label keeps the name the listing used even when the bytes turn out to
+  // live somewhere else — `en-US/images/icon.png` is where a person would look
+  // for it, and that is the point of the label.
+  const push = async (
+    file: RepoFile | null,
+    kind: ImageKind,
+    label: string
+  ): Promise<void> => {
+    if (!file?.downloadUrl) return;
+    const real = await resolveRepoFile(file);
+    if (!real?.downloadUrl) return;
+    out.push({ kind, url: real.downloadUrl, from: "fastlane", label });
+  };
+
   const icon = named(images, "icon");
-  if (icon?.downloadUrl) {
-    out.push({
-      kind: "icon",
-      url: icon.downloadUrl,
-      from: "fastlane",
-      label: `${where}/${icon.name}`,
-    });
-  }
+  await push(icon, "icon", `${where}/${icon?.name ?? "icon"}`);
 
   const banner = named(images, "featuregraphic");
-  if (banner?.downloadUrl) {
-    out.push({
-      kind: "banner",
-      url: banner.downloadUrl,
-      from: "fastlane",
-      label: `${where}/${banner.name}`,
-    });
-  }
+  await push(banner, "banner", `${where}/${banner?.name ?? "featureGraphic"}`);
 
   const shots = images.find(
     (f) => f.type === "dir" && f.name.toLowerCase() === "phonescreenshots"
@@ -153,12 +154,7 @@ async function fastlaneArtwork(
       .sort((a, b) => a.name.localeCompare(b.name, "en", { numeric: true }))
       .slice(0, MAX_SCREENSHOTS);
     for (const file of sorted) {
-      out.push({
-        kind: "screenshot",
-        url: file.downloadUrl!,
-        from: "fastlane",
-        label: `${where}/${shots.name}/${file.name}`,
-      });
+      await push(file, "screenshot", `${where}/${shots.name}/${file.name}`);
     }
   }
 
