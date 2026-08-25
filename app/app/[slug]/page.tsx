@@ -51,6 +51,12 @@ export default async function AppDetailPage({
   // file is coming, and for these it is not.
   const shelfOnly = !latest && app.source?.kind === "play" ? app.source : null;
 
+  // A linked app has no file here either, but unlike a Play listing there is a
+  // real download at the other end — the exact asset this store read the
+  // version and the signer out of. So the button installs, it just does not
+  // come from us.
+  const linked = !latest && app.source?.assetUrl ? app.source : null;
+
   // The per-user controls are simply absent without a session rather than
   // present and inert: this store is browsable by anyone, and a bookmark that
   // silently keeps nothing is a worse answer than no bookmark.
@@ -99,6 +105,15 @@ export default async function AppDetailPage({
               <Download size={15} /> Install {latest.version}
             </Button>
           </a>
+        ) : linked ? (
+          // Straight to the release rather than through /api/download: the
+          // file is not here to serve, and GitHub's own CDN resumes better
+          // than a proxy that would only add a hop.
+          <a href={linked.assetUrl} className="flex-1">
+            <Button className="w-full justify-center">
+              <Download size={15} /> Install {app.version}
+            </Button>
+          </a>
         ) : shelfOnly ? (
           <a
             href={shelfOnly.url}
@@ -123,12 +138,12 @@ export default async function AppDetailPage({
         </Button>
       </div>
 
-      {/* Nothing to install from here means nothing to mark as installed — the
-          card would offer no button at all. */}
-      {userId !== null && latest && (
+      {/* Nothing to install — no file here and no link out — means nothing to
+          mark as installed, and the card would offer no button at all. */}
+      {userId !== null && (latest || linked) && (
         <InstalledControl
           slug={app.slug}
-          latest={latest?.version ?? null}
+          latest={latest?.version ?? app.version}
           initialVersion={mine.installedVersion}
         />
       )}

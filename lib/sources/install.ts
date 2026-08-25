@@ -18,6 +18,7 @@ import path from "node:path";
 import { STORE_DIRS, STORE_ROOT } from "@/lib/storage";
 import { attachApk, isPlaceholderVersion, parseApkFilename } from "@/lib/import";
 import { readApkInfo } from "@/lib/apk-manifest";
+import { verifyApk } from "@/lib/apk-verify";
 import { downloadFile, looksLikeApk } from "@/lib/sources/net";
 
 const STAGING_DIR = path.join(STORE_ROOT, STORE_DIRS.import, "_sources");
@@ -93,6 +94,83 @@ export async function installFromUrl(
     };
   } finally {
     // On success the importer moved the file out; this clears the rest.
+    await fs.rm(path.join(STAGING_DIR, slug), { recursive: true, force: true });
+  }
+}
+
+export type LinkedVersion = {
+  /** What the manifest inside the release said, not the tag. */
+  version: string;
+  packageName: string | null;
+  /** SHA-256 of the signer cert, so a later release can be checked against it. */
+  signerSha256: string | null;
+  bytes: number;
+};
+
+/**
+ * Read a release without keeping it.
+ *
+ * GitHub hosts the file already, so mirroring a second copy buys nothing the
+ * store needs — except the two facts that only exist inside the binary: the
+ * version the phone will report, and who signed it. So the file is fetched,
+ * asked those two questions, and deleted. What is kept is a link to the same
+ * asset plus the answers.
+ *
+ * The signer is checked against the pin the same way `attachApk` does it. A
+ * linked app never stops being verified: every new tag comes back through
+ * here, and a release signed with a new key is refused rather than linked.
+ */
+export async function installLinked(
+  slug: string,
+  url: string,
+  opts: {
+    fileName: string;
+    tag: string;
+    fallbackVersion?: string | null;
+    /** The signer this app is already pinned to, when it has one. */
+    pinnedSigner?: string | null;
+  }
+): Promise<LinkedVersion> {
+  const staged = path.join(STAGING_DIR, slug, path.basename(opts.fileName));
+  const bytes = await downloadFile(url, staged, { tag: opts.tag });
+
+  try {
+    if (!(await looksLikeApk(staged))) {
+      throw new Error(
+        "that download is not an APK — the source served something else"
+      );
+    }
+
+    const verify = await verifyApk(staged, {
+      pinnedSigner: opts.pinnedSigner ?? null,
+    });
+    if (verify.status === "signer_mismatch") {
+      throw new Error(
+        "the release is signed with a different key than the one this app is pinned to — add it from the review queue if that is expected"
+      );
+    }
+
+    const manifest = await readApkInfo(staged);
+    const parsed = parseApkFilename(path.basename(opts.fileName));
+    const version =
+      (isPlaceholderVersion(manifest.versionName)
+        ? parsed.version ?? opts.fallbackVersion ?? null
+        : null) ||
+      manifest.versionName ||
+      opts.fallbackVersion ||
+      parsed.version ||
+      (manifest.versionCode ? `vc${manifest.versionCode}` : null) ||
+      "unknown";
+
+    return {
+      version,
+      packageName: manifest.packageName,
+      signerSha256: verify.signerSha256 ?? null,
+      bytes,
+    };
+  } finally {
+    // Nothing moved the file out of staging — for a linked app there is no
+    // shelf to move it to, and this is the whole point of the mode.
     await fs.rm(path.join(STAGING_DIR, slug), { recursive: true, force: true });
   }
 }

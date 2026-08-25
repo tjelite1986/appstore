@@ -42,6 +42,8 @@ type SourceLanding = {
   version: string;
   /** What the importer made of the file it was handed. */
   status: string;
+  /** True when the store points at the upstream file instead of holding one. */
+  linked?: boolean;
 };
 
 const SOURCE_LABEL: Record<"github" | "fdroid" | "play", string> = {
@@ -114,13 +116,26 @@ export default function AddApp() {
               method: "POST",
               body: JSON.stringify({ packageId: ref }),
             });
-      setLanded({
-        kind,
-        slug: data.slug,
-        name: data.name,
-        version: data.installed.version,
-        status: data.installed.status,
-      });
+      // GitHub reads the release and lets go of it; F-Droid still hands its
+      // file to the importer. The two answer "which version" differently.
+      setLanded(
+        "linked" in data
+          ? {
+              kind,
+              slug: data.slug,
+              name: data.name,
+              version: data.linked.version,
+              status: "ok",
+              linked: true,
+            }
+          : {
+              kind,
+              slug: data.slug,
+              name: data.name,
+              version: data.installed.version,
+              status: data.installed.status,
+            }
+      );
       setHits(null);
       router.refresh();
     } catch (err) {
@@ -230,7 +245,10 @@ export default function AddApp() {
           <Link href={`/app/${landed.slug}`} className="underline">
             {landed.slug}
           </Link>{" "}
-          — version {landed.version} is on the shelf
+          — version {landed.version}{" "}
+          {landed.linked
+            ? "is linked, and downloads come straight from the release"
+            : "is on the shelf"}
           {landed.status === "ok" ? "" : ` (${landed.status})`}.
         </p>
       )}

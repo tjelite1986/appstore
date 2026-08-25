@@ -18,7 +18,7 @@ import { STORE_DIRS, STORE_ROOT } from "@/lib/storage";
 import { uniqueSlug, writeMeta } from "@/lib/import";
 import { getApps, invalidateCatalog, type StoreApp } from "@/lib/store";
 import { USER_AGENT } from "@/lib/sources/net";
-import { installFromUrl, type InstalledVersion } from "@/lib/sources/install";
+import { installLinked, type LinkedVersion } from "@/lib/sources/install";
 
 /** How far back to look for a release that actually carries an APK. */
 const RELEASE_PAGE = 10;
@@ -149,11 +149,16 @@ export type GithubAddResult = {
   slug: string;
   name: string;
   repo: string;
-  installed: InstalledVersion;
+  linked: LinkedVersion & { assetUrl: string };
 };
 
 /**
- * Add a repository to the catalog and install its newest release.
+ * Add a repository to the catalog and link its newest release.
+ *
+ * The release is fetched once and then thrown away: GitHub goes on hosting the
+ * file, so a mirrored copy only adds a second thing to keep current. What the
+ * fetch is for is the two facts that exist nowhere else — the version string
+ * inside the manifest and the signer of the binary — and those are kept.
  *
  * The clash checks come before the download, not after: a 200 MB release
  * fetched only to be refused at the last step wastes the line and leaves the
@@ -186,6 +191,8 @@ export async function addFromGitHub(input: string): Promise<GithubAddResult> {
   const name = String(repo?.name ?? ref.repo).replace(/[-_]+/g, " ").trim();
   const slug = await uniqueSlug(name);
 
+  // Claim the slug before the download so a second add of the same repo
+  // collides here rather than both arriving at the same shelf.
   await writeMeta(slug, {
     name,
     developer: String(repo?.owner?.login ?? ref.owner),
@@ -195,18 +202,15 @@ export async function addFromGitHub(input: string): Promise<GithubAddResult> {
       kind: "github",
       url: repoUrl(ref),
       repo: `${ref.owner}/${ref.repo}`,
-      // What the release was called upstream. The version the store serves
-      // comes from the APK, so this is a note about the release, not a claim
-      // about the library.
       releaseTag: release.tag,
       addedFrom: "manage/add",
     },
   });
   invalidateCatalog();
 
-  let installed: InstalledVersion;
+  let linked: LinkedVersion;
   try {
-    installed = await installFromUrl(slug, release.asset.url, {
+    linked = await installLinked(slug, release.asset.url, {
       fileName: release.asset.name,
       tag: "github",
       fallbackVersion: release.tag.replace(/^v/i, ""),
@@ -219,8 +223,84 @@ export async function addFromGitHub(input: string): Promise<GithubAddResult> {
     throw err;
   }
 
+  await writeMeta(slug, {
+    packageName: linked.packageName ?? undefined,
+    // The pin a later release is checked against, exactly as the importer
+    // would have set it had the file stayed.
+    signingCert: linked.signerSha256 ?? undefined,
+    source: linkedSource(ref, release, linked),
+  });
   invalidateCatalog();
-  return { slug, name, repo: `${ref.owner}/${ref.repo}`, installed };
+
+  return {
+    slug,
+    name,
+    repo: `${ref.owner}/${ref.repo}`,
+    linked: { ...linked, assetUrl: release.asset.url },
+  };
+}
+
+/**
+ * The source object for a linked release — the whole of it.
+ *
+ * `writeMeta` merges one level deep, so a patch carrying half a source would
+ * drop the other half. Building it in one place keeps the repo and the asset
+ * from ever describing different releases.
+ */
+export function linkedSource(
+  ref: RepoRef,
+  release: GithubRelease,
+  linked: LinkedVersion,
+  addedFrom = "manage/add"
+): Record<string, unknown> {
+  return {
+    kind: "github",
+    url: repoUrl(ref),
+    repo: `${ref.owner}/${ref.repo}`,
+    releaseTag: release.tag,
+    assetUrl: release.asset.url,
+    assetName: release.asset.name,
+    assetBytes: release.asset.bytes,
+    // What the binary said about itself. The tag is what the author called it;
+    // these disagree often enough that showing the tag would file the app under
+    // a version the phone never reports.
+    assetVersion: linked.version,
+    addedFrom,
+  };
+}
+
+/**
+ * Point an already-linked app at a newer release.
+ *
+ * The same fetch-read-discard as adding one, with the pin this app already
+ * carries handed to the check: an app that was linked under one signer does
+ * not silently start pointing at a release signed by someone else.
+ */
+export async function relinkGitHub(
+  app: StoreApp,
+  release: GithubRelease
+): Promise<LinkedVersion> {
+  const ref = parseRepoRef(app.source?.repo ?? "");
+  if (!ref) throw new Error("that listing has no repository to link to");
+
+  const linked = await installLinked(app.slug, release.asset.url, {
+    fileName: release.asset.name,
+    tag: "github",
+    fallbackVersion: release.tag.replace(/^v/i, ""),
+    pinnedSigner: app.signingCert ?? null,
+  });
+
+  await writeMeta(app.slug, {
+    packageName: app.packageName ?? linked.packageName ?? undefined,
+    signingCert: app.signingCert ?? linked.signerSha256 ?? undefined,
+    source: linkedSource(ref, release, linked, app.source?.addedFrom),
+  });
+  return linked;
+}
+
+/** True when this app is served as a link upstream rather than from disk. */
+export function isLinked(app: StoreApp): boolean {
+  return typeof app.source?.assetUrl === "string" && app.source.assetUrl !== "";
 }
 
 async function removeMeta(slug: string): Promise<void> {

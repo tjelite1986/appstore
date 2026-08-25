@@ -64,6 +64,18 @@ export type AppSource = {
   /** GitHub: `owner/name`, and the tag the release carried when it was added. */
   repo?: string;
   releaseTag?: string;
+  /**
+   * A release this store checked but does not mirror.
+   *
+   * GitHub already hosts the file and keeps hosting it, so a linked app is
+   * downloaded once when it is added — long enough to read the version out of
+   * its manifest and pin the signer — and then served as a link to that same
+   * asset. `assetVersion` is what the binary said about itself, not the tag.
+   */
+  assetUrl?: string;
+  assetName?: string;
+  assetBytes?: number;
+  assetVersion?: string;
   /** F-Droid: the package id the repository is addressed by. */
   package?: string;
   addedFrom?: string;
@@ -369,6 +381,7 @@ async function readFromDisk(): Promise<StoreApp[]> {
       // the file name in the catalog.
       if (!meta && versions.length === 0) return null;
       const latest = versions[0];
+      const source = readSource(meta?.source);
       const icon = icons.get(slug);
       const banner = banners.get(slug);
 
@@ -385,10 +398,18 @@ async function readFromDisk(): Promise<StoreApp[]> {
         tagline: meta?.tagline?.trim() || "",
         description: meta?.description?.trim() || undefined,
         packageName: meta?.packageName,
-        source: readSource(meta?.source),
+        source,
         signingCert: meta?.signingCert,
-        version: latest?.version ?? "—",
-        size: latest?.size ?? "—",
+        // A linked app holds no file, so the newest version and its size are
+        // what the release carried when it was last checked. Falling back here
+        // rather than in each caller keeps tiles, search and the detail page
+        // from each having to know that a source can stand in for a binary.
+        version: latest?.version ?? source?.assetVersion ?? "—",
+        size:
+          latest?.size ??
+          (typeof source?.assetBytes === "number"
+            ? formatBytes(source.assetBytes)
+            : "—"),
         rating: typeof meta?.rating === "number" ? meta.rating : 0,
         ratingCount:
           typeof meta?.ratingCount === "number" ? meta.ratingCount : 0,

@@ -14,7 +14,7 @@
 import { getApps, invalidateCatalog, type StoreApp } from "@/lib/store";
 import { writeMeta } from "@/lib/import";
 import { alreadyHeld, installFromUrl } from "@/lib/sources/install";
-import { checkGitHub } from "@/lib/sources/github";
+import { checkGitHub, isLinked, relinkGitHub } from "@/lib/sources/github";
 import { apkUrl, buildToInstall, checkFdroid } from "@/lib/sources/fdroid";
 
 export type SourceStatus =
@@ -108,7 +108,7 @@ export async function checkSources(
         name: app.name,
         kind: app.source?.kind ?? "none",
         upstream: null,
-        held: app.versions[0]?.version ?? null,
+        held: app.versions[0]?.version ?? app.source?.assetVersion ?? null,
         status: "error",
         detail,
       });
@@ -120,7 +120,9 @@ export async function checkSources(
 }
 
 async function checkOne(app: StoreApp, install: boolean): Promise<SourceCheck> {
-  const held = app.versions[0]?.version ?? null;
+  // A linked app has nothing on disk, so what it "holds" is the version of the
+  // release it currently points at.
+  const held = app.versions[0]?.version ?? app.source?.assetVersion ?? null;
   const base = { slug: app.slug, name: app.name, held };
 
   if (app.source?.kind === "github") {
@@ -145,6 +147,21 @@ async function checkOne(app: StoreApp, install: boolean): Promise<SourceCheck> {
     }
     if (!install) {
       return { ...base, kind: "github", upstream: release.tag, status: "available" };
+    }
+
+    // Two shapes live side by side on purpose. An app added before linking
+    // existed keeps its mirrored file — dropping the binary out from under
+    // someone who installed from it is not an update — while a linked app is
+    // repointed at the new asset.
+    if (isLinked(app)) {
+      const linked = await relinkGitHub(app, release);
+      return {
+        ...base,
+        kind: "github",
+        upstream: release.tag,
+        status: "installed",
+        detail: `${linked.version} (linked)`,
+      };
     }
 
     const installed = await installFromUrl(app.slug, release.asset.url, {
