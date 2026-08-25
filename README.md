@@ -380,9 +380,10 @@ URL there and the shelf is on the phone.
 | Route | Serves |
 |---|---|
 | `/fdroid/repo/index.xml` | the shelf a signed-out visitor sees, as an index |
+| `/fdroid/repo/index-v1.jar` | the same shelf, signed, for a real F-Droid client |
 | `/fdroid/repo/<slug>_<version>.apk` | a file from it |
 | `/fdroid/repo/obtainium.json` | the same shelf as an Obtainium import file |
-| `/fdroid/t/<token>/repo/…` | all three, as one account |
+| `/fdroid/t/<token>/repo/…` | all four, as one account |
 
 Entering the bare hostname is enough: Obtainium tries `/index.xml`,
 `/repo/index.xml` and `/fdroid/repo/index.xml` in turn, and the third answers.
@@ -404,18 +405,53 @@ that shows it says so. It buys one thing — reading the library as its owner,
 Adults included — and the signed-out URL is the strict reading, exactly as the
 website is (`lib/repo-token.ts`).
 
-The index is the old `index.xml`, not `index-v1.json`, because that is what
-Obtainium reads — with an HTML parser rather than an XML one, which is why
+Obtainium's index is the old `index.xml`, not `index-v1.json`, because that is
+what it reads — with an HTML parser rather than an XML one, which is why
 nothing in it is a void HTML element. It carries no APK hashes, version codes
 or signatures: Obtainium reads none of them, and each would mean opening every
-APK on the shelf on every index request. The official F-Droid client and
-Droid-ify want all three, inside a signed `index-v1.jar` — that is the day to
-add them, and nothing here forecloses it (`lib/fdroid-index.ts`).
+APK on the shelf on every index request (`lib/fdroid-index.ts`).
 
-An app is in the index only if it has a package id and an APK on this host. A
-listing linked to Play or to a GitHub release has nothing for a client to
+An app is in either index only if it has a package id and an APK on this host.
+A listing linked to Play or to a GitHub release has nothing for a client to
 download from here, and an entry keyed on anything but the real package id
 would install once and then never notice its own updates.
+
+### The signed index
+
+Obtainium cannot do one thing: notice an app that is not already on the phone.
+Its F-Droid source tracks apps you added, one at a time, so a new listing on
+the shelf reaches nobody. A client that *subscribes* to a repository — the
+official F-Droid app, Droid-ify, Neo Store — lists the whole thing, and for
+that it wants `index-v1.jar`: the same catalog as JSON, with every APK's
+SHA-256, version code and signer, inside a signed jar.
+
+All three of those come from the bytes of the file, so `lib/apk-facts.ts`
+caches them in `_state/store.db` on the path plus `(size, mtime)`. The first
+build reads 3.5 GB; every build after it reads a `stat` per file.
+
+The signature is why this is not a route. Signing needs a JDK, and a repository
+key inside the container image is a key inside every copy of that image — so
+the split is the one the timers already use, and `scripts/fdroid-sign.sh`
+is the other half:
+
+    the app     GET /api/fdroid/index-v1  →  the document, whole
+    the host    zip it, jarsign it, drop the jar in _state/fdroid/<variant>/
+
+A signature cannot be per request, so there are exactly two documents — `all`
+and `clean`, the shelf with Adults and without — and the token in the URL picks
+between them, the same decision the unsigned index makes per request. The key
+is generated on first run into `_state/fdroid/`, beside its password in plain
+text, and it never moves: a client pins its fingerprint, so replacing it means
+every subscribed phone has to remove the repository and add it again. Whether
+that directory belongs in a backup is a decision, not a default — a key in a
+versioned backup cannot be taken back out of it, and the two jars beside it are
+rebuilt from nothing in seconds. Settings shows that fingerprint on the
+URL (`?fingerprint=…`) once something has been signed.
+
+An APK with no v2/v3 signing block is left out of the signed index rather than
+listed without a `signer`. A client that installed it would have nothing to
+check the *next* version against, which is the one guarantee a repository is
+for. The job prints what it left out and why, so a missing app has an answer.
 
 ## What an account keeps
 
@@ -424,14 +460,21 @@ library, and it is why the catalog is a directory tree rather than a database.
 What a person *did* is not like that. Saving an app and marking one installed
 are per-account facts with no natural file to live in, they are written far
 more often than the catalog changes, and two tabs can write them at the same
-moment. So there is one small SQLite database, `_state/store.db`, holding two
+moment. So there is one small SQLite database, `_state/store.db`, holding the
 tables keyed on the elite-v2 account id (`lib/db.ts`):
 
 | Table | Row |
 |---|---|
 | `user_saved` | this account keeps this slug |
 | `user_installed` | this account has *this version* of this slug |
+| `user_prefs` | what this account has answered — so far, its age |
 | `user_repo_token` | the secret in this account's repository URL (above) |
+
+One table there is none of those things. `apk_facts` is a cache: the SHA-256,
+version code and signer of an APK, keyed on its path and invalidated by
+`(size, mtime)`. It is in this database because it is written per file and read
+per index build, and it is safe to delete — every row can be recomputed by
+reading the file again (`lib/apk-facts.ts`).
 
 The version in `user_installed` is the whole reason that table is not a flag.
 An update is derived, never stored: the library knows the newest file, the row

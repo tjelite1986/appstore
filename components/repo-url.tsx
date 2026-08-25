@@ -9,6 +9,14 @@
  * someone the URL — which carries their token, so it is theirs and not to be
  * shared (see `lib/repo-token.ts`).
  *
+ * The same URL serves two different clients from the same row, and the second
+ * one needs one thing more. Obtainium reads the unsigned `index.xml` and takes
+ * the URL as it stands; a real F-Droid client reads the signed `index-v1.jar`
+ * and wants the key's fingerprint alongside, so that a repository it fetches
+ * over someone else's network is still the repository it subscribed to. Hence
+ * two rows carrying the same address: one plain, one with `?fingerprint=`.
+ * The second appears only once something has actually been signed.
+ *
  * The origin is read off the browser rather than passed down from the server:
  * the value has to be exactly what a phone on this network would type, and
  * the page it is shown on is already at that address.
@@ -17,7 +25,14 @@
  * state, and `rows.tsx` is imported by server components.
  */
 import { useEffect, useState } from "react";
-import { Copy, Check, RefreshCw, Smartphone, Download } from "lucide-react";
+import {
+  Copy,
+  Check,
+  RefreshCw,
+  ShieldCheck,
+  Smartphone,
+  Download,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CARD, MUTED, SectionTitle } from "@/components/primitives";
 
@@ -26,25 +41,32 @@ const ROW = "flex w-full items-center gap-3 px-3.5 py-3 text-left";
 export default function RepoUrl({
   path,
   signedIn,
+  fingerprint,
 }: {
   path: string;
   signedIn: boolean;
+  /** Null until the signing job has run at least once. */
+  fingerprint: string | null;
 }) {
   const [current, setCurrent] = useState(path);
   const [origin, setOrigin] = useState("");
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"repo" | "fdroid" | null>(null);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => setOrigin(window.location.origin), []);
   const url = origin ? `${origin}${current}` : "";
+  // What an F-Droid client is given: the same address, plus the key it should
+  // insist on. Uppercase hex with no separators is the form those clients
+  // parse — see scripts/fdroid-sign.sh, which is where the value comes from.
+  const fdroidUrl = url && fingerprint ? `${url}?fingerprint=${fingerprint}` : "";
 
-  async function copy() {
+  async function copy(which: "repo" | "fdroid") {
     setFailed(false);
     try {
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      await navigator.clipboard.writeText(which === "repo" ? url : fdroidUrl);
+      setCopied(which);
+      setTimeout(() => setCopied(null), 1500);
     } catch (err) {
       // Clipboard access needs a secure context, which a plain-http visit on
       // the LAN is not. The URL is on screen either way.
@@ -82,7 +104,7 @@ export default function RepoUrl({
       <div className={cn(CARD, "overflow-hidden")}>
         <button
           type="button"
-          onClick={() => void copy()}
+          onClick={() => void copy("repo")}
           disabled={!url}
           className={cn(ROW, "disabled:opacity-60")}
         >
@@ -102,12 +124,45 @@ export default function RepoUrl({
               {url || " "}
             </span>
           </span>
-          {copied ? (
+          {copied === "repo" ? (
             <Check size={15} className="shrink-0 text-[color:var(--accent)]" />
           ) : (
             <Copy size={15} className="shrink-0 opacity-40" />
           )}
         </button>
+
+        {fingerprint && (
+          <button
+            type="button"
+            onClick={() => void copy("fdroid")}
+            disabled={!fdroidUrl}
+            className={cn(
+              ROW,
+              "border-t border-[color:var(--border)] disabled:opacity-60"
+            )}
+          >
+            <ShieldCheck
+              size={17}
+              className="shrink-0 text-[color:var(--muted-2)]"
+            />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm">
+                F-Droid client URL
+              </span>
+              <span
+                className={cn("block truncate font-mono text-[11px]", MUTED)}
+                title={fdroidUrl}
+              >
+                {fingerprint}
+              </span>
+            </span>
+            {copied === "fdroid" ? (
+              <Check size={15} className="shrink-0 text-[color:var(--accent)]" />
+            ) : (
+              <Copy size={15} className="shrink-0 opacity-40" />
+            )}
+          </button>
+        )}
 
         <a
           href={`${current}/obtainium.json`}
@@ -149,6 +204,9 @@ export default function RepoUrl({
         {signedIn
           ? "Add the URL to Obtainium as a third-party F-Droid repository, one app at a time — or take the import file to get all of them in one go. Both carry your account, so treat them like a password."
           : "Add the URL to Obtainium as a third-party F-Droid repository. Sign in for one of your own — this is what a signed-out visitor sees."}
+        {fingerprint
+          ? " The second URL is for an F-Droid client such as Droid-ify or Neo Store, which lists the whole shelf and tells you about apps you have never installed."
+          : ""}
       </p>
       {failed && (
         <p className="mt-2 text-xs text-[color:var(--danger,#f87171)]">

@@ -18,6 +18,7 @@ import { adultsAllowed, readState } from "@/lib/user-state";
 import AdultsToggle from "@/components/adults-toggle";
 import RepoUrl from "@/components/repo-url";
 import { repoTokenFor } from "@/lib/repo-token";
+import { repoFingerprint } from "@/lib/fdroid-index-v1";
 
 export const dynamic = "force-dynamic";
 
@@ -92,7 +93,11 @@ export default async function SettingsPage() {
 
       <AdultsToggle on={adultsAllowed(user?.id ?? null)} signedIn={!!user} />
 
-      <RepoUrl path={repoPath} signedIn={!!user} />
+      <RepoUrl
+        path={repoPath}
+        signedIn={!!user}
+        fingerprint={await repoFingerprint()}
+      />
 
       <RowCard
         title="Storage"

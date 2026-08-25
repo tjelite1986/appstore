@@ -1,0 +1,19 @@
+# Publish the shelf as a signed F-Droid repository, so a subscribed phone is
+# told about apps it has never heard of. Unlike the other three, this one is
+# not a bare HTTP call: it holds the repository key, which is why it needs a
+# JDK on the host and a user that can read the library directly.
+[Unit]
+Description=App Store signed F-Droid index
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=appstore
+Group=appstore
+# The first run hashes every APK on the shelf; later ones read a cache and
+# finish in seconds.
+TimeoutStartSec=120min
+ExecStart=/opt/appstore/scripts/fdroid-sign.sh
+Nice=10
+IOSchedulingClass=idle

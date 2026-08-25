@@ -1,0 +1,15 @@
+[Unit]
+Description=Run appstore-fdroid every 6 hours
+
+[Timer]
+# After the source check has had its window: a release fetched this morning
+# should be in the index the same morning, not six hours later.
+OnBootSec=35min
+OnUnitActiveSec=6h
+AccuracySec=5min
+# A missed window (the Pi was down, or a long run overran) is picked up on the
+# next boot rather than waiting out a full interval.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

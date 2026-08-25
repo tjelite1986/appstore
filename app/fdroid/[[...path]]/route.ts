@@ -5,9 +5,12 @@
  * fixed by what Obtainium asks for rather than by anything here:
  *
  *     /fdroid/repo/index.xml            the shelf a signed-out browser sees
+ *     /fdroid/repo/index-v1.jar         the same shelf, signed, for a real
+ *                                       F-Droid client
  *     /fdroid/repo/<name>.apk           a file from it
  *     /fdroid/repo/obtainium.json       the same shelf, as an import file
  *     /fdroid/t/<token>/repo/index.xml  the shelf that account sees
+ *     /fdroid/t/<token>/repo/index-v1.jar
  *     /fdroid/t/<token>/repo/<name>.apk
  *     /fdroid/t/<token>/repo/obtainium.json
  *
@@ -29,10 +32,15 @@ import {
   buildObtainiumImport,
   findByApkFileName,
 } from "@/lib/fdroid-index";
+import {
+  FDROID_STATE_DIR,
+  SIGNED_INDEX_FILE,
+  type IndexVariant,
+} from "@/lib/fdroid-index-v1";
 import { userForRepoToken } from "@/lib/repo-token";
 import { contentTypeFor, fileResponse, resolveInStore } from "@/lib/serve";
 import { STORE_DIRS } from "@/lib/storage";
-import { catalogFor } from "@/lib/user-state";
+import { adultsAllowed, catalogFor } from "@/lib/user-state";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -92,6 +100,39 @@ export async function GET(
   const { path } = await params;
   const target = route(path ?? []);
   if (!target) return notFound();
+
+  // The signed index, which is a file on disk rather than a document built
+  // here: a signature cannot be produced per request, and the key that makes
+  // it is deliberately outside this container (see scripts/fdroid-sign.sh).
+  //
+  // There are two of them, and which one this URL gets is the same decision
+  // the unsigned index makes — the token says who is asking, and only an
+  // account that has confirmed its age is shown Adults. A repository that has
+  // never been signed answers 404, which is what a client that asked for a
+  // format this repo does not publish should see.
+  //
+  // Answered before the catalog is read, because it does not need one.
+  if (target.file === SIGNED_INDEX_FILE) {
+    const variant: IndexVariant = adultsAllowed(target.userId) ? "all" : "clean";
+    const abs = await resolveInStore(
+      FDROID_STATE_DIR,
+      variant,
+      SIGNED_INDEX_FILE
+    );
+    if (!abs) return notFound();
+
+    let jar;
+    try {
+      jar = await fs.stat(abs);
+    } catch {
+      return notFound();
+    }
+    if (!jar.isFile()) return notFound();
+
+    return fileResponse(abs, jar, req, {
+      contentType: "application/java-archive",
+    });
+  }
 
   const apps = await catalogFor(target.userId);
   const url = new URL(req.url);

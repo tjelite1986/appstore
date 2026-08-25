@@ -7,8 +7,12 @@
  * an app and marking one installed are per-account facts with no natural file
  * to live in, they are written far more often than the catalog changes, and
  * two tabs can write them at the same moment. That is a database's job, so
- * this is where it starts and, so far, ends: two tables keyed on the elite-v2
- * account id.
+ * this is where it lives: the tables keyed on the elite-v2 account id.
+ *
+ * One table here is neither content nor a person's doing — `apk_facts` caches
+ * what reading an APK's bytes costs. It is here rather than in a file because
+ * it is written per file, read per index build, and can be thrown away
+ * without losing anything.
  *
  * It lives under `_state/`, beside the Telegram cursor — bookkeeping, not
  * content — so a backup of the library still picks it up and nothing in
@@ -92,6 +96,29 @@ function migrate(conn: Database.Database): void {
       user_id    INTEGER PRIMARY KEY,
       token      TEXT    NOT NULL UNIQUE,
       created_at TEXT    NOT NULL
+    );
+
+    -- What is inside an APK, keyed on the file it was read from.
+    --
+    -- Not user state, and the one table here that is a cache rather than a
+    -- fact: every value in it can be recomputed by reading the file again.
+    -- It exists because the signed index needs a SHA-256 of every APK on the
+    -- shelf and the shelf is gigabytes — hashing all of it on a Pi is minutes
+    -- of disk, and it is the same answer every time.
+    --
+    -- The path is relative to STORE_ROOT so the rows survive a move of the
+    -- library; size and mtime are the invalidation, because a file whose
+    -- bytes changed cannot keep the same pair by accident.
+    CREATE TABLE IF NOT EXISTS apk_facts (
+      path         TEXT    PRIMARY KEY,
+      size         INTEGER NOT NULL,
+      mtime        INTEGER NOT NULL,
+      sha256       TEXT    NOT NULL,
+      version_code INTEGER,
+      -- The SHA-256 of the signer certificate, or NULL for an APK carrying
+      -- no v2/v3 signing block. NULL is a real answer, not a missing one.
+      signer       TEXT,
+      read_at      TEXT    NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS user_installed (
