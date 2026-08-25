@@ -10,7 +10,10 @@
  * bytes rather than by the name it was requested under.
  */
 import { createWriteStream, promises as fs } from "node:fs";
-import { lookup } from "node:dns/promises";
+import { lookup as dnsLookup } from "node:dns";
+import http from "node:http";
+import https from "node:https";
+import { isIP, type LookupFunction } from "node:net";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import path from "node:path";
@@ -143,20 +146,79 @@ function isInternalAddress(ip: string): boolean {
   return /^f[cd]/.test(low) || /^fe[89ab]/.test(low);
 }
 
-/** Refuse a host that resolves inward, rather than fetching from it. */
-async function refuseInternal(target: URL): Promise<void> {
-  const addresses = await lookup(target.hostname, { all: true }).catch(
-    () => [] as { address: string }[]
-  );
-  if (addresses.length === 0) {
-    throw new Error(`${target.hostname} does not resolve`);
+/** How far a chain of redirects may run before it is just a loop. */
+const MAX_REDIRECTS = 5;
+
+/**
+ * The address the socket will actually use, checked before it is used.
+ *
+ * Resolving the name first and then handing the *name* to a fetcher that
+ * resolves it again is not a check — the second answer can differ from the
+ * one that passed, and a host that controls its own DNS can arrange exactly
+ * that. Validating inside the lookup closes it: what this function returns is
+ * what the connection is made to, and there is no second resolution to
+ * disagree with it.
+ */
+const guardedLookup: LookupFunction = (hostname, options, callback) => {
+  dnsLookup(hostname, options as never, (err, address, family) => {
+    if (err) return (callback as (e: Error | null) => void)(err);
+
+    // With autoSelectFamily the caller asks for every address at once, so this
+    // is handed either one address or a list of them.
+    if (Array.isArray(address)) {
+      const usable = address.filter((a) => !isInternalAddress(a.address));
+      if (usable.length === 0) {
+        return (callback as (e: Error | null) => void)(
+          new Error(`${hostname} is ${address[0]?.address}, on this machine's own network`)
+        );
+      }
+      return (callback as (e: Error | null, a: unknown) => void)(null, usable);
+    }
+
+    if (isInternalAddress(String(address))) {
+      return (callback as (e: Error | null) => void)(
+        new Error(`${hostname} is ${address}, on this machine's own network`)
+      );
+    }
+    callback(null, String(address), family);
+  });
+};
+
+/**
+ * Refuse an address written as digits.
+ *
+ * `guardedLookup` never sees one: `net.connect` uses a literal as it stands
+ * rather than resolving it, so an IP in the URL would walk straight past the
+ * only check there is. Called per hop, before the request is made.
+ */
+function refuseInternalLiteral(target: URL): void {
+  const host = target.hostname.replace(/^\[|\]$/g, "");
+  if (isIP(host) && isInternalAddress(host)) {
+    throw new Error(`${host} is on this machine's own network`);
   }
-  const inward = addresses.find((a) => isInternalAddress(a.address));
-  if (inward) {
-    throw new Error(
-      `${target.hostname} is ${inward.address}, on this machine's own network`
+}
+
+/** One request, connected only to an address `guardedLookup` allowed. */
+function requestOnce(
+  target: URL,
+  timeoutMs: number
+): Promise<http.IncomingMessage> {
+  return new Promise((resolve, reject) => {
+    const mod = target.protocol === "https:" ? https : http;
+    const req = mod.get(
+      target,
+      {
+        headers: { "user-agent": USER_AGENT, accept: "image/*,*/*" },
+        lookup: guardedLookup,
+        timeout: timeoutMs,
+      },
+      resolve
     );
-  }
+    req.on("timeout", () =>
+      req.destroy(new Error("that address did not answer in time"))
+    );
+    req.on("error", reject);
+  });
 }
 
 /**
@@ -166,6 +228,12 @@ async function refuseInternal(target: URL): Promise<void> {
  * the address is waiting to hear whether it worked, and a silent null would
  * read as "saved". It also asks nothing of `content-type` — the caller hands
  * the bytes to `saveUpload`, which decides what they are by reading them.
+ *
+ * Redirects are followed by hand rather than by the fetcher, because a
+ * followed redirect is a request that already happened: by the time a
+ * response object can be examined, the hop into the docker network has been
+ * made and answered. Here every hop is a fresh `requestOnce`, so each one is
+ * gated by the lookup before a socket opens.
  */
 export async function fetchImageBytes(
   raw: string,
@@ -179,26 +247,37 @@ export async function fetchImageBytes(
   } catch {
     throw new Error("that is not a URL");
   }
-  if (target.protocol !== "https:" && target.protocol !== "http:") {
-    throw new Error(`${target.protocol.replace(":", "")} is not a URL this store will fetch`);
-  }
-  await refuseInternal(target);
 
-  const res = await fetch(target, {
-    headers: { "user-agent": USER_AGENT, accept: "image/*,*/*" },
-    signal: AbortSignal.timeout(IMAGE_TIMEOUT_MS),
-    cache: "no-store",
-  });
-  // Redirects are followed — release assets and CDNs are built on them — so
-  // the host that actually answered gets the same check as the one asked for.
-  if (res.url && res.url !== target.href) {
-    await refuseInternal(new URL(res.url));
+  let res: http.IncomingMessage;
+  let hops = 0;
+  for (;;) {
+    if (target.protocol !== "https:" && target.protocol !== "http:") {
+      throw new Error(
+        `${target.protocol.replace(":", "")} is not a URL this store will fetch`
+      );
+    }
+    refuseInternalLiteral(target);
+    res = await requestOnce(target, IMAGE_TIMEOUT_MS);
+    const status = res.statusCode ?? 0;
+    const location = res.headers.location;
+    if (status >= 300 && status < 400 && location) {
+      res.resume(); // let the socket go before opening the next one
+      if (++hops > MAX_REDIRECTS) {
+        throw new Error("that address redirects further than this store follows");
+      }
+      target = new URL(location, target);
+      continue;
+    }
+    if (status !== 200) {
+      res.resume();
+      throw new Error(`that address answered HTTP ${status}`);
+    }
+    break;
   }
-  if (!res.ok) throw new Error(`that address answered HTTP ${res.status}`);
-  if (!res.body) throw new Error("that address answered with no body");
 
-  const announced = Number(res.headers.get("content-length") ?? 0);
+  const announced = Number(res.headers["content-length"] ?? 0);
   if (announced > max) {
+    res.resume();
     throw new Error(`${announced} bytes is not a listing image`);
   }
 
@@ -206,11 +285,12 @@ export async function fetchImageBytes(
   // it has not sent yet.
   const chunks: Buffer[] = [];
   let bytes = 0;
-  for await (const chunk of Readable.fromWeb(
-    res.body as Parameters<typeof Readable.fromWeb>[0]
-  ) as AsyncIterable<Buffer>) {
+  for await (const chunk of res as AsyncIterable<Buffer>) {
     bytes += chunk.length;
-    if (bytes > max) throw new Error(`the body passed ${max} bytes`);
+    if (bytes > max) {
+      res.destroy();
+      throw new Error(`the body passed ${max} bytes`);
+    }
     chunks.push(chunk);
   }
   console.log(`[${opts.tag}] ${bytes} bytes from ${target.href}`);
