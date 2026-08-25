@@ -8,8 +8,7 @@
  * fields a person owns and which are read off the binary.
  */
 import { requireAdmin } from "@/lib/admin";
-import { editApp, EditError } from "@/lib/edit";
-import { findApp } from "@/lib/store";
+import { editApp, EditError, storedText } from "@/lib/edit";
 
 export const dynamic = "force-dynamic";
 
@@ -40,21 +39,10 @@ export async function PATCH(
     throw err;
   }
 
-  // The saved app back, so the form shows what the library actually holds
-  // rather than what was typed — a trimmed name and a dropped empty field
-  // both differ from the request body.
-  const app = await findApp(slug);
-  return Response.json({
-    ok: true,
-    app: app && {
-      slug: app.slug,
-      name: app.name,
-      developer: app.developer,
-      category: app.category,
-      tagline: app.tagline,
-      description: app.description ?? "",
-      iconBackground: app.iconBackground ?? "",
-      iconFit: app.iconFit ?? "cover",
-    },
-  });
+  // What the file holds back, so the form shows the library's truth rather
+  // than what was typed — a trimmed name and a dropped empty field both differ
+  // from the request body. Deliberately the *stored* values and not a rendered
+  // `StoreApp`: handing the form "Unknown" for a developer nobody has named
+  // would put that word in the file on the next save.
+  return Response.json({ ok: true, stored: await storedText(slug) });
 }

@@ -53,13 +53,35 @@ type ArtworkFind = {
   looked: string[];
 };
 
-export type EditableApp = {
-  slug: string;
+/** The five fields a person types, exactly as the meta file holds them. */
+export type EditText = {
   name: string;
   developer: string;
   category: string;
   tagline: string;
   description: string;
+};
+
+const TEXT_FIELDS = [
+  "name",
+  "developer",
+  "category",
+  "tagline",
+  "description",
+] as const;
+
+export type EditableApp = {
+  slug: string;
+  /**
+   * What the file holds — empty where it holds nothing. Not what the page
+   * renders: the catalog answers a missing developer with "Unknown" and a
+   * missing category with "Other", and a form seeded with those saves them
+   * into the file the first time anyone corrects a name. That turns a gap the
+   * sources are still allowed to fill into a value that outranks them.
+   */
+  stored: EditText;
+  /** What the store shows in their place, offered as placeholder text. */
+  fallback: { name: string; developer: string; category: string };
   icon?: string;
   /** Empty for "no plate chosen" — the fallback gradient, keyed on `seed`. */
   iconBackground?: string;
@@ -74,13 +96,11 @@ export type EditableApp = {
 export default function EditApp({ app }: { app: EditableApp }) {
   const [open, setOpen] = useState(false);
   const [token, setToken] = useState("");
-  const [form, setForm] = useState({
-    name: app.name,
-    developer: app.developer,
-    category: app.category,
-    tagline: app.tagline,
-    description: app.description,
-  });
+  const [form, setForm] = useState<EditText>(app.stored);
+  // What the file held when this form was seeded. Only fields that differ from
+  // it are sent, so saving a corrected name does not also write the four
+  // untouched placeholders into the gaps beside it.
+  const [base, setBase] = useState<EditText>(app.stored);
   // Its own state and its own save, not a sixth row in `form`: this is a
   // decision about a picture, made while looking at the picture, and it would
   // be odd for "Save text" to be the button that applies a colour.
@@ -144,18 +164,21 @@ export default function EditApp({ app }: { app: EditableApp }) {
 
   const save = () =>
     run("save", async () => {
-      const data = await call(`/api/apps/${app.slug}`, {
-        method: "PATCH",
-        body: JSON.stringify(form),
-      });
-      if (data.app) {
-        setForm({
-          name: data.app.name,
-          developer: data.app.developer,
-          category: data.app.category,
-          tagline: data.app.tagline,
-          description: data.app.description,
+      const patch: Partial<EditText> = {};
+      for (const field of TEXT_FIELDS) {
+        if (form[field] !== base[field]) patch[field] = form[field];
+      }
+      // Nothing typed is not an error and not a request: `writeMeta` merges and
+      // rewrites the file, so a save of nothing is only a chance to lose it.
+      if (Object.keys(patch).length > 0) {
+        const data = await call(`/api/apps/${app.slug}`, {
+          method: "PATCH",
+          body: JSON.stringify(patch),
         });
+        if (data.stored) {
+          setForm(data.stored);
+          setBase(data.stored);
+        }
       }
       setSaved(true);
     });
@@ -246,11 +269,13 @@ export default function EditApp({ app }: { app: EditableApp }) {
           <Text
             label="Name"
             value={form.name}
+            placeholder={app.fallback.name}
             onChange={(v) => setForm((f) => ({ ...f, name: v }))}
           />
           <Text
             label="Developer"
             value={form.developer}
+            placeholder={app.fallback.developer}
             onChange={(v) => setForm((f) => ({ ...f, developer: v }))}
           />
         </div>
@@ -264,6 +289,10 @@ export default function EditApp({ app }: { app: EditableApp }) {
               setForm((f) => ({ ...f, category: e.target.value }))
             }
           >
+            {/* Not one of the seven: an app nobody has filed shows as "Other"
+                without the file saying so, and leaving it here is what keeps
+                a Play or F-Droid category able to arrive later. */}
+            <option value="">Not filed ({app.fallback.category})</option>
             {CATEGORIES.map((c) => (
               <option key={c} value={c}>
                 {c}
@@ -275,6 +304,7 @@ export default function EditApp({ app }: { app: EditableApp }) {
         <Text
           label="Tagline"
           value={form.tagline}
+          placeholder="One line, under the name"
           onChange={(v) => setForm((f) => ({ ...f, tagline: v }))}
         />
 
@@ -612,10 +642,13 @@ function UrlField({
 function Text({
   label,
   value,
+  placeholder,
   onChange,
 }: {
   label: string;
   value: string;
+  /** What the store shows while this field is empty — grey, and not a value. */
+  placeholder?: string;
   onChange: (v: string) => void;
 }) {
   return (
@@ -624,6 +657,7 @@ function Text({
       <input
         className={FIELD}
         value={value}
+        placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
       />
     </label>

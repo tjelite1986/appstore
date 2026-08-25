@@ -15,7 +15,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { STORE_DIRS, STORE_ROOT } from "@/lib/storage";
-import { writeMeta } from "@/lib/import";
+import { readMetaRaw, writeMeta } from "@/lib/import";
 import {
   findApp,
   invalidateCatalog,
@@ -67,6 +67,38 @@ const MAX_LENGTHS: Record<EditableField, number> = {
   iconBackground: 9,
   iconFit: 8,
 };
+
+/** The five text fields, as a form deals with them. */
+export const TEXT_FIELDS = [
+  "name",
+  "developer",
+  "category",
+  "tagline",
+  "description",
+] as const;
+
+export type TextField = (typeof TEXT_FIELDS)[number];
+export type StoredText = Record<TextField, string>;
+
+/**
+ * What the meta file holds, not what the catalog renders.
+ *
+ * A form seeded from a `StoreApp` is seeded with the read-time fallbacks —
+ * "Unknown" for a developer nobody has named, "Other" for a category nobody
+ * has chosen — and saving it writes those into the file. That turns a gap the
+ * sources are still allowed to fill into a value that outranks them, forever.
+ * So the form is seeded from here instead, and shows the fallbacks as
+ * placeholder text.
+ */
+export async function storedText(slug: string): Promise<StoredText> {
+  const meta = await readMetaRaw(slug);
+  const out = {} as StoredText;
+  for (const field of TEXT_FIELDS) {
+    const value = meta[field];
+    out[field] = typeof value === "string" ? value.trim() : "";
+  }
+  return out;
+}
 
 export type EditPatch = Partial<Record<EditableField, string>>;
 

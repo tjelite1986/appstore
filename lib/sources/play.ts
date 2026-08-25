@@ -56,6 +56,11 @@ async function gplay(): Promise<any> {
  * different purposes, and `meta/<slug>.json` is hand-editable precisely so a
  * wrong guess costs one line. Nothing maps to Adults: Play has no such
  * listings, and the shelf is filled from elsewhere.
+ *
+ * A genre outside the table answers `null`, not "Other". The store shows
+ * "Other" for a category nobody has chosen either way, but writing the word
+ * into the file is a claim that somebody filed it — and the fillers only write
+ * into gaps, so that claim would outlast every later chance to correct it.
  */
 const CATEGORY_BY_GENRE: Record<string, Category> = {
   VIDEO_PLAYERS: "Media",
@@ -72,11 +77,11 @@ const CATEGORY_BY_GENRE: Record<string, Category> = {
   BUSINESS: "Editor",
 };
 
-function categoryFor(genreId: unknown): Category {
-  if (typeof genreId !== "string") return "Other";
+function categoryFor(genreId: unknown): Category | null {
+  if (typeof genreId !== "string") return null;
   // Every game genre is GAME_SOMETHING, and there are dozens of them.
   if (genreId.startsWith("GAME")) return "Games";
-  return CATEGORY_BY_GENRE[genreId] ?? "Other";
+  return CATEGORY_BY_GENRE[genreId] ?? null;
 }
 
 /**
@@ -166,7 +171,8 @@ export type PlayListing = {
   packageId: string;
   name: string;
   developer: string | null;
-  category: Category;
+  /** Null where Play's genre has no counterpart here — see `categoryFor`. */
+  category: Category | null;
   tagline: string | null;
   description: string | null;
   rating: number | null;

@@ -15,6 +15,7 @@ import SaveButton from "@/components/save-button";
 import InstalledControl from "@/components/installed-control";
 import EditApp from "@/components/edit-app";
 import { findApp, getApps } from "@/lib/store";
+import { storedText } from "@/lib/edit";
 import { currentUser } from "@/lib/current-user";
 import { stateFor } from "@/lib/user-state";
 
@@ -159,11 +160,15 @@ export default async function AppDetailPage({
         <EditApp
           app={{
             slug: app.slug,
-            name: app.name,
-            developer: app.developer,
-            category: app.category,
-            tagline: app.tagline,
-            description: app.description ?? "",
+            // The file, not the row: `app` carries the catalog's fallbacks in
+            // the fields nobody has filled, and a form seeded with those saves
+            // them. They go along as placeholders instead.
+            stored: await storedText(app.slug),
+            fallback: {
+              name: app.name,
+              developer: app.developer,
+              category: app.category,
+            },
             icon: app.icon,
             iconBackground: app.iconBackground,
             iconFit: app.iconFit,

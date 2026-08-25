@@ -228,7 +228,7 @@ export async function addFromFdroid(input: string): Promise<FdroidAddResult> {
   await writeMeta(slug, {
     name: app.name,
     packageName: packageId,
-    category: "Other",
+    // Left out on purpose — see the same omission in `lib/sources/github.ts`.
     tagline: app.summary ?? undefined,
     description: app.description ?? undefined,
     source: {

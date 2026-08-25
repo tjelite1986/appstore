@@ -359,7 +359,9 @@ export async function addFromGitHub(input: string): Promise<GithubAddResult> {
   await writeMeta(slug, {
     name,
     developer: String(repo?.owner?.login ?? ref.owner),
-    category: "Other",
+    // No category: "Other" is what the catalog shows for an app nobody has
+    // filed, and writing it here would make this shelf look filed — the
+    // gap-fillers only write into gaps, so a Play category could never land.
     tagline: typeof repo?.description === "string" ? repo.description : undefined,
     source: {
       kind: "github",
