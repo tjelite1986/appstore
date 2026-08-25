@@ -381,12 +381,20 @@ URL there and the shelf is on the phone.
 |---|---|
 | `/fdroid/repo/index.xml` | the shelf a signed-out visitor sees, as an index |
 | `/fdroid/repo/<slug>_<version>.apk` | a file from it |
-| `/fdroid/t/<token>/repo/…` | the same two, as one account |
+| `/fdroid/repo/obtainium.json` | the same shelf as an Obtainium import file |
+| `/fdroid/t/<token>/repo/…` | all three, as one account |
 
 Entering the bare hostname is enough: Obtainium tries `/index.xml`,
 `/repo/index.xml` and `/fdroid/repo/index.xml` in turn, and the third answers.
 Settings shows the account's URL, copies it, and can replace it — which is also
 how a leaked one is revoked.
+
+The URL adds one app at a time, and no repository can do better: Obtainium's
+search dialog is hardcoded to `onlyOneSelectionAllowed`. The whole shelf at
+once goes through the import file instead, which is also the only route in that
+names the source explicitly — it has to, because the F-Droid repo source sets
+`neverAutoSelect`, so a bare URL list is handed to the generic HTML scraper and
+that would read `index.xml` as a web page.
 
 The token is in the path because there is nowhere else for it to go.
 Obtainium's F-Droid source sends no cookie, cannot be given a request header,
