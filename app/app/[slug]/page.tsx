@@ -14,8 +14,8 @@ import {
 import SaveButton from "@/components/save-button";
 import InstalledControl from "@/components/installed-control";
 import EditApp from "@/components/edit-app";
-import { findApp, getApps } from "@/lib/store";
 import { storedText } from "@/lib/edit";
+import { appFor, catalogFor } from "@/lib/user-state";
 import { currentUser } from "@/lib/current-user";
 import { stateFor } from "@/lib/user-state";
 
@@ -38,10 +38,18 @@ export default async function AppDetailPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const app = await findApp(slug);
+  // The per-user controls are simply absent without a session rather than
+  // present and inert: this store is browsable by anyone, and a bookmark that
+  // silently keeps nothing is a worse answer than no bookmark. The same reading
+  // decides whether the 18+ gate is open — see `appFor`.
+  const viewer = await currentUser();
+  const userId = viewer?.id ?? null;
+  // A gated app is not found rather than refused: a page that says "you may
+  // not see this" still says the app is here.
+  const app = await appFor(userId, slug);
   if (!app) notFound();
 
-  const related = (await getApps())
+  const related = (await catalogFor(userId))
     .filter((a) => a.category === app.category && a.slug !== app.slug)
     .slice(0, 6);
 
@@ -59,11 +67,6 @@ export default async function AppDetailPage({
   // come from us.
   const linked = !latest && app.source?.assetUrl ? app.source : null;
 
-  // The per-user controls are simply absent without a session rather than
-  // present and inert: this store is browsable by anyone, and a bookmark that
-  // silently keeps nothing is a worse answer than no bookmark.
-  const viewer = await currentUser();
-  const userId = viewer?.id ?? null;
   const mine = stateFor(userId, app.slug);
 
   return (

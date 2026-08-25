@@ -14,12 +14,15 @@
  */
 import { db } from "./db";
 import {
+  ADULT_CATEGORY,
   compareVersions,
+  findApp,
   getApps,
   getCatalog,
   installed as placeholderInstalled,
   saved as placeholderSaved,
   updates as placeholderUpdates,
+  withoutAdults,
   type StoreApp,
 } from "./store";
 
@@ -31,6 +34,52 @@ export type UserState = {
 };
 
 const EMPTY: UserState = { saved: new Set(), installed: new Map() };
+
+/* ------------------------------------------------------------- the 18+ gate */
+
+/**
+ * Whether this account has said it is 18 or older.
+ *
+ * A signed-out browser is never old enough. That is the whole design: the
+ * store is open to anyone on the network, so "nobody in particular" has to be
+ * the strictest reading rather than the most permissive one, and there is no
+ * cookie to clear or dialog to click past.
+ */
+export function adultsAllowed(userId: number | null): boolean {
+  if (userId === null) return false;
+  const row = db()
+    .prepare("SELECT adults FROM user_prefs WHERE user_id = ?")
+    .get(userId) as { adults: number } | undefined;
+  return row?.adults === 1;
+}
+
+/** Idempotent, like the save toggle: the same answer may arrive twice. */
+export function setAdultsAllowed(userId: number, on: boolean): void {
+  db()
+    .prepare(
+      `INSERT INTO user_prefs (user_id, adults, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT (user_id) DO UPDATE SET adults = excluded.adults,
+                                           updated_at = excluded.updated_at`
+    )
+    .run(userId, on ? 1 : 0, new Date().toISOString());
+}
+
+/**
+ * One app, seen as this person may see it.
+ *
+ * A gated app answers null — exactly what a slug that does not exist answers,
+ * so the detail page and the download route both 404 without having to say
+ * which of the two reasons it was.
+ */
+export async function appFor(
+  userId: number | null,
+  slug: string
+): Promise<StoreApp | null> {
+  const app = await findApp(slug);
+  if (!app) return null;
+  if (app.category === ADULT_CATEGORY && !adultsAllowed(userId)) return null;
+  return app;
+}
 
 export function readState(userId: number): UserState {
   const conn = db();
@@ -140,7 +189,10 @@ export function decorate(apps: StoreApp[], state: UserState): StoreApp[] {
  * flags survive, so the screens can still be judged on an empty install.
  */
 export async function catalogFor(userId: number | null): Promise<StoreApp[]> {
-  const apps = await getApps();
+  // Every list screen reads through here, so this one line is the gate for all
+  // of them — home, search, the category pages, saved and updates.
+  const all = await getApps();
+  const apps = adultsAllowed(userId) ? all : withoutAdults(all);
   if (userId === null) return apps;
   return decorate(apps, readState(userId));
 }
@@ -148,17 +200,17 @@ export async function catalogFor(userId: number | null): Promise<StoreApp[]> {
 /* ------------------------------------------------------- the screens' lists */
 
 export async function savedApps(userId: number | null): Promise<StoreApp[]> {
-  if (userId === null) return placeholderSaved();
+  if (userId === null) return withoutAdults(await placeholderSaved());
   return (await catalogFor(userId)).filter((a) => a.saved);
 }
 
 export async function installedApps(userId: number | null): Promise<StoreApp[]> {
-  if (userId === null) return placeholderInstalled();
+  if (userId === null) return withoutAdults(await placeholderInstalled());
   return (await catalogFor(userId)).filter((a) => a.installed);
 }
 
 export async function updatableApps(userId: number | null): Promise<StoreApp[]> {
-  if (userId === null) return placeholderUpdates();
+  if (userId === null) return withoutAdults(await placeholderUpdates());
   return (await catalogFor(userId)).filter((a) => a.updateTo);
 }
 

@@ -9,7 +9,8 @@ import { promises as fs } from "node:fs";
 import { NextResponse } from "next/server";
 import { STORE_DIRS } from "@/lib/storage";
 import { contentTypeFor, fileResponse, resolveInStore } from "@/lib/serve";
-import { findApp } from "@/lib/store";
+import { appFor } from "@/lib/user-state";
+import { currentUserId } from "@/lib/current-user";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,7 +20,9 @@ export async function GET(
   { params }: { params: Promise<{ slug: string }> }
 ) {
   const { slug } = await params;
-  const app = await findApp(slug);
+  // Gated the same way the page is: a slug read off someone else's screen is
+  // the obvious way around a hidden shelf.
+  const app = await appFor(await currentUserId(), slug);
   if (!app) return new NextResponse("Not found", { status: 404 });
 
   const wanted = new URL(req.url).searchParams.get("v");

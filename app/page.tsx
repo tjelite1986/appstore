@@ -7,7 +7,9 @@ import Changelog from "@/components/changelog";
 import QuickLinks from "@/components/quick-links";
 import { MUTED } from "@/components/primitives";
 import { cn } from "@/lib/utils";
-import { changelog, getApps, recentlyAdded } from "@/lib/store";
+import { changelog, recentlyAdded } from "@/lib/store";
+import { currentUserId } from "@/lib/current-user";
+import { adultsAllowed, catalogFor } from "@/lib/user-state";
 
 // The catalog is a directory on disk, not a build-time constant: an app
 // imported after the last deploy has to show up without one.
@@ -22,10 +24,15 @@ export const dynamic = "force-dynamic";
  * unevenly, and a heading over an empty grid reads as a bug.
  */
 export default async function HomePage() {
+  const userId = await currentUserId();
+  // Read once and passed down: three blocks and the category tiles all have to
+  // agree about what this person may see, and asking four times invites three
+  // of them to be right.
+  const adults = adultsAllowed(userId);
   const [apps, recent, entries] = await Promise.all([
-    getApps(),
-    recentlyAdded(6),
-    changelog(3),
+    catalogFor(userId),
+    recentlyAdded(6, { adults }),
+    changelog(3, { adults }),
   ]);
 
   const editors = apps.filter((a) => a.category === "Editor");
@@ -75,7 +82,7 @@ export default async function HomePage() {
           a stray list between two headed sections. */}
       {entries.length > 0 && <Changelog title="What's new" items={entries} />}
 
-      <QuickLinks title="Categories" />
+      <QuickLinks title="Categories" adults={adults} />
     </Screen>
   );
 }

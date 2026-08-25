@@ -163,6 +163,20 @@ export const CATEGORIES: { label: Category; icon: string }[] = [
   { label: "Adults", icon: "store" },
 ];
 
+/**
+ * The one category this store keeps behind a gate.
+ *
+ * Filing an app here is what hides it — there is no second flag to forget. The
+ * gate itself is per account and lives in `lib/user-state.ts`, because who may
+ * see this shelf is a fact about a person and this module knows only disk.
+ */
+export const ADULT_CATEGORY: Category = "Adults";
+
+/** Everything but the gated shelf. The default answer for every reader. */
+export function withoutAdults<T extends { category: Category }>(apps: T[]): T[] {
+  return apps.filter((a) => a.category !== ADULT_CATEGORY);
+}
+
 const KNOWN_CATEGORIES: Category[] = [
   "Editor",
   "Media",
@@ -545,19 +559,28 @@ export async function byCategory(category: Category): Promise<StoreApp[]> {
  * The five tiles the sketch draws, plus "Other" only when something is in it —
  * an imported APK with no category lands there and needs somewhere to be found.
  */
-export async function categoryTiles(): Promise<
-  { label: Category; icon: string }[]
-> {
+export async function categoryTiles(
+  opts: { adults?: boolean } = {}
+): Promise<{ label: Category; icon: string }[]> {
   const apps = await getApps();
   const hasOther = apps.some((a) => a.category === "Other");
+  const tiles = opts.adults
+    ? CATEGORIES
+    : CATEGORIES.filter((c) => c.label !== ADULT_CATEGORY);
   return hasOther
-    ? [...CATEGORIES, { label: "Other" as Category, icon: "package" }]
-    : CATEGORIES;
+    ? [...tiles, { label: "Other" as Category, icon: "package" }]
+    : tiles;
 }
 
 /** Newest first by the date the app was first seen. */
-export async function recentlyAdded(limit = 6): Promise<StoreApp[]> {
-  const { apps, placeholder } = await getCatalog();
+export async function recentlyAdded(
+  limit = 6,
+  opts: { adults?: boolean } = {}
+): Promise<StoreApp[]> {
+  const { apps: all, placeholder } = await getCatalog();
+  // Gated by default: a caller that forgets to ask is a caller that should not
+  // be showing the shelf.
+  const apps = opts.adults ? all : withoutAdults(all);
   if (placeholder) return apps.slice(0, limit);
   return [...apps]
     .sort((a, b) => (b.added ?? "").localeCompare(a.added ?? ""))
@@ -583,11 +606,16 @@ export async function saved(): Promise<StoreApp[]> {
 }
 
 /** "v9.4.1 | 20 August | Photo Editor Pro, new update" */
-export async function changelog(limit = 3): Promise<string[]> {
-  const { apps, placeholder } = await getCatalog();
+export async function changelog(
+  limit = 3,
+  opts: { adults?: boolean } = {}
+): Promise<string[]> {
+  const { apps: all, placeholder } = await getCatalog();
   if (placeholder) return PLACEHOLDER_CHANGELOG.slice(0, limit);
 
-  return apps
+  // A line here names an app, so an ungated changelog would announce every
+  // arrival on the shelf it is meant to hide.
+  return (opts.adults ? all : withoutAdults(all))
     .flatMap((app) => app.versions.map((v) => ({ app, v })))
     .sort((a, b) => b.v.added.localeCompare(a.v.added))
     .slice(0, limit)

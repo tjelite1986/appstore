@@ -5,7 +5,9 @@ import AddApp from "@/components/add-app";
 import SourcesPanel from "@/components/sources-panel";
 import ImportPanel from "@/components/import-panel";
 import { STORE_DIRS, STORE_HOST_ROOT } from "@/lib/storage";
-import { getCatalog, pendingImports } from "@/lib/store";
+import { getCatalog, pendingImports, withoutAdults } from "@/lib/store";
+import { currentUserId } from "@/lib/current-user";
+import { adultsAllowed } from "@/lib/user-state";
 
 export const dynamic = "force-dynamic";
 
@@ -18,10 +20,14 @@ export const dynamic = "force-dynamic";
  * now. Nothing on this screen is layout any more.
  */
 export default async function ManagePage() {
-  const [{ apps, placeholder }, waiting] = await Promise.all([
+  const [{ apps: all, placeholder }, waiting] = await Promise.all([
     getCatalog(),
     pendingImports(),
   ]);
+  // Manage is reachable by anyone — only its write actions ask who you are —
+  // so the 18+ gate applies to the listing here as well. An admin who needs to
+  // work on that shelf opens the gate in Settings like everybody else.
+  const apps = adultsAllowed(await currentUserId()) ? all : withoutAdults(all);
 
   return (
     <Screen>

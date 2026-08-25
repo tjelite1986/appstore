@@ -70,6 +70,17 @@ function migrate(conn: Database.Database): void {
       PRIMARY KEY (user_id, slug)
     );
 
+    -- One row per person who has changed something away from the defaults.
+    -- A missing row is the default, which is why every column here has to
+    -- have a safe one: "no row" and "answered no" must read the same.
+    CREATE TABLE IF NOT EXISTS user_prefs (
+      user_id    INTEGER PRIMARY KEY,
+      -- Whether this account has confirmed it is 18 or older. 0 hides the
+      -- Adults category everywhere, including from a typed-in URL.
+      adults     INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT    NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS user_installed (
       user_id      INTEGER NOT NULL,
       slug         TEXT    NOT NULL,

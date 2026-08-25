@@ -11,7 +11,7 @@
  * over, which is as close to "installed" as a web page gets.
  */
 import { requireUser } from "@/lib/admin";
-import { findApp } from "@/lib/store";
+import { appFor } from "@/lib/user-state";
 import { setInstalled } from "@/lib/user-state";
 
 export const dynamic = "force-dynamic";
@@ -36,7 +36,7 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   if (body.version !== null) {
-    const app = await findApp(body.slug);
+    const app = await appFor(gate.user.id, body.slug);
     if (!app) return Response.json({ error: "No such app" }, { status: 404 });
     // The version has to be one the library actually has. A free-text version
     // would compare against the shelf however it liked, and an app could sit

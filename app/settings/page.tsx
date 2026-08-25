@@ -15,7 +15,8 @@ import RowCard from "@/components/rows";
 import ForgetStateButton from "@/components/forget-state-button";
 import { STORE_ROOT } from "@/lib/storage";
 import { currentUser } from "@/lib/current-user";
-import { readState } from "@/lib/user-state";
+import { adultsAllowed, readState } from "@/lib/user-state";
+import AdultsToggle from "@/components/adults-toggle";
 
 export const dynamic = "force-dynamic";
 
@@ -64,6 +65,8 @@ export default async function SettingsPage() {
           <ForgetStateButton count={kept} />
         </div>
       )}
+
+      <AdultsToggle on={adultsAllowed(user?.id ?? null)} signedIn={!!user} />
 
       <RowCard
         title="Appearance"

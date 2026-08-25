@@ -25,8 +25,15 @@ const ICONS: Record<string, LucideIcon> = {
  * The sketch's `quick-links`: icon tiles in a 3-column grid that jump into a
  * category.
  */
-export default async function QuickLinks({ title }: { title: string }) {
-  const categories = await categoryTiles();
+export default async function QuickLinks({
+  title,
+  adults = false,
+}: {
+  title: string;
+  /** Whether this viewer has passed the 18+ gate — see `lib/user-state.ts`. */
+  adults?: boolean;
+}) {
+  const categories = await categoryTiles({ adults });
 
   return (
     <section className="px-[var(--pad)]">

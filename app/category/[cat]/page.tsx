@@ -3,7 +3,7 @@ import { Screen, ScreenTitle } from "@/components/screen";
 import AppGrid from "@/components/app-grid";
 import { categoryTiles } from "@/lib/store";
 import { currentUserId } from "@/lib/current-user";
-import { catalogFor } from "@/lib/user-state";
+import { adultsAllowed, catalogFor } from "@/lib/user-state";
 
 export const dynamic = "force-dynamic";
 
@@ -14,12 +14,13 @@ export default async function CategoryPage({
   params: Promise<{ cat: string }>;
 }) {
   const { cat } = await params;
-  const match = (await categoryTiles()).find(
+  const userId = await currentUserId();
+  const match = (await categoryTiles({ adults: adultsAllowed(userId) })).find(
     (c) => c.label.toLowerCase() === cat.toLowerCase()
   );
   if (!match) notFound();
 
-  const apps = (await catalogFor(await currentUserId())).filter(
+  const apps = (await catalogFor(userId)).filter(
     (a) => a.category === match.label
   );
 
