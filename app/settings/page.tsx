@@ -18,7 +18,7 @@ import { adultsAllowed, readState } from "@/lib/user-state";
 import AdultsToggle from "@/components/adults-toggle";
 import RepoUrl from "@/components/repo-url";
 import { repoTokenFor } from "@/lib/repo-token";
-import { repoFingerprint } from "@/lib/fdroid-index-v1";
+import { repoFingerprint } from "@/lib/fdroid-published";
 
 export const dynamic = "force-dynamic";
 

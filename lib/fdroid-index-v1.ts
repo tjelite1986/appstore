@@ -12,8 +12,9 @@
  *
  * The first is bytes. A client verifies its download against the index's
  * SHA-256 and keys versions on `versionCode`, so every APK has to be opened.
- * That goes through `lib/apk-facts.ts`, which caches on (path, size, mtime);
- * a build after a quiet hour reads no APK at all.
+ * That goes through `lib/fdroid-shelf.ts`, which both index formats read the
+ * library through, and which caches on (path, size, mtime); a build after a
+ * quiet hour reads no APK at all.
  *
  * The second is that the index is *signed*, and a signature cannot be per
  * request. So this produces a whole document, not a response: the host job
@@ -35,13 +36,8 @@
  * them would mean parsing every manifest past its root element for a field
  * nothing here gates on.
  */
-import { promises as fs } from "node:fs";
-import path from "node:path";
-import { apkFacts, apkFactsKey } from "./apk-facts";
-import { apkFileName } from "./fdroid-index";
-import { resolveInStore } from "./serve";
-import { STORE_DIRS } from "./storage";
-import type { AppVersion, StoreApp } from "./store";
+import { collectShelf, iconName, ms } from "./fdroid-shelf";
+import type { StoreApp } from "./store";
 
 /**
  * The repository-format version this document claims. 20 is what current
@@ -73,99 +69,6 @@ export type IndexV1Result = {
   seen: Set<string>;
 };
 
-type PackageEntry = {
-  packageName: string;
-  apkName: string;
-  versionName: string;
-  versionCode: number;
-  hash: string;
-  hashType: "sha256";
-  signer: string;
-  size: number;
-  added: number;
-};
-
-/**
- * The icon's file name, as a client will ask for it — or null.
- *
- * The catalog carries the icon as a ready-made URL into `/api/media`, because
- * that is what a browser needs; a repository index needs the bare name, and
- * the client puts it together with an address of its own choosing. Rather
- * than reach into the library a second time and risk disagreeing with the
- * catalog about which file an app's icon is, the name is taken back out of
- * that URL — it is the last segment, before the cache-busting query.
- */
-function iconName(app: StoreApp): string | null {
-  if (!app.icon) return null;
-  const withoutQuery = app.icon.split("?")[0];
-  const last = withoutQuery.slice(withoutQuery.lastIndexOf("/") + 1);
-  // The catalog percent-encodes each segment on the way in.
-  const decoded = (() => {
-    try {
-      return decodeURIComponent(last);
-    } catch {
-      return last;
-    }
-  })();
-  // A name a client cannot ask for cleanly is no name at all: the route looks
-  // it up against the library, so anything with a separator in it would be a
-  // path rather than a file.
-  return decoded && !decoded.includes("/") ? decoded : null;
-}
-
-/** F-Droid timestamps are milliseconds; the catalog keeps ISO strings. */
-function ms(iso: string): number {
-  return Date.parse(iso) || 0;
-}
-
-/**
- * One APK, as far as a client is concerned — or null, with why.
- *
- * Three of the four reasons to drop a file are the same shape: the bytes did
- * not answer. An APK with no v2/v3 signing block is dropped rather than listed
- * without a `signer`, because a client that installed it would have nothing to
- * check the *next* version against, which is the one guarantee a repository is
- * supposed to carry.
- */
-async function packageFor(
-  app: StoreApp,
-  version: AppVersion,
-  seen: Set<string>
-): Promise<{ entry: PackageEntry | null; reason?: string }> {
-  const abs = await resolveInStore(
-    STORE_DIRS.apks,
-    app.slug,
-    version.version,
-    version.file
-  );
-  if (!abs) return { entry: null, reason: `${version.version}: file missing` };
-
-  const facts = await apkFacts(abs);
-  if (!facts) return { entry: null, reason: `${version.version}: unreadable` };
-  seen.add(apkFactsKey(abs));
-
-  if (facts.versionCode === null) {
-    return { entry: null, reason: `${version.version}: no versionCode` };
-  }
-  if (!facts.signer) {
-    return { entry: null, reason: `${version.version}: not v2/v3-signed` };
-  }
-
-  return {
-    entry: {
-      packageName: app.packageName!,
-      apkName: apkFileName(app, version),
-      versionName: version.version,
-      versionCode: facts.versionCode,
-      hash: facts.sha256,
-      hashType: "sha256",
-      signer: facts.signer,
-      size: version.bytes,
-      added: ms(version.added),
-    },
-  };
-}
-
 /**
  * Build the document.
  *
@@ -178,65 +81,24 @@ export async function buildIndexV1(
   apps: StoreApp[],
   opts: IndexV1Options & { timestamp: number }
 ): Promise<IndexV1Result> {
-  const skipped: { slug: string; reason: string }[] = [];
-  const seen = new Set<string>();
-
-  /**
-   * `packages` is keyed on the package id, and nothing in this store promises
-   * two listings do not share one. So the id is the unit here, not the slug:
-   * the first listing to claim an id describes the app, later ones only add
-   * their files. Merging beats dropping — two listings for one id are usually
-   * the same app twice, and a client keys on the id either way.
-   */
-  const order: string[] = [];
-  const meta = new Map<string, StoreApp>();
-  const files = new Map<string, PackageEntry[]>();
-
-  for (const app of apps) {
-    if (!app.packageName) {
-      skipped.push({ slug: app.slug, reason: "no package id" });
-      continue;
-    }
-    if (!app.versions.length) {
-      skipped.push({ slug: app.slug, reason: "nothing on the shelf" });
-      continue;
-    }
-
-    const entries: PackageEntry[] = [];
-    for (const version of app.versions) {
-      const { entry, reason } = await packageFor(app, version, seen);
-      if (entry) entries.push(entry);
-      else if (reason) skipped.push({ slug: app.slug, reason });
-    }
-    if (!entries.length) continue;
-
-    const id = app.packageName;
-    if (!meta.has(id)) {
-      order.push(id);
-      meta.set(id, app);
-      files.set(id, []);
-    }
-    files.get(id)!.push(...entries);
-  }
+  const shelf = await collectShelf(apps);
 
   const appList = [];
-  const packages: Record<string, PackageEntry[]> = {};
+  const packages: Record<string, unknown[]> = {};
   let packageCount = 0;
 
-  for (const id of order) {
-    const app = meta.get(id)!;
-    // Newest first, which is the order a client shows and the order it picks
-    // a suggestion from. A version code repeated across two listings would be
-    // one entry too many, so the first one to claim it wins.
-    const byCode = new Map<number, PackageEntry>();
-    for (const entry of files.get(id)!) {
-      if (!byCode.has(entry.versionCode)) byCode.set(entry.versionCode, entry);
-    }
-    const entries = [...byCode.values()].sort(
-      (a, b) => b.versionCode - a.versionCode
-    );
-
-    packages[id] = entries;
+  for (const { id, app, entries } of shelf.packages) {
+    packages[id] = entries.map((entry) => ({
+      packageName: entry.packageName,
+      apkName: entry.apkName,
+      versionName: entry.versionName,
+      versionCode: entry.versionCode,
+      hash: entry.hash,
+      hashType: "sha256",
+      signer: entry.signer,
+      size: entry.size,
+      added: entry.added,
+    }));
     packageCount += entries.length;
 
     const description = app.description || app.tagline;
@@ -300,36 +162,7 @@ export async function buildIndexV1(
     json: JSON.stringify(index),
     apps: appList.length,
     packages: packageCount,
-    skipped,
-    seen,
+    skipped: shelf.skipped,
+    seen: shelf.seen,
   };
-}
-
-/** Where a built jar lives, relative to the library root. */
-export const FDROID_STATE_DIR = path.join(STORE_DIRS.state, "fdroid");
-
-/** The two documents that exist, and the directory each one's jar sits in. */
-export const INDEX_VARIANTS = ["all", "clean"] as const;
-export type IndexVariant = (typeof INDEX_VARIANTS)[number];
-
-export const SIGNED_INDEX_FILE = "index-v1.jar";
-
-/**
- * The repository key's fingerprint, or null before anything has been signed.
- *
- * An F-Droid client takes it on the URL — `?fingerprint=…` — and refuses an
- * index signed by anything else, which is what makes a repository over a home
- * connection worth trusting at all. The signing job writes the file after both
- * jars are in place, so its presence also answers "is there a signed index
- * yet"; that is why the settings row appears with it and not before.
- */
-export async function repoFingerprint(): Promise<string | null> {
-  const abs = await resolveInStore(FDROID_STATE_DIR, "fingerprint.txt");
-  if (!abs) return null;
-  try {
-    const raw = (await fs.readFile(abs, "utf8")).trim();
-    return /^[0-9A-F]{64}$/.test(raw) ? raw : null;
-  } catch {
-    return null;
-  }
 }

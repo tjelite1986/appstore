@@ -380,10 +380,12 @@ URL there and the shelf is on the phone.
 | Route | Serves |
 |---|---|
 | `/fdroid/repo/index.xml` | the shelf a signed-out visitor sees, as an index |
-| `/fdroid/repo/index-v1.jar` | the same shelf, signed, for a real F-Droid client |
+| `/fdroid/repo/entry.jar` | the signed pointer a current F-Droid client asks for first |
+| `/fdroid/repo/index-v2.json` | what that pointer vouches for |
+| `/fdroid/repo/index-v1.jar` | the same shelf in the older signed format |
 | `/fdroid/repo/<slug>_<version>.apk` | a file from it |
 | `/fdroid/repo/obtainium.json` | the same shelf as an Obtainium import file |
-| `/fdroid/t/<token>/repo/…` | all four, as one account |
+| `/fdroid/t/<token>/repo/…` | all of them, as one account |
 
 Entering the bare hostname is enough: Obtainium tries `/index.xml`,
 `/repo/index.xml` and `/fdroid/repo/index.xml` in turn, and the third answers.
@@ -422,8 +424,17 @@ Obtainium cannot do one thing: notice an app that is not already on the phone.
 Its F-Droid source tracks apps you added, one at a time, so a new listing on
 the shelf reaches nobody. A client that *subscribes* to a repository — the
 official F-Droid app, Droid-ify, Neo Store — lists the whole thing, and for
-that it wants `index-v1.jar`: the same catalog as JSON, with every APK's
-SHA-256, version code and signer, inside a signed jar.
+that it wants the catalog as JSON, with every APK's SHA-256, version code and
+signer, under a signature.
+
+Both signed formats are published, because a client picks one by probing.
+Index-v2 is what a current client asks for first: it fetches `entry.jar`, a
+signed jar holding nothing but the SHA-256 and size of `index-v2.json`, then
+fetches that document unsigned and checks it against the entry. A 404 on
+`entry.jar` sends it back to `index-v1.jar`, the older shape, where the whole
+catalog sits inside the signed jar itself. Publishing only v1 works and costs
+every sync a wasted round trip; publishing only v2 would break the first old
+client that showed up. Both cost one document each per signing run.
 
 All three of those come from the bytes of the file, so `lib/apk-facts.ts`
 caches them in `_state/store.db` on the path plus `(size, mtime)`. The first
@@ -435,7 +446,15 @@ the split is the one the timers already use, and `scripts/fdroid-sign.sh`
 is the other half:
 
     the app     GET /api/fdroid/index-v1  →  the document, whole
-    the host    zip it, jarsign it, drop the jar in _state/fdroid/<variant>/
+                GET /api/fdroid/index-v2  →  the other one
+    the host    zip it, jarsign it, drop the result in _state/fdroid/<variant>/
+
+For v2 the host also writes `entry.json`, because it describes bytes the host
+produced: the SHA-256 and size of the file it just received, plus that file's
+own timestamp echoed back in the `x-index-timestamp` header. So the response
+body is hashed exactly as it arrived — nothing reformats it on the way to disk,
+because a pretty-printer between the two would publish an entry that no longer
+describes the file beside it.
 
 A signature cannot be per request, so there are exactly two documents — `all`
 and `clean`, the shelf with Adults and without — and the token in the URL picks
@@ -444,7 +463,7 @@ is generated on first run into `_state/fdroid/`, beside its password in plain
 text, and it never moves: a client pins its fingerprint, so replacing it means
 every subscribed phone has to remove the repository and add it again. Whether
 that directory belongs in a backup is a decision, not a default — a key in a
-versioned backup cannot be taken back out of it, and the two jars beside it are
+versioned backup cannot be taken back out of it, and the indexes beside it are
 rebuilt from nothing in seconds. Settings shows that fingerprint on the
 URL (`?fingerprint=…`) once something has been signed.
 
@@ -454,7 +473,10 @@ from — `<repo>/icons-<dpi>/<name>` from the flat `icon`, or
 `<repo>/<packageName>/en-US/<name>` from the localised one. Both are written
 and the repository route answers both, with the same file: this library keeps
 one icon per app and no density buckets, so every bucket a client asks for is
-the same PNG the website serves.
+the same PNG the website serves. Index-v2 removes the guessing: there a name
+is a repository-relative path the client is handed
+(`/<packageName>/en-US/<name>`) rather than a rule it applies, so one field
+serves it and the route already answers that shape.
 
 An APK with no v2/v3 signing block is left out of the signed index rather than
 listed without a `signer`. A client that installed it would have nothing to
@@ -622,9 +644,5 @@ Sign-in and per-user storage are both answered. What is left:
   the same version and the second is a `duplicate` decision.
 - **Reviews, ratings and the 18+ gate.** `rating` and `ratingCount` are read
   from meta and shown; nothing collects them.
-- **A repository the official F-Droid client can add.** The index is served for
-  Obtainium, which reads the unsigned `index.xml`; F-Droid and Droid-ify want a
-  signed `index-v1.jar` with APK hashes, version codes and signer fingerprints
-  in it (see "On a phone").
 - **Per-app update controls.** The source check is all-or-nothing from Manage;
   there is no "fetch just this one" on an app's own page.

@@ -4,15 +4,21 @@
 #
 # The other timers are pure HTTP: the work belongs to the app, and the host
 # only decides when. This one cannot be, and the reason is the whole design.
-# A subscribable F-Droid repository is a *signed* `index-v1.jar`, signing needs
-# a JDK, and a repository key baked into a container image is a key inside
-# every copy of that image. So the split is:
+# A subscribable F-Droid repository is *signed*, signing needs a JDK, and a
+# repository key baked into a container image is a key inside every copy of
+# that image. So the split is:
 #
 #   the app     decides what is in the index — which apps, which files, their
 #               hashes, version codes and signers — and hands it over whole
-#               (GET /api/fdroid/index-v1)
-#   this script owns the key, seals the document into a jar, and drops it
-#               where the app can serve it (_state/fdroid/<variant>/)
+#               (GET /api/fdroid/index-v1, GET /api/fdroid/index-v2)
+#   this script owns the key, seals the documents, and drops them where the
+#               app can serve them (_state/fdroid/<variant>/)
+#
+# Both formats are published. A current client — Neo Store, Droid-ify, the
+# official one — asks for index-v2's `entry.jar` first and only falls back to
+# `index-v1.jar` on a 404, so publishing v2 spares every sync a wasted round
+# trip, and keeping v1 costs one document per run and covers the client that
+# has not moved.
 #
 # Two variants exist because a signature cannot be per request: `all` is the
 # whole shelf, `clean` is the shelf without Adults. The repository route picks
@@ -73,7 +79,14 @@ PASSFILE="$STATE/keystore.pass"
 mkdir -p "$STATE"
 chmod 700 "$STATE"
 
-WORK=$(mktemp -d)
+# Inside the library, not /tmp: publishing is a `mv` into $STATE, and a rename
+# is only atomic within one filesystem. Here those are two — /tmp is the boot
+# device and the library is the 4 TB disk — so a staged file in /tmp would be
+# *copied* into place, and a phone fetching the index during that copy would
+# read half of it. Under index-v2 that is not even a slow download: the entry
+# carries the index's SHA-256, so half a file is a repository the client
+# refuses outright.
+WORK=$(mktemp -d "$STATE/.build-XXXXXX")
 trap 'rm -rf "$WORK"' EXIT
 
 # ------------------------------------------------------------------ the key
@@ -116,36 +129,44 @@ FINGERPRINT=$(
 
 # Prints the document to $1; fails the script on any non-2xx, and prints what
 # the app said about the build so the journal has more than a status code.
+#
+# Two of those headers are not just for the journal — index-v2's entry has to
+# repeat the document's own timestamp and app count — so they are left in
+# INDEX_TIMESTAMP and INDEX_APPS for the caller. Globals rather than a return
+# value because a function can only hand back a string, and splitting one is
+# how a build ends up publishing an entry that describes a different index.
+INDEX_TIMESTAMP=
+INDEX_APPS=
 fetch_index() {
-  local out=$1 query=$2 code
+  local out=$1 endpoint=$2 query=$3 label=$4 code
   code=$("$CURL" -sS -H "x-store-admin-token: $TOKEN" \
            --max-time 3600 -D "$WORK/headers" -o "$out" \
-           -w '%{http_code}' "$BASE/api/fdroid/index-v1$query") \
-    || die "index$query: curl failed"
-  [ "$code" = "200" ] || die "index$query: HTTP $code — $(head -c 300 "$out")"
+           -w '%{http_code}' "$BASE/api/fdroid/$endpoint$query") \
+    || die "$endpoint$query: curl failed"
+  [ "$code" = "200" ] || die "$endpoint$query: HTTP $code — $(head -c 300 "$out")"
 
-  local apps packages skipped pruned
-  apps=$(sed -n 's/^[Xx]-[Ii]ndex-[Aa]pps: *//p' "$WORK/headers" | tr -d '\r')
+  local packages skipped pruned
+  INDEX_APPS=$(sed -n 's/^[Xx]-[Ii]ndex-[Aa]pps: *//p' "$WORK/headers" | tr -d '\r')
+  INDEX_TIMESTAMP=$(sed -n 's/^[Xx]-[Ii]ndex-[Tt]imestamp: *//p' "$WORK/headers" | tr -d '\r')
   packages=$(sed -n 's/^[Xx]-[Ii]ndex-[Pp]ackages: *//p' "$WORK/headers" | tr -d '\r')
   pruned=$(sed -n 's/^[Xx]-[Ii]ndex-[Pp]runed: *//p' "$WORK/headers" | tr -d '\r')
   skipped=$(sed -n 's/^[Xx]-[Ii]ndex-[Ss]kipped: *//p' "$WORK/headers" | tr -d '\r')
-  say "$3: ${apps:-?} apps, ${packages:-?} files${pruned:+, $pruned stale cache rows dropped}"
-  [ -n "$skipped" ] && say "$3: left out — $skipped"
+  say "$label: ${INDEX_APPS:-?} apps, ${packages:-?} files${pruned:+, $pruned stale cache rows dropped}"
+  [ -n "$skipped" ] && say "$label: left out — $skipped"
   return 0
 }
 
-# One jar: zip the document, sign it, and move it into place in one step.
+# Seal one document into a jar under $WORK.
 #
 # `jar` writes META-INF/MANIFEST.MF itself and jarsigner adds the digests and
 # the signature block beside it — which is exactly what an F-Droid client
 # verifies before it reads a byte of the index. SHA-256 throughout: this JDK
 # refuses to sign with SHA-1 at all, and every Android version that can run a
 # current client has read SHA-256 jar signatures since forever.
-build_jar() {
-  local variant=$1 doc=$2 dest="$STATE/$1"
-  local staged="$WORK/$variant.jar"
+sign_jar() {
+  local staged=$1 doc=$2 label=$3
 
-  "$JAR" --create --file "$staged" -C "$(dirname "$doc")" index-v1.json
+  "$JAR" --create --file "$staged" -C "$(dirname "$doc")" "$(basename "$doc")"
   "$JARSIGNER" -keystore "$KEYSTORE" -storetype PKCS12 \
     -storepass "$PASS" -keypass "$PASS" \
     -digestalg SHA-256 -sigalg SHA256withRSA \
@@ -153,26 +174,94 @@ build_jar() {
   # Refuse to publish something a client would reject.
   "$JARSIGNER" -verify -keystore "$KEYSTORE" -storetype PKCS12 \
     -storepass "$PASS" "$staged" >/dev/null \
-    || die "$variant: the jar this run produced does not verify"
-
-  mkdir -p "$dest"
-  # Same filesystem, so the replacement is atomic: a phone fetching the index
-  # at this moment gets the old jar whole or the new one whole, never half.
-  mv -f "$staged" "$dest/index-v1.jar"
-  chmod 644 "$dest/index-v1.jar"
-  say "$variant: published $(stat -c%s "$dest/index-v1.jar") bytes"
+    || die "$label: the jar this run produced does not verify"
 }
 
-# The full shelf first, and it is the one that prunes: only this build looks
-# at every APK, so only this one can tell which cache rows are for files that
-# are gone. The filtered build reuses the cache that one just warmed, which is
-# why it is second and why it costs seconds rather than minutes.
-mkdir -p "$WORK/all" "$WORK/clean"
-fetch_index "$WORK/all/index-v1.json"   "?adults=1&prune=1" all
-fetch_index "$WORK/clean/index-v1.json" ""                  clean
+# Move a staged file into the variant's directory. $WORK is inside the library,
+# so this is a rename: a phone fetching the file at this moment gets the old
+# one whole or the new one whole, never half.
+publish() {
+  local variant=$1 staged=$2 name=$3 dest="$STATE/$variant"
+  mkdir -p "$dest"
+  mv -f "$staged" "$dest/$name"
+  chmod 644 "$dest/$name"
+  say "$variant: published $name, $(stat -c%s "$dest/$name") bytes"
+}
 
-build_jar all   "$WORK/all/index-v1.json"
-build_jar clean "$WORK/clean/index-v1.json"
+# ---------------------------------------------------------------- index-v1
+
+build_v1() {
+  local variant=$1 doc=$2
+  local staged="$WORK/$variant-index-v1.jar"
+  sign_jar "$staged" "$doc" "$variant/v1"
+  publish "$variant" "$staged" index-v1.jar
+}
+
+# ---------------------------------------------------------------- index-v2
+#
+# The newer format splits what v1 keeps in one jar: the signature covers a
+# small `entry.json` that names the real document and carries its SHA-256 and
+# size, and the client fetches that document unsigned and checks it against the
+# entry. So this is the one place where the *bytes* the app returned matter and
+# not just their meaning — the file is hashed exactly as it arrived and moved
+# into place unmodified.
+#
+# The entry is written here rather than by the app for the same reason the
+# signing is: it describes bytes this script produced. It is the only piece of
+# index format knowledge out here, and it is four fields.
+#
+#   timestamp   must equal the one inside index-v2.json — a client compares it
+#               with the one it already has to decide whether to download at
+#               all, so an entry that disagreed with its index would either
+#               re-fetch the shelf forever or never again
+#   diffs       empty. A diff is an optimisation for a repository whose index
+#               is megabytes; this one is tens of kilobytes, and a client that
+#               finds no usable diff simply fetches the whole document.
+ENTRY_VERSION=20002
+
+build_v2() {
+  local variant=$1 doc=$2 timestamp=$3 apps=$4
+  local staged="$WORK/$variant-entry.jar"
+  local entry="$WORK/$variant-entry/entry.json"
+  local sha size
+
+  [ -n "$timestamp" ] || die "$variant: the index-v2 build reported no timestamp"
+
+  sha=$("$SHA256SUM" "$doc" | cut -d' ' -f1)
+  size=$(stat -c%s "$doc")
+
+  mkdir -p "$(dirname "$entry")"
+  printf '{"timestamp":%s,"version":%s,"index":{"name":"/index-v2.json","sha256":"%s","size":%s,"numPackages":%s},"diffs":{}}' \
+    "$timestamp" "$ENTRY_VERSION" "$sha" "$size" "${apps:-0}" > "$entry"
+
+  sign_jar "$staged" "$entry" "$variant/v2"
+
+  # The index before the entry that vouches for it. Between the two moves a
+  # client can read a new index with an old entry, which it rejects on the
+  # hash and retries; the other order hands it an entry pointing at bytes that
+  # are not there yet, which is the same failure with a worse cache story.
+  publish "$variant" "$doc"    index-v2.json
+  publish "$variant" "$staged" entry.jar
+}
+
+# ------------------------------------------------------------------- build
+
+# The full shelf first, and its v1 build is the one that prunes: only a build
+# over every APK can tell which cache rows are for files that are gone, and
+# doing it twice would just delete rows the first pass wrote. Every build after
+# it reuses the cache that one warmed, which is why they cost seconds.
+mkdir -p "$WORK/all" "$WORK/clean"
+fetch_index "$WORK/all/index-v1.json"   index-v1 "?adults=1&prune=1" "all/v1"
+build_v1 all "$WORK/all/index-v1.json"
+
+fetch_index "$WORK/clean/index-v1.json" index-v1 ""                  "clean/v1"
+build_v1 clean "$WORK/clean/index-v1.json"
+
+fetch_index "$WORK/all/index-v2.json"   index-v2 "?adults=1"         "all/v2"
+build_v2 all "$WORK/all/index-v2.json" "$INDEX_TIMESTAMP" "$INDEX_APPS"
+
+fetch_index "$WORK/clean/index-v2.json" index-v2 ""                  "clean/v2"
+build_v2 clean "$WORK/clean/index-v2.json" "$INDEX_TIMESTAMP" "$INDEX_APPS"
 
 # Last, and only once both jars are in place: the fingerprint is what Settings
 # shows people to paste into a client, and it should not name a key whose

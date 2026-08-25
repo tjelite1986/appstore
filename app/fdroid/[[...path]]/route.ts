@@ -5,13 +5,18 @@
  * fixed by what Obtainium asks for rather than by anything here:
  *
  *     /fdroid/repo/index.xml            the shelf a signed-out browser sees
- *     /fdroid/repo/index-v1.jar         the same shelf, signed, for a real
- *                                       F-Droid client
+ *     /fdroid/repo/entry.jar            the signed pointer a current F-Droid
+ *                                       client asks for first
+ *     /fdroid/repo/index-v2.json        what that pointer vouches for
+ *     /fdroid/repo/index-v1.jar         the same shelf in the older format,
+ *                                       signed, for a client that wants it
  *     /fdroid/repo/<name>.apk           a file from it
  *     /fdroid/repo/icons-<dpi>/<name>   an app's icon, for a client that
  *     /fdroid/repo/<pkg>/en-US/<name>   builds one address or the other
  *     /fdroid/repo/obtainium.json       the same shelf, as an import file
  *     /fdroid/t/<token>/repo/index.xml  the shelf that account sees
+ *     /fdroid/t/<token>/repo/entry.jar
+ *     /fdroid/t/<token>/repo/index-v2.json
  *     /fdroid/t/<token>/repo/index-v1.jar
  *     /fdroid/t/<token>/repo/<name>.apk
  *     /fdroid/t/<token>/repo/obtainium.json
@@ -36,9 +41,9 @@ import {
 } from "@/lib/fdroid-index";
 import {
   FDROID_STATE_DIR,
-  SIGNED_INDEX_FILE,
+  PUBLISHED_FILES,
   type IndexVariant,
-} from "@/lib/fdroid-index-v1";
+} from "@/lib/fdroid-published";
 import { userForRepoToken } from "@/lib/repo-token";
 import { contentTypeFor, fileResponse, resolveInStore } from "@/lib/serve";
 import { STORE_DIRS } from "@/lib/storage";
@@ -148,37 +153,32 @@ export async function GET(
   if (target.rest.length !== 1) return notFound();
   const file = target.rest[0];
 
-  // The signed index, which is a file on disk rather than a document built
+  // A signed index, which is a file on disk rather than a document built
   // here: a signature cannot be produced per request, and the key that makes
   // it is deliberately outside this container (see scripts/fdroid-sign.sh).
   //
-  // There are two of them, and which one this URL gets is the same decision
-  // the unsigned index makes — the token says who is asking, and only an
-  // account that has confirmed its age is shown Adults. A repository that has
-  // never been signed answers 404, which is what a client that asked for a
-  // format this repo does not publish should see.
+  // There are two of every one of them, and which one this URL gets is the
+  // same decision the unsigned index makes — the token says who is asking,
+  // and only an account that has confirmed its age is shown Adults. A format
+  // this repository has never signed answers 404, which is exactly what a
+  // probing client expects: it asks for index-v2 first and falls back.
   //
-  // Answered before the catalog is read, because it does not need one.
-  if (file === SIGNED_INDEX_FILE) {
+  // Answered before the catalog is read, because none of it needs one.
+  const published = PUBLISHED_FILES[file];
+  if (published) {
     const variant: IndexVariant = adultsAllowed(target.userId) ? "all" : "clean";
-    const abs = await resolveInStore(
-      FDROID_STATE_DIR,
-      variant,
-      SIGNED_INDEX_FILE
-    );
+    const abs = await resolveInStore(FDROID_STATE_DIR, variant, file);
     if (!abs) return notFound();
 
-    let jar;
+    let stat;
     try {
-      jar = await fs.stat(abs);
+      stat = await fs.stat(abs);
     } catch {
       return notFound();
     }
-    if (!jar.isFile()) return notFound();
+    if (!stat.isFile()) return notFound();
 
-    return fileResponse(abs, jar, req, {
-      contentType: "application/java-archive",
-    });
+    return fileResponse(abs, stat, req, { contentType: published });
   }
 
   const apps = await catalogFor(target.userId);
