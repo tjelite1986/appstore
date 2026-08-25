@@ -10,6 +10,7 @@
  * bytes rather than by the name it was requested under.
  */
 import { createWriteStream, promises as fs } from "node:fs";
+import { lookup } from "node:dns/promises";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import path from "node:path";
@@ -110,6 +111,110 @@ export async function fetchImageDataUrl(
 ): Promise<string | null> {
   const image = await fetchImage(url, tag);
   return image ? `data:${image.type};base64,${image.body.toString("base64")}` : null;
+}
+
+/* ------------------------------------------- an image somebody typed in */
+
+/**
+ * True when an address is on a network this machine can reach but the
+ * internet cannot.
+ *
+ * `fetchImageBytes` is the one function here whose URL comes from a form, so
+ * it is the one that can be pointed at the docker network, at the host, or at
+ * a cloud metadata service. Every other fetch in this module reads a URL that
+ * an upstream listing just handed us.
+ */
+function isInternalAddress(ip: string): boolean {
+  // An IPv4-mapped IPv6 address is the same address wearing a hat.
+  const v4 = ip.toLowerCase().startsWith("::ffff:") ? ip.slice(7) : ip;
+  const quad = v4.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (quad) {
+    const [a, b] = quad.slice(1).map(Number);
+    if (a === 0 || a === 10 || a === 127) return true;
+    if (a === 169 && b === 254) return true; // link-local, metadata included
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true; // carrier-grade NAT
+    return false;
+  }
+  const low = ip.toLowerCase();
+  if (low === "::" || low === "::1") return true;
+  // fc00::/7 unique-local, fe80::/10 link-local.
+  return /^f[cd]/.test(low) || /^fe[89ab]/.test(low);
+}
+
+/** Refuse a host that resolves inward, rather than fetching from it. */
+async function refuseInternal(target: URL): Promise<void> {
+  const addresses = await lookup(target.hostname, { all: true }).catch(
+    () => [] as { address: string }[]
+  );
+  if (addresses.length === 0) {
+    throw new Error(`${target.hostname} does not resolve`);
+  }
+  const inward = addresses.find((a) => isInternalAddress(a.address));
+  if (inward) {
+    throw new Error(
+      `${target.hostname} is ${inward.address}, on this machine's own network`
+    );
+  }
+}
+
+/**
+ * A remote image as bytes, for a URL that came from a request.
+ *
+ * Unlike `fetchImage` this throws rather than swallowing: the person typing
+ * the address is waiting to hear whether it worked, and a silent null would
+ * read as "saved". It also asks nothing of `content-type` — the caller hands
+ * the bytes to `saveUpload`, which decides what they are by reading them.
+ */
+export async function fetchImageBytes(
+  raw: string,
+  opts: { tag: string; maxBytes?: number }
+): Promise<Buffer> {
+  const max = opts.maxBytes ?? MAX_IMAGE_BYTES;
+
+  let target: URL;
+  try {
+    target = new URL(raw);
+  } catch {
+    throw new Error("that is not a URL");
+  }
+  if (target.protocol !== "https:" && target.protocol !== "http:") {
+    throw new Error(`${target.protocol.replace(":", "")} is not a URL this store will fetch`);
+  }
+  await refuseInternal(target);
+
+  const res = await fetch(target, {
+    headers: { "user-agent": USER_AGENT, accept: "image/*,*/*" },
+    signal: AbortSignal.timeout(IMAGE_TIMEOUT_MS),
+    cache: "no-store",
+  });
+  // Redirects are followed — release assets and CDNs are built on them — so
+  // the host that actually answered gets the same check as the one asked for.
+  if (res.url && res.url !== target.href) {
+    await refuseInternal(new URL(res.url));
+  }
+  if (!res.ok) throw new Error(`that address answered HTTP ${res.status}`);
+  if (!res.body) throw new Error("that address answered with no body");
+
+  const announced = Number(res.headers.get("content-length") ?? 0);
+  if (announced > max) {
+    throw new Error(`${announced} bytes is not a listing image`);
+  }
+
+  // Counted as it arrives: content-length is the far end's claim about a body
+  // it has not sent yet.
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+  for await (const chunk of Readable.fromWeb(
+    res.body as Parameters<typeof Readable.fromWeb>[0]
+  ) as AsyncIterable<Buffer>) {
+    bytes += chunk.length;
+    if (bytes > max) throw new Error(`the body passed ${max} bytes`);
+    chunks.push(chunk);
+  }
+  console.log(`[${opts.tag}] ${bytes} bytes from ${target.href}`);
+  return Buffer.concat(chunks);
 }
 
 /**

@@ -13,8 +13,9 @@ import {
 } from "@/components/primitives";
 import SaveButton from "@/components/save-button";
 import InstalledControl from "@/components/installed-control";
+import EditApp from "@/components/edit-app";
 import { findApp, getApps } from "@/lib/store";
-import { currentUserId } from "@/lib/current-user";
+import { currentUser } from "@/lib/current-user";
 import { stateFor } from "@/lib/user-state";
 
 export const dynamic = "force-dynamic";
@@ -60,7 +61,8 @@ export default async function AppDetailPage({
   // The per-user controls are simply absent without a session rather than
   // present and inert: this store is browsable by anyone, and a bookmark that
   // silently keeps nothing is a worse answer than no bookmark.
-  const userId = await currentUserId();
+  const viewer = await currentUser();
+  const userId = viewer?.id ?? null;
   const mine = stateFor(userId, app.slug);
 
   return (
@@ -145,6 +147,25 @@ export default async function AppDetailPage({
           slug={app.slug}
           latest={latest?.version ?? app.version}
           initialVersion={mine.installedVersion}
+        />
+      )}
+
+      {/* Admins only, and closed until asked for — see components/edit-app.tsx.
+          The token-holder route into Manage does not apply here: this is a
+          public page, and a form on it would be an invitation to everyone. */}
+      {viewer?.role === "admin" && (
+        <EditApp
+          app={{
+            slug: app.slug,
+            name: app.name,
+            developer: app.developer,
+            category: app.category,
+            tagline: app.tagline,
+            description: app.description ?? "",
+            icon: app.icon,
+            banner: app.banner,
+            screenshots: app.screenshots,
+          }}
         />
       )}
 
