@@ -3,7 +3,8 @@
  * layout-only build — but the paths are pinned here so the feature work has a
  * single file to open, and so nothing hard-codes a path inline later.
  *
- * Host root: /srv/appstore/library
+ * Host root: wherever `STORE_ROOT` points — a directory outside this
+ * repository, bind-mounted at /store in the container.
  *
  *   apks/         <slug>/<version>/<file>.apk|.xapk   the served binaries
  *   icons/        <slug>.png                          app icon
@@ -21,7 +22,7 @@
  * stay relative to it and nothing outside this file needs to know the host
  * path.
  */
-export const STORE_ROOT = process.env.STORE_ROOT ?? "/srv/appstore/library";
+export const STORE_ROOT = process.env.STORE_ROOT ?? "/store";
 
 /**
  * The same library as the machine outside the container sees it.

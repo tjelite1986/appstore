@@ -3,7 +3,7 @@
 A standalone store front for the APK archive — the section that used to live
 inside elite-v2 at `/store`, rebuilt as its own app.
 
-**The catalog is read off disk. There is still no database of its own.** Apps come from the library at `/srv/appstore/library`: the APKs
+**The catalog is read off disk. There is still no database of its own.** Apps come from the library at `STORE_ROOT`: the APKs
 decide which versions exist, `meta/<slug>.json` supplies the words, and the
 images come out of `icons/`, `banners/` and `screenshots/`. Nothing writes to
 the library yet — files get there by hand.
@@ -21,7 +21,7 @@ Point `STORE_ROOT` at a directory to run against a different library.
 ## The library
 
 ```
-/srv/appstore/library
+$STORE_ROOT
 ├── apks/         <slug>/<version>/<file>.apk|.xapk
 ├── icons/        <slug>.png
 ├── banners/      <slug>.jpg
@@ -328,8 +328,8 @@ and downloading need nothing; those three need an admin.
 
 **A person signs in to elite-v2.** The store shares that login rather than
 keeping accounts of its own: elite-v2 scopes its session cookie to
-`.example.com` (`SESSION_COOKIE_DOMAIN` there), so a browser logged in at
-accounts.example.com sends the same cookie to store.example.com. Verifying it
+the parent domain both hosts share (`SESSION_COOKIE_DOMAIN` there), so a
+browser logged in at the accounts host sends the same cookie to the store. Verifying it
 locally would take elite-v2's signing secret and would still miss a revoked
 session — that row is in elite-v2's database — so the token goes back to
 `POST /api/auth/verify` (`ELITE_VERIFY_URL`, the container name over the
@@ -340,7 +340,7 @@ token form when it comes back 401.
 A cookie is the one credential a browser attaches on its own, so writes
 authenticated that way also have to come from this store's own pages: the
 `Origin` on an unsafe method must match the host. `SameSite=lax` is not enough
-on its own here — every host under `example.com` counts as the same site, so a
+on its own here — every host under one parent domain counts as the same site, so a
 sibling service, or a file this store serves back, would otherwise be trusted.
 Reads skip the check; a cross-site navigation cannot read what it gets.
 
@@ -470,8 +470,8 @@ lives in the URL. Every other chip row is still a shape.
 
 ## Deploying
 
-Built on the host and bind-mounted into a bare `node:20-slim`. Compose lives in
-`compose/appstore/`.
+Built on the host and bind-mounted into a bare `node:20-slim`. Compose lives outside
+this repository, beside the machine's other services.
 
 ```
 npm run build && docker restart appstore

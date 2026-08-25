@@ -44,8 +44,8 @@ export function adminConfigured(): boolean {
  *
  * The cookie is the one credential here a browser attaches by itself, which is
  * what makes it worth stealing: any page can make the visitor's browser POST.
- * `SameSite=lax` stops that from another *site*, but every host under
- * example.com is the same site, so a page on a sibling service — or a file
+ * `SameSite=lax` stops that from another *site*, but every host under one
+ * parent domain is the same site, so a page on a sibling service — or a file
  * this store itself serves back — would be trusted without this check.
  *
  * Reads are left alone deliberately. A cross-site navigation can reach one

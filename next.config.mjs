@@ -16,8 +16,8 @@ const CSP = [
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Built on the host and bind-mounted into a bare node:20-slim container —
-  // see compose/appstore. Deploy is `npm run build` + `docker restart`.
+  // Built on the host and bind-mounted into a bare node:20-slim container.
+  // Deploy is `npm run build` + `docker restart`.
   output: "standalone",
   reactStrictMode: true,
   // Left out of the bundle so the standalone tracer copies them into the

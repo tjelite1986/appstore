@@ -19,7 +19,8 @@ import { pipeline } from "node:stream/promises";
 import path from "node:path";
 
 /** Named so a repo owner reading their traffic knows who this is. */
-export const USER_AGENT = "astore/1.0 (+https://store.example.com)";
+export const USER_AGENT =
+  "astore/1.0 (+https://github.com/tjelite1986/appstore)";
 
 const IMAGE_TIMEOUT_MS = 15_000;
 // A store listing image is a few hundred KB. Anything past this is not one,

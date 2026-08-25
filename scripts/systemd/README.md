@@ -22,6 +22,10 @@ Install:
     sudo systemctl daemon-reload
     sudo systemctl enable --now appstore-sync.timer appstore-scan.timer appstore-sources.timer
 
-The units run as `thomas` and read `STORE_ADMIN_TOKEN` out of
-`/srv/compose/appstore/.env`, so rotating the token needs no
-change here. Watch them with `journalctl -u appstore-sync -f`.
+The units here are examples: `User`, `Group` and the `ExecStart` path are facts
+about one machine, so set them to yours before installing. The same goes for
+the two values `../cron.sh` needs — the store's URL and the compose env file it
+reads `STORE_ADMIN_TOKEN` out of — which live in `scripts/cron.env` beside the
+script rather than in a unit, so rotating the token needs no change here. Copy
+`scripts/cron.env.example` to start one. Watch the timers with
+`journalctl -u appstore-sync -f`.

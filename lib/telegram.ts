@@ -89,7 +89,7 @@ export function telegramConfig() {
     apiId: Number(process.env.TELEGRAM_API_ID),
     apiHash: process.env.TELEGRAM_API_HASH ?? "",
     session: process.env.TELEGRAM_SESSION ?? "",
-    channels: (process.env.TELEGRAM_CHANNELS || "example-channel")
+    channels: (process.env.TELEGRAM_CHANNELS ?? "")
       .split(",")
       .map((c) => c.trim().replace(/^https?:\/\/t\.me\//i, "").replace(/^@/, ""))
       .filter(Boolean),
@@ -103,7 +103,7 @@ export function telegramConfig() {
 
 export function telegramConfigured(): boolean {
   const c = telegramConfig();
-  return !!(c.apiId && c.apiHash && c.session);
+  return !!(c.apiId && c.apiHash && c.session && c.channels.length > 0);
 }
 
 /* ------------------------------------------------------------------- state */

@@ -7,9 +7,13 @@
 #   sources  ask GitHub and F-Droid what they have, and fetch what is newer
 #
 # Both are HTTP calls into the container: the work belongs to the app, and a
-# host script that touched /srv/appstore/library directly would be a second
-# implementation of the importer's rules. The admin token is read from the
-# compose env file rather than copied into a unit, so rotating it is one edit.
+# host script that touched the library directly would be a second implementation
+# of the importer's rules. The admin token is read from the compose env file
+# rather than copied into a unit, so rotating it is one edit.
+#
+# Where this machine keeps those two things is not a fact about the app, so it
+# lives beside this script in cron.env, which is not in the repository — see
+# cron.env.example. Either value can also come from the environment.
 #
 # Called by appstore-sync.timer / appstore-scan.timer / appstore-sources.timer.
 
@@ -17,6 +21,13 @@ set -euo pipefail
 
 CURL=/usr/bin/curl
 JQ=/usr/bin/jq
+
+CONFIG="${APPSTORE_CRON_ENV:-$(dirname "${BASH_SOURCE[0]}")/cron.env}"
+if [ -r "$CONFIG" ]; then
+  # shellcheck disable=SC1090  # a per-machine file, by definition not in the repo
+  . "$CONFIG"
+fi
+
 BASE="${APPSTORE_URL:-https://store.example.com}"
 ENV_FILE="${APPSTORE_ENV:-/srv/compose/appstore/.env}"
 # A 400 MB download over a home line, plus the importer's quiet period.
