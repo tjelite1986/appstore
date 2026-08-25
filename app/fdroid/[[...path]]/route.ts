@@ -8,6 +8,8 @@
  *     /fdroid/repo/index-v1.jar         the same shelf, signed, for a real
  *                                       F-Droid client
  *     /fdroid/repo/<name>.apk           a file from it
+ *     /fdroid/repo/icons-<dpi>/<name>   an app's icon, for a client that
+ *     /fdroid/repo/<pkg>/en-US/<name>   builds one address or the other
  *     /fdroid/repo/obtainium.json       the same shelf, as an import file
  *     /fdroid/t/<token>/repo/index.xml  the shelf that account sees
  *     /fdroid/t/<token>/repo/index-v1.jar
@@ -76,7 +78,7 @@ function publicOrigin(req: Request, url: URL): string {
  */
 function route(
   segments: string[]
-): { userId: number | null; file: string } | null {
+): { userId: number | null; rest: string[] } | null {
   let rest = segments;
   let userId: number | null = null;
 
@@ -90,7 +92,30 @@ function route(
   // `…/fdroid/repo` work as the URL someone pastes into the client.
   if (rest[0] === "repo") rest = rest.slice(1);
 
-  return rest.length === 1 && rest[0] ? { userId, file: rest[0] } : null;
+  return rest.length && rest.every(Boolean) ? { userId, rest } : null;
+}
+
+/**
+ * The icon file an address is asking for, or null.
+ *
+ * A client does not follow a URL out of the index — it composes one, and
+ * which one depends on which field it read the name from. Both shapes end at
+ * the same file, because this library keeps one icon per app and no density
+ * buckets at all:
+ *
+ *     icons-640/<name>       from the flat `icon` field, any bucket
+ *     icons/<name>           the bucketless form older tools use
+ *     <packageName>/en-US/<name>   from `localized["en-US"].icon`
+ *
+ * The package id in the third shape is decoration: the name identifies the
+ * file on its own, and the lookup is against the library rather than a path
+ * built from what was sent. Nothing here reaches the filesystem unchecked —
+ * `resolveInStore` refuses anything landing outside the icons directory.
+ */
+function iconRequest(rest: string[]): string | null {
+  if (rest.length === 2 && /^icons(-\d{2,4})?$/.test(rest[0])) return rest[1];
+  if (rest.length === 3 && rest[1] === "en-US") return rest[2];
+  return null;
 }
 
 export async function GET(
@@ -100,6 +125,28 @@ export async function GET(
   const { path } = await params;
   const target = route(path ?? []);
   if (!target) return notFound();
+
+  // An icon, which like the jar needs no catalog: the file name is the whole
+  // request, and an icon is not something this repository hides from anyone —
+  // the website serves the same directory to a signed-out browser.
+  const icon = iconRequest(target.rest);
+  if (icon) {
+    const abs = await resolveInStore(STORE_DIRS.icons, icon);
+    if (!abs) return notFound();
+    let stat;
+    try {
+      stat = await fs.stat(abs);
+    } catch {
+      return notFound();
+    }
+    if (!stat.isFile()) return notFound();
+    return fileResponse(abs, stat, req, {
+      contentType: contentTypeFor(icon),
+    });
+  }
+
+  if (target.rest.length !== 1) return notFound();
+  const file = target.rest[0];
 
   // The signed index, which is a file on disk rather than a document built
   // here: a signature cannot be produced per request, and the key that makes
@@ -112,7 +159,7 @@ export async function GET(
   // format this repo does not publish should see.
   //
   // Answered before the catalog is read, because it does not need one.
-  if (target.file === SIGNED_INDEX_FILE) {
+  if (file === SIGNED_INDEX_FILE) {
     const variant: IndexVariant = adultsAllowed(target.userId) ? "all" : "clean";
     const abs = await resolveInStore(
       FDROID_STATE_DIR,
@@ -140,7 +187,7 @@ export async function GET(
   const repoUrl = `${publicOrigin(req, url)}${dir}`;
 
   // Every app at once, which the index cannot do — see buildObtainiumImport.
-  if (target.file === IMPORT_FILE) {
+  if (file === IMPORT_FILE) {
     return new NextResponse(buildObtainiumImport(apps, repoUrl), {
       status: 200,
       headers: {
@@ -153,7 +200,7 @@ export async function GET(
     });
   }
 
-  if (target.file === INDEX_FILE) {
+  if (file === INDEX_FILE) {
     const xml = buildIndexXml(apps, {
       repoUrl,
       repoName: "App Store",
@@ -183,7 +230,7 @@ export async function GET(
 
   // An APK. The name is matched against the ones the index generated rather
   // than taken apart, so nothing a client sends reaches the filesystem.
-  const found = findByApkFileName(apps, target.file);
+  const found = findByApkFileName(apps, file);
   if (!found) return notFound();
 
   const abs = await resolveInStore(
@@ -204,6 +251,6 @@ export async function GET(
 
   return fileResponse(abs, stat, req, {
     contentType: contentTypeFor(found.version.file),
-    download: target.file,
+    download: file,
   });
 }

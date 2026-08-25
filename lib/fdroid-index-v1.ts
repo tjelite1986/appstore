@@ -22,6 +22,12 @@
  * without — a client gets is decided by the URL it fetched, exactly as the
  * unsigned index decides it.
  *
+ * Icons are the one thing here that is a URL rather than a value. A client
+ * builds the address itself from the repository it fetched plus the name in
+ * the index, and it builds two different ones depending on which field the
+ * name is in — so both are written, and the repository route answers both
+ * shapes. See `iconName` below.
+ *
  * What a package entry deliberately omits: `minSdkVersion`, `targetSdkVersion`,
  * `nativecode` and `uses-permission`. A client treats an absent minSdk and an
  * empty nativecode list as "compatible with this phone", which is the right
@@ -78,6 +84,34 @@ type PackageEntry = {
   size: number;
   added: number;
 };
+
+/**
+ * The icon's file name, as a client will ask for it — or null.
+ *
+ * The catalog carries the icon as a ready-made URL into `/api/media`, because
+ * that is what a browser needs; a repository index needs the bare name, and
+ * the client puts it together with an address of its own choosing. Rather
+ * than reach into the library a second time and risk disagreeing with the
+ * catalog about which file an app's icon is, the name is taken back out of
+ * that URL — it is the last segment, before the cache-busting query.
+ */
+function iconName(app: StoreApp): string | null {
+  if (!app.icon) return null;
+  const withoutQuery = app.icon.split("?")[0];
+  const last = withoutQuery.slice(withoutQuery.lastIndexOf("/") + 1);
+  // The catalog percent-encodes each segment on the way in.
+  const decoded = (() => {
+    try {
+      return decodeURIComponent(last);
+    } catch {
+      return last;
+    }
+  })();
+  // A name a client cannot ask for cleanly is no name at all: the route looks
+  // it up against the library, so anything with a separator in it would be a
+  // path rather than a file.
+  return decoded && !decoded.includes("/") ? decoded : null;
+}
 
 /** F-Droid timestamps are milliseconds; the catalog keeps ISO strings. */
 function ms(iso: string): number {
@@ -206,11 +240,16 @@ export async function buildIndexV1(
     packageCount += entries.length;
 
     const description = app.description || app.tagline;
+    const icon = iconName(app);
     appList.push({
       packageName: id,
       name: app.name,
       summary: app.tagline,
       description,
+      // Fetched from `<repo>/icons-<dpi>/<icon>` — the client picks the
+      // bucket for its screen, and this repository answers every one of them
+      // with the same file, because there is only one file.
+      ...(icon ? { icon } : {}),
       // Unknown rather than absent: this store never asks for a licence, and
       // a client renders the string as-is.
       license: "Unknown",
@@ -224,7 +263,15 @@ export async function buildIndexV1(
       // fields; older ones only know the flat ones. Both are written, which
       // is what a repository built by fdroidserver looks like too.
       localized: {
-        "en-US": { name: app.name, summary: app.tagline, description },
+        "en-US": {
+          name: app.name,
+          summary: app.tagline,
+          description,
+          // The same file again, under the name a newer client prefers:
+          // `<repo>/<packageName>/en-US/<icon>`. A client that reads this one
+          // never looks at the flat field, and one that does not, does.
+          ...(icon ? { icon } : {}),
+        },
       },
     });
   }
@@ -234,9 +281,11 @@ export async function buildIndexV1(
       timestamp: opts.timestamp,
       version: INDEX_V1_VERSION,
       name: opts.repoName,
-      // Conventional, and cosmetic: a client that cannot fetch it shows the
-      // repository without a picture.
-      icon: "icon.png",
+      // The repository's own picture, which this store does not have. Empty
+      // rather than the conventional "icon.png": a client shows a repository
+      // without a picture either way, and naming a file that is not there
+      // only buys a 404 on every refresh.
+      icon: "",
       address: opts.repoUrl,
       description: opts.description,
       mirrors: [] as string[],

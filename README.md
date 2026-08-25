@@ -448,6 +448,14 @@ versioned backup cannot be taken back out of it, and the two jars beside it are
 rebuilt from nothing in seconds. Settings shows that fingerprint on the
 URL (`?fingerprint=…`) once something has been signed.
 
+Icons are the one field a client does not follow but *composes*, and it
+composes two different addresses depending on which field it read the name
+from — `<repo>/icons-<dpi>/<name>` from the flat `icon`, or
+`<repo>/<packageName>/en-US/<name>` from the localised one. Both are written
+and the repository route answers both, with the same file: this library keeps
+one icon per app and no density buckets, so every bucket a client asks for is
+the same PNG the website serves.
+
 An APK with no v2/v3 signing block is left out of the signed index rather than
 listed without a `signer`. A client that installed it would have nothing to
 check the *next* version against, which is the one guarantee a repository is
