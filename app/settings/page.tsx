@@ -16,6 +16,8 @@ import { STORE_ROOT } from "@/lib/storage";
 import { currentUser } from "@/lib/current-user";
 import { adultsAllowed, readState } from "@/lib/user-state";
 import AdultsToggle from "@/components/adults-toggle";
+import RepoUrl from "@/components/repo-url";
+import { repoTokenFor } from "@/lib/repo-token";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +30,11 @@ export default async function SettingsPage() {
   const user = await currentUser();
   const state = user ? readState(user.id) : null;
   const kept = state ? state.saved.size + state.installed.size : 0;
+  // Signed out there is no account to put in the path, so the URL offered is
+  // the open one — the same shelf a signed-out browser gets, Adults excluded.
+  const repoPath = user
+    ? `/fdroid/t/${repoTokenFor(user.id)}/repo`
+    : "/fdroid/repo";
 
   return (
     <Screen>
@@ -84,6 +91,8 @@ export default async function SettingsPage() {
       />
 
       <AdultsToggle on={adultsAllowed(user?.id ?? null)} signedIn={!!user} />
+
+      <RepoUrl path={repoPath} signedIn={!!user} />
 
       <RowCard
         title="Storage"

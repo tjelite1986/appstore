@@ -81,6 +81,19 @@ function migrate(conn: Database.Database): void {
       updated_at TEXT    NOT NULL
     );
 
+    -- The token that puts this account's shelf in an Android client.
+    --
+    -- Obtainium reaches the repository over plain HTTP with no cookie and no
+    -- header of its own, so the only place an identity can ride is the path
+    -- (see app/fdroid/[[...path]]/route.ts). One long random value per
+    -- account, rotatable, and worth exactly one thing: reading the library as
+    -- that account, Adults included.
+    CREATE TABLE IF NOT EXISTS user_repo_token (
+      user_id    INTEGER PRIMARY KEY,
+      token      TEXT    NOT NULL UNIQUE,
+      created_at TEXT    NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS user_installed (
       user_id      INTEGER NOT NULL,
       slug         TEXT    NOT NULL,

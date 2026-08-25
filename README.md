@@ -368,6 +368,47 @@ resolve the path and refuse anything that lands outside `STORE_ROOT`, symlinks
 included. The version in a download URL is looked up in the catalog rather than
 trusted from the query string.
 
+## On a phone
+
+There is no Android client here, and there is not going to be one. The store
+speaks F-Droid's repository format instead, which is enough for
+[Obtainium](https://github.com/ImranR98/Obtainium) to subscribe to it — and
+Obtainium already does the parts a client is actually made of: search, per-app
+version tracking, background update checks, and the install session. Add one
+URL there and the shelf is on the phone.
+
+| Route | Serves |
+|---|---|
+| `/fdroid/repo/index.xml` | the shelf a signed-out visitor sees, as an index |
+| `/fdroid/repo/<slug>_<version>.apk` | a file from it |
+| `/fdroid/t/<token>/repo/…` | the same two, as one account |
+
+Entering the bare hostname is enough: Obtainium tries `/index.xml`,
+`/repo/index.xml` and `/fdroid/repo/index.xml` in turn, and the third answers.
+Settings shows the account's URL, copies it, and can replace it — which is also
+how a leaked one is revoked.
+
+The token is in the path because there is nowhere else for it to go.
+Obtainium's F-Droid source sends no cookie, cannot be given a request header,
+and strips every query parameter but `appId` off the URL it was configured
+with; the path is what survives. So the URL is a bearer credential and the page
+that shows it says so. It buys one thing — reading the library as its owner,
+Adults included — and the signed-out URL is the strict reading, exactly as the
+website is (`lib/repo-token.ts`).
+
+The index is the old `index.xml`, not `index-v1.json`, because that is what
+Obtainium reads — with an HTML parser rather than an XML one, which is why
+nothing in it is a void HTML element. It carries no APK hashes, version codes
+or signatures: Obtainium reads none of them, and each would mean opening every
+APK on the shelf on every index request. The official F-Droid client and
+Droid-ify want all three, inside a signed `index-v1.jar` — that is the day to
+add them, and nothing here forecloses it (`lib/fdroid-index.ts`).
+
+An app is in the index only if it has a package id and an APK on this host. A
+listing linked to Play or to a GitHub release has nothing for a client to
+download from here, and an entry keyed on anything but the real package id
+would install once and then never notice its own updates.
+
 ## What an account keeps
 
 Everything a person can *see* about an app is a file — that is the point of the
@@ -382,6 +423,7 @@ tables keyed on the elite-v2 account id (`lib/db.ts`):
 |---|---|
 | `user_saved` | this account keeps this slug |
 | `user_installed` | this account has *this version* of this slug |
+| `user_repo_token` | the secret in this account's repository URL (above) |
 
 The version in `user_installed` is the whole reason that table is not a flag.
 An update is derived, never stored: the library knows the newest file, the row
@@ -409,6 +451,7 @@ silently keeps nothing is a worse answer than no bookmark.
 | `DELETE /api/me` | forget everything about this account |
 | `POST /api/me/saved` | `{ slug, saved }` — the state to end in, not a toggle |
 | `POST /api/me/installed` | `{ slug, version }`, or `version: null` to forget |
+| `POST /api/me/repo` | a new repository token, revoking the old URL |
 
 Writes take any signed-in account, not just an admin (`requireUser` in
 `lib/admin.ts`), and still require a same-origin `Origin` — `SameSite=lax` does
@@ -520,5 +563,9 @@ Sign-in and per-user storage are both answered. What is left:
   the same version and the second is a `duplicate` decision.
 - **Reviews, ratings and the 18+ gate.** `rating` and `ratingCount` are read
   from meta and shown; nothing collects them.
+- **A repository the official F-Droid client can add.** The index is served for
+  Obtainium, which reads the unsigned `index.xml`; F-Droid and Droid-ify want a
+  signed `index-v1.jar` with APK hashes, version codes and signer fingerprints
+  in it (see "On a phone").
 - **Per-app update controls.** The source check is all-or-nothing from Manage;
   there is no "fetch just this one" on an app's own page.
