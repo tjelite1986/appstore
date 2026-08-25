@@ -14,7 +14,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Link2, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Link2, Pencil, Plus, Sparkles, Trash2, X } from "lucide-react";
 import { adminHeaders, readAdminToken } from "@/lib/admin-token";
 import { buttonClass, CARD, MUTED } from "@/components/primitives";
 import { cn } from "@/lib/utils";
@@ -31,6 +31,22 @@ const CATEGORIES = [
 
 const FIELD =
   "w-full rounded-[var(--radius)] border border-[color:var(--border)] bg-[var(--card-2)] px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]";
+
+/** One picture an upstream holds, as `/api/apps/<slug>/artwork` describes it. */
+type ArtworkCandidate = {
+  kind: "icon" | "banner" | "screenshot";
+  url: string;
+  from: string;
+  label: string;
+  /** The bytes inlined, for the kinds worth looking at before choosing. */
+  preview: string | null;
+};
+
+type ArtworkFind = {
+  has: { icon: boolean; banner: boolean; screenshots: number };
+  candidates: ArtworkCandidate[];
+  looked: string[];
+};
 
 export type EditableApp = {
   slug: string;
@@ -54,6 +70,7 @@ export default function EditApp({ app }: { app: EditableApp }) {
     tagline: app.tagline,
     description: app.description,
   });
+  const [art, setArt] = useState<ArtworkFind | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -140,6 +157,19 @@ export default function EditApp({ app }: { app: EditableApp }) {
       await call(`/api/apps/${app.slug}/image`, {
         method: "POST",
         body: JSON.stringify({ kind, url }),
+      });
+    });
+
+  const findArtwork = () =>
+    run("artwork", async () => {
+      setArt(await call(`/api/apps/${app.slug}/artwork`));
+    });
+
+  const useArtwork = (picks: { kind: string; url: string }[], label: string) =>
+    run(label, async () => {
+      await call(`/api/apps/${app.slug}/artwork`, {
+        method: "POST",
+        body: JSON.stringify({ picks }),
       });
     });
 
@@ -240,6 +270,26 @@ export default function EditApp({ app }: { app: EditableApp }) {
 
         <hr className="border-[color:var(--border)]" />
 
+        <div>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <span className={cn("text-[11px]", MUTED)}>
+              Artwork the upstream already has
+            </span>
+            <button
+              onClick={findArtwork}
+              disabled={busy === "artwork"}
+              className={cn(
+                buttonClass("secondary", "sm"),
+                "shrink-0 disabled:opacity-60"
+              )}
+            >
+              <Sparkles size={13} />
+              {busy === "artwork" ? "Looking…" : "Find artwork"}
+            </button>
+          </div>
+          {art && <Artwork find={art} busy={busy} onUse={useArtwork} />}
+        </div>
+
         <div className="grid gap-3 sm:grid-cols-2">
           <Single
             kind="icon"
@@ -324,6 +374,133 @@ export default function EditApp({ app }: { app: EditableApp }) {
 function fileNameOf(href: string): string {
   const path = href.split("?")[0];
   return path.slice(path.lastIndexOf("/") + 1);
+}
+
+/**
+ * What a repository and F-Droid hold for this app, offered rather than applied.
+ *
+ * The store cannot tell an icon somebody uploaded by hand from one a source
+ * wrote, so it does not decide which of these are gaps — it says which kinds
+ * the listing already has and lets the button read "Replace" where that is
+ * what pressing it would do.
+ */
+function Artwork({
+  find,
+  busy,
+  onUse,
+}: {
+  find: ArtworkFind;
+  busy: string | null;
+  onUse: (
+    picks: { kind: string; url: string }[],
+    label: string
+  ) => Promise<boolean>;
+}) {
+  const singles = find.candidates.filter((c) => c.kind !== "screenshot");
+  // Grouped by where they came from: an app on both GitHub and F-Droid offers
+  // the same tour twice, and one "Add all" over the lot would put every
+  // screenshot on the listing two times.
+  const shotGroups = new Map<string, ArtworkCandidate[]>();
+  for (const c of find.candidates) {
+    if (c.kind !== "screenshot") continue;
+    shotGroups.set(c.from, [...(shotGroups.get(c.from) ?? []), c]);
+  }
+
+  if (find.candidates.length === 0) {
+    return (
+      <p className={cn("text-[11px]", MUTED)}>
+        Nothing found.{" "}
+        {find.looked.length > 0
+          ? `Looked at ${find.looked.join(", ")}.`
+          : "This app has no repository and no package id to look one up by."}
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {singles.map((c) => (
+        <div key={c.url} className="flex items-center gap-2">
+          {c.preview ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={c.preview}
+              alt=""
+              className={cn(
+                "shrink-0 rounded-[var(--radius)] border border-[color:var(--border)] object-cover",
+                c.kind === "banner" ? "h-10 w-20" : "h-10 w-10"
+              )}
+            />
+          ) : (
+            <div
+              className={cn(
+                "grid h-10 w-10 shrink-0 place-items-center rounded-[var(--radius)] border border-dashed border-[color:var(--border)] text-[10px]",
+                MUTED
+              )}
+            >
+              ?
+            </div>
+          )}
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-xs">
+              {c.kind === "banner" ? "Banner" : "Icon"} · {c.from}
+            </p>
+            <p className={cn("truncate text-[11px]", MUTED)}>{c.label}</p>
+          </div>
+          <button
+            disabled={busy === `art:${c.url}`}
+            onClick={() => void onUse([{ kind: c.kind, url: c.url }], `art:${c.url}`)}
+            className={cn(
+              buttonClass("secondary", "sm"),
+              "shrink-0 disabled:opacity-60"
+            )}
+          >
+            {busy === `art:${c.url}`
+              ? "Saving…"
+              : (c.kind === "icon" ? find.has.icon : find.has.banner)
+                ? "Replace"
+                : "Use"}
+          </button>
+        </div>
+      ))}
+
+      {[...shotGroups].map(([from, shots]) => (
+        <div key={from} className="flex items-center gap-2">
+          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-[var(--radius)] border border-[color:var(--border)] text-xs">
+            {shots.length}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-xs">
+              {shots.length} screenshot{shots.length === 1 ? "" : "s"} · {from}
+            </p>
+            <p className={cn("truncate text-[11px]", MUTED)}>
+              {shots[0].label}
+            </p>
+          </div>
+          <button
+            disabled={busy === `art:shots:${from}`}
+            onClick={() =>
+              void onUse(
+                shots.map((c) => ({ kind: c.kind, url: c.url })),
+                `art:shots:${from}`
+              )
+            }
+            className={cn(
+              buttonClass("secondary", "sm"),
+              "shrink-0 disabled:opacity-60"
+            )}
+          >
+            {busy === `art:shots:${from}` ? "Saving…" : "Add all"}
+          </button>
+        </div>
+      ))}
+
+      <p className={cn("text-[11px]", MUTED)}>
+        From {find.looked.join(", ")}. Screenshots append; the list above is
+        where you remove one.
+      </p>
+    </div>
+  );
 }
 
 /**

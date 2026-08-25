@@ -33,6 +33,8 @@ export type FdroidApp = {
   summary: string | null;
   description: string | null;
   iconUrl: string | null;
+  /** The developer's own phone screenshots, in the order the page lists them. */
+  screenshotUrls: string[];
   /** The build the repository recommends — not always the highest one. */
   suggestedVersionCode: number;
   versions: FdroidVersion[];
@@ -104,6 +106,23 @@ function decodeEntities(s: string): string {
 }
 
 /**
+ * The screenshots off a package page.
+ *
+ * F-Droid serves what the app's own repository put in
+ * `fastlane/metadata/android/<locale>/images/phoneScreenshots`, under a URL
+ * that says so. Matching on that path rather than on the carousel's markup is
+ * the stabler half of the page: the class names are a theme, the repo layout
+ * is the format every Android project publishes in.
+ */
+function readScreenshots(html: string): string[] {
+  const found = html.matchAll(
+    /src=["'](https:\/\/[^"']*\/phoneScreenshots\/[^"']+)["']/gi
+  );
+  const urls = [...found].map((m) => decodeEntities(m[1]));
+  return [...new Set(urls)];
+}
+
+/**
  * The description block, as text.
  *
  * F-Droid writes it as HTML with links and lists in it. Bullets are kept as
@@ -135,6 +154,7 @@ export async function fetchApp(packageId: string): Promise<FdroidApp> {
   let summary: string | null = null;
   let description: string | null = null;
   let iconUrl: string | null = null;
+  let screenshotUrls: string[] = [];
   try {
     const res = await fetch(pageUrl(packageId), {
       headers: { "user-agent": USER_AGENT },
@@ -147,6 +167,7 @@ export async function fetchApp(packageId: string): Promise<FdroidApp> {
       summary = ogTag(html, "description");
       description = readDescription(html);
       iconUrl = ogTag(html, "image");
+      screenshotUrls = readScreenshots(html);
     }
   } catch (err) {
     console.error(`[fdroid] no page for ${packageId}:`, err);
@@ -158,6 +179,7 @@ export async function fetchApp(packageId: string): Promise<FdroidApp> {
     summary,
     description,
     iconUrl,
+    screenshotUrls,
     suggestedVersionCode: suggested,
     versions,
   };

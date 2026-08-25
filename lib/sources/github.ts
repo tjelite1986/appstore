@@ -59,13 +59,21 @@ function headers(): Record<string, string> {
   return h;
 }
 
-async function api(pathname: string): Promise<any> {
+async function api(
+  pathname: string,
+  opts: { missingIsNull?: boolean } = {}
+): Promise<any> {
   const res = await fetch(`https://api.github.com${pathname}`, {
     headers: headers(),
     signal: AbortSignal.timeout(API_TIMEOUT_MS),
     cache: "no-store",
   });
-  if (res.status === 404) throw new Error("GitHub has no such repository");
+  if (res.status === 404) {
+    // Asking for a path that most repositories do not have is a question, not
+    // a failure — see `repoContents`.
+    if (opts.missingIsNull) return null;
+    throw new Error("GitHub has no such repository");
+  }
   if (res.status === 403 || res.status === 429) {
     // Anonymous requests are 60 an hour for the whole machine, so this is the
     // failure a timer hits first — say which knob fixes it.
@@ -143,6 +151,45 @@ export async function latestRelease(ref: RepoRef): Promise<GithubRelease | null>
     };
   }
   return null;
+}
+
+export type RepoFile = {
+  name: string;
+  type: "file" | "dir";
+  path: string;
+  /** Where the bytes are, for a file. A directory has none. */
+  downloadUrl: string | null;
+};
+
+/**
+ * One directory of a repository, or null when there is no such path.
+ *
+ * A 404 is an ordinary answer here. Most repositories carry no fastlane
+ * metadata, and `lib/sources/artwork.ts` finds that out by asking — treating
+ * the absence as an error would make "this repo has no artwork" read like a
+ * broken lookup.
+ */
+export async function repoContents(
+  ref: RepoRef,
+  pathname: string
+): Promise<RepoFile[] | null> {
+  const body = await api(
+    `/repos/${ref.owner}/${ref.repo}/contents/${pathname}`,
+    { missingIsNull: true }
+  );
+  // A file path answers with an object; only a directory listing is an array.
+  if (!Array.isArray(body)) return null;
+  return body.map((f: any) => ({
+    name: String(f?.name ?? ""),
+    type: f?.type === "dir" ? "dir" : "file",
+    path: String(f?.path ?? ""),
+    downloadUrl: f?.download_url ? String(f.download_url) : null,
+  }));
+}
+
+/** The repository itself — its description, its owner, its avatar. */
+export async function repoInfo(ref: RepoRef): Promise<any> {
+  return api(`/repos/${ref.owner}/${ref.repo}`);
 }
 
 export type GithubAddResult = {
