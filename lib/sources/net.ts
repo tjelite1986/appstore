@@ -36,18 +36,22 @@ const IMAGE_EXT_BY_TYPE: Record<string, string> = {
 };
 
 /**
- * One image into the library, or nothing.
+ * One listing image, fetched and checked, or nothing.
  *
  * A listing that arrives without its screenshots is worth having; a create
  * that fails halfway because the far end rate-limited the fourth thumbnail is
  * not. So every image failure is logged and swallowed — the meta file is the
  * part that has to land.
+ *
+ * The URL always comes from an upstream listing this server just read, never
+ * from a request — which is what makes fetching it without a host allowlist
+ * reasonable. `/api/sources/play/icon` takes one from the browser and has an
+ * allowlist for exactly that reason.
  */
-export async function saveImage(
+async function fetchImage(
   url: string,
-  destNoExt: string,
   tag: string
-): Promise<boolean> {
+): Promise<{ ext: string; type: string; body: Buffer } | null> {
   try {
     const res = await fetch(url, {
       headers: { "user-agent": USER_AGENT },
@@ -66,14 +70,46 @@ export async function saveImage(
     if (body.byteLength > MAX_IMAGE_BYTES) {
       throw new Error(`${body.byteLength} bytes is not a listing image`);
     }
+    return { ext, type, body };
+  } catch (err) {
+    console.error(`[${tag}] could not fetch ${url}:`, err);
+    return null;
+  }
+}
 
+/** One image into the library, or nothing. */
+export async function saveImage(
+  url: string,
+  destNoExt: string,
+  tag: string
+): Promise<boolean> {
+  const image = await fetchImage(url, tag);
+  if (!image) return false;
+  try {
     await fs.mkdir(path.dirname(destNoExt), { recursive: true });
-    await fs.writeFile(`${destNoExt}${ext}`, body);
+    await fs.writeFile(`${destNoExt}${image.ext}`, image.body);
     return true;
   } catch (err) {
     console.error(`[${tag}] could not save ${url}:`, err);
     return false;
   }
+}
+
+/**
+ * The same image, inlined for a page rather than written to the library.
+ *
+ * A preview of something not added yet has nowhere on disk to live, and the
+ * obvious alternative — pointing an `<img>` at the icon proxy — only works for
+ * whoever is signed in by cookie. The proxy is admin-gated, and an `<img>`
+ * carries no header, so the person holding the shared token instead sees a
+ * broken image exactly where they are being asked to recognise an app.
+ */
+export async function fetchImageDataUrl(
+  url: string,
+  tag: string
+): Promise<string | null> {
+  const image = await fetchImage(url, tag);
+  return image ? `data:${image.type};base64,${image.body.toString("base64")}` : null;
 }
 
 /**

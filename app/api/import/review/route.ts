@@ -2,13 +2,14 @@
  * The review queue — the drops the scan would not resolve on its own.
  *
  *   GET   list what is waiting
- *   POST  { id, action, slug?, force? } resolve one item
+ *   POST  { id, action, slug?, force?, fillFrom? } resolve one item
  *
  * `id` is the parked file's name, not a row id: the sidecar beside the file is
  * the record, so there is nothing to keep in sync with the folder.
  */
 import { requireAdmin } from "@/lib/admin";
 import { decideImport, listReview, type ReviewAction } from "@/lib/import";
+import { fetchPlayListing, fillFromPlay } from "@/lib/sources/play";
 
 export const dynamic = "force-dynamic";
 
@@ -30,11 +31,13 @@ export async function POST(req: Request): Promise<Response> {
   } catch {
     return Response.json({ error: "Expected a JSON body" }, { status: 400 });
   }
-  const { id, action, slug, force } = (body ?? {}) as {
+  const { id, action, slug, force, fillFrom } = (body ?? {}) as {
     id?: string;
     action?: string;
     slug?: string;
     force?: boolean;
+    /** A package id the person was shown a Play listing for. */
+    fillFrom?: string;
   };
   if (typeof id !== "string" || !id) {
     return Response.json({ error: "id is required" }, { status: 400 });
@@ -51,6 +54,25 @@ export async function POST(req: Request): Promise<Response> {
       slug: typeof slug === "string" ? slug : undefined,
       force: force === true,
     });
+
+    // Filling the new app in happens here rather than inside `decideImport`
+    // for two reasons: the source module already imports the importer, so the
+    // other direction would close a cycle — and a listing fetched from Google
+    // must not be able to fail an import that has already moved the file.
+    // The app is created either way; a fill that did not happen is a sentence
+    // in the answer, not an error.
+    if (result.ok && result.slug && typeof fillFrom === "string" && fillFrom) {
+      try {
+        const listing = await fetchPlayListing(fillFrom);
+        const fill = await fillFromPlay(result.slug, listing);
+        return Response.json({ ...result, filled: { name: listing.name, ...fill } });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`[import] filling ${result.slug} from Play failed:`, message);
+        return Response.json({ ...result, fillError: message });
+      }
+    }
+
     // A refused signer is a decision to offer, not a server fault — 409 so the
     // UI can tell it apart from a bad request and show "attach anyway".
     return Response.json(result, { status: result.ok ? 200 : 409 });

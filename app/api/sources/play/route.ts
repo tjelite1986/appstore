@@ -1,13 +1,15 @@
 /**
- * GET  /api/sources/play?q=…   search Google Play
- * POST /api/sources/play       { packageId } — add that listing to the catalog
+ * GET  /api/sources/play?q=…            search Google Play
+ * GET  /api/sources/play?packageId=…    read one listing, writing nothing
+ * POST /api/sources/play                { packageId } — add that listing
  *
  * Admin-gated like the rest of the write surface, the GET included: it is an
  * outbound request to Google made in this server's name, and leaving it open
  * would let anyone use the store as a scraping proxy.
  */
 import { requireAdmin } from "@/lib/admin";
-import { addFromPlay, searchPlay } from "@/lib/sources/play";
+import { fetchImageDataUrl } from "@/lib/sources/net";
+import { addFromPlay, fetchPlayListing, searchPlay } from "@/lib/sources/play";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +17,33 @@ export async function GET(req: Request): Promise<Response> {
   const refusal = await requireAdmin(req);
   if (refusal) return refusal;
 
-  const term = new URL(req.url).searchParams.get("q") ?? "";
+  const params = new URL(req.url).searchParams;
+
+  // A lookup by package id is the read half of a fill: whoever is about to
+  // put these words on an app sees them first. Kept here rather than behind
+  // the fill route because nothing about it writes, and the answer is worth
+  // showing even when the person then decides against it.
+  const packageId = params.get("packageId");
+  if (packageId) {
+    try {
+      const listing = await fetchPlayListing(packageId);
+      // Inlined rather than proxied: one icon, and the card showing it has to
+      // work for a token holder as well as a signed-in admin. See
+      // `fetchImageDataUrl`.
+      const icon = listing.iconUrl
+        ? await fetchImageDataUrl(listing.iconUrl, "play")
+        : null;
+      return Response.json({ listing, iconDataUrl: icon });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("[play] lookup failed:", message);
+      // Not a fault of the request: "Play has no listing for that" is the
+      // answer, and the panel shows it as one.
+      return Response.json({ error: message, listing: null }, { status: 404 });
+    }
+  }
+
+  const term = params.get("q") ?? "";
   if (!term.trim()) return Response.json({ results: [] });
 
   try {

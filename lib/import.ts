@@ -272,8 +272,13 @@ async function freeName(dir: string, name: string): Promise<string> {
  * Read as a bag rather than a typed `MetaFile`: the importer only ever fills
  * two fields, and re-serialising a parsed shape would quietly drop any key a
  * person added by hand that this build does not know about.
+ *
+ * Exported because a source filling in editorial metadata has the same
+ * question the importer does — which keys does this app already carry — and
+ * has to answer it against the file rather than the catalog, whose reader
+ * substitutes defaults for the fields that are missing.
  */
-async function readMetaRaw(slug: string): Promise<Record<string, unknown>> {
+export async function readMetaRaw(slug: string): Promise<Record<string, unknown>> {
   const abs = path.join(STORE_ROOT, STORE_DIRS.meta, `${slug}.json`);
   try {
     const parsed = JSON.parse(await fs.readFile(abs, "utf8"));

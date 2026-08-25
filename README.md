@@ -197,6 +197,55 @@ this server's name, and an open one is a scraping proxy. Their icons come
 through `/api/sources/play/icon`, because the CSP is `img-src 'self'` and
 widening it for one admin screen would weaken every page.
 
+Play's `summary` arrives HTML-escaped while its `description` does not, so
+listing text is decoded on the way in (`decodeEntities`) — otherwise a shelf
+reads `lyrics &amp; videos`, and React, which escapes what it renders, was
+never going to undo it.
+
+#### Filling an app in from Play
+
+An app created from a dropped APK knows three things about itself: a name taken
+from the file, the package id in the manifest, and the signer the importer
+pinned. Nothing anybody would want to read. The same listing that would have
+described it had it been added from Play describes it just as well afterwards
+— so the review queue offers the lookup at the one moment the package id is in
+hand and the shelf is still empty.
+
+**Offered, never taken automatically.** A package id says which app a build is
+a build of, not which build it is: the store's Instagram Piko is a patched
+client under `com.instagram.android`, the id Play answers for with Meta's own
+listing. So "Look up on Play" shows the listing — icon, developer, tagline,
+what it would bring — and "New app from this" is a second click. `GET
+/api/sources/play?packageId=…` reads and writes nothing; the decision travels
+with the write as `fillFrom`.
+
+The write itself (`fillFromPlay`) **fills gaps and never overwrites**. That is
+what makes it safe to click: the name worked out from the file is exactly what
+distinguishes "Instagram Piko" from stock Instagram, and a hand-written tagline
+is somebody's work. Existing values come back in the answer as `kept`. Images
+are the same — an icon already on disk stays, and screenshots are all-or-
+nothing, since a folder holding two of someone's and six of Play's is worse
+than either. `source` is only written when the caller passes one, so an APK
+that came from Telegram or a GitHub release keeps the origin its update check
+compares against.
+
+What was filled is stamped into `playMeta` beside the words themselves —
+package id, listing URL, when, and which fields — because the app where this
+matters most is the one whose description does not quite sound like the build
+that was installed. A second fill that finds everything already there writes
+nothing at all, stamp included: re-stamping would replace a true record with an
+empty one.
+
+The same pair works on an app that is already in the catalog: `POST
+/api/sources/play/fill` with `{slug, packageId}` fills in a shelf that has been
+bare since it was imported. It refuses a slug the catalog does not list, so a
+fill can never be the thing that conjures an app.
+
+The preview icon is inlined into the lookup answer as a `data:` URL rather than
+pointed at the icon proxy. The proxy is admin-gated and an `<img>` sends no
+header, so an admin holding the shared token instead of a session would see a
+broken image in the one place they are being asked to recognise an app.
+
 A Play listing keeps no download button on its detail page — it links to Play
 instead, and the stat cell says "On Play" rather than dressing an upstream
 version up as one this library holds.
@@ -440,12 +489,13 @@ Sign-in and per-user storage are both answered. What is left:
   Cloudflare-gated sites elite-v2 reaches through curl-impersonate are not, and
   neither is the split-XAPK merge an APKPure download needs to be
   tap-installable.
-- **Editorial metadata on import.** A created app gets a name, a package id and
-  a pinned signer. Category, tagline, description, icon and screenshots are
-  still hand-written into `meta/<slug>.json` and the media folders. Note too
-  that the manifest's `versionName` is the version, so two builds of one
-  release — elitev3 kept Instagram Piko as `439.0.0.37.89-1` and `-3` — land
-  as the same version and the second is a `duplicate` decision.
+- **Editorial metadata for an app Play does not list.** The review queue can
+  now fill an app in from Play (below), but a build with no Play listing at all
+  — a wrapper app, a fork, anything adult — still gets a name, a package id and
+  a pinned signer, and the rest is hand-written into `meta/<slug>.json`. Note
+  too that the manifest's `versionName` is the version, so two builds of one
+  release — elitev3 kept Instagram Piko as `439.0.0.37.89-1` and `-3` — land as
+  the same version and the second is a `duplicate` decision.
 - **Reviews, ratings and the 18+ gate.** `rating` and `ratingCount` are read
   from meta and shown; nothing collects them.
 - **Per-app update controls.** The source check is all-or-nothing from Manage;

@@ -15,10 +15,16 @@
  * Play APKs are never fetched. Google does not serve them to anyone but the
  * Play client, and the store hosts what it was given, not what it scraped.
  */
+import { promises as fs } from "node:fs";
 import path from "node:path";
 import { STORE_DIRS, STORE_ROOT } from "@/lib/storage";
-import { uniqueSlug, writeMeta } from "@/lib/import";
-import { getApps, invalidateCatalog, type Category } from "@/lib/store";
+import { readMetaRaw, uniqueSlug, writeMeta } from "@/lib/import";
+import {
+  getApps,
+  invalidateCatalog,
+  type AppSource,
+  type Category,
+} from "@/lib/store";
 import { saveImage } from "@/lib/sources/net";
 
 const SEARCH_LIMIT = 12;
@@ -73,6 +79,39 @@ function categoryFor(genreId: unknown): Category {
   return CATEGORY_BY_GENRE[genreId] ?? "Other";
 }
 
+/**
+ * The entities Play's own listing text arrives with.
+ *
+ * `summary` comes back HTML-escaped — "lyrics &amp; videos" — while
+ * `description` does not, so a listing written straight to disk gives an app a
+ * tagline reading `&amp;` on the shelf. React escapes what it renders, so
+ * nothing downstream was ever going to undo it.
+ *
+ * One pass, not repeated: `&amp;lt;` is text that says `&lt;` and decoding it
+ * twice would invent a tag that was never there.
+ */
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: "\u00a0",
+};
+
+export function decodeEntities(text: string): string {
+  return text.replace(/&(#x[0-9a-fA-F]+|#[0-9]+|[a-zA-Z]+);/g, (whole, body: string) => {
+    if (body[0] !== "#") return NAMED_ENTITIES[body.toLowerCase()] ?? whole;
+    const code =
+      body[1] === "x" || body[1] === "X"
+        ? Number.parseInt(body.slice(2), 16)
+        : Number.parseInt(body.slice(1), 10);
+    return Number.isFinite(code) && code > 0 && code <= 0x10ffff
+      ? String.fromCodePoint(code)
+      : whole;
+  });
+}
+
 /** Play reports "VARY" for apps whose version differs per device. */
 function realVersion(raw: unknown): string | null {
   return typeof raw === "string" && raw && raw !== "VARY" ? raw : null;
@@ -99,9 +138,9 @@ export async function searchPlay(term: string): Promise<PlayHit[]> {
 
   return results.map((r) => ({
     packageId: String(r.appId),
-    name: String(r.title ?? r.appId),
-    developer: typeof r.developer === "string" ? r.developer : null,
-    summary: typeof r.summary === "string" ? r.summary : null,
+    name: decodeEntities(String(r.title ?? r.appId)),
+    developer: typeof r.developer === "string" ? decodeEntities(r.developer) : null,
+    summary: typeof r.summary === "string" ? decodeEntities(r.summary) : null,
     iconUrl: typeof r.icon === "string" ? r.icon : null,
     score: typeof r.score === "number" ? r.score : 0,
     url:
@@ -111,6 +150,212 @@ export async function searchPlay(term: string): Promise<PlayHit[]> {
     existingSlug: byPackage.get(String(r.appId).toLowerCase()),
   }));
 }
+
+/**
+ * A Play listing, read but not yet written anywhere.
+ *
+ * Split out from the write so the same lookup can be shown to a person before
+ * anything lands on disk. That matters more than it sounds: a package id says
+ * which app a build *is a build of*, not which build it is. The store holds
+ * Instagram Piko, a patched client under `com.instagram.android` — the id
+ * Play answers for with Meta's own listing, screenshots and all. Some of that
+ * describes the patched build fairly and some of it does not, and only a
+ * person looking at the two can say which.
+ */
+export type PlayListing = {
+  packageId: string;
+  name: string;
+  developer: string | null;
+  category: Category;
+  tagline: string | null;
+  description: string | null;
+  rating: number | null;
+  ratingCount: number | null;
+  /** What Play showed, which is upstream's version and not this library's. */
+  playVersion: string | null;
+  url: string;
+  iconUrl: string | null;
+  bannerUrl: string | null;
+  screenshotUrls: string[];
+};
+
+export async function fetchPlayListing(packageId: string): Promise<PlayListing> {
+  const pkg = packageId.trim();
+  if (!/^[a-zA-Z0-9._]+$/.test(pkg)) {
+    throw new Error("That does not look like a package id");
+  }
+
+  const gp = await gplay();
+  let app: any;
+  try {
+    app = await gp.app({ appId: pkg });
+  } catch {
+    throw new Error("Play has no listing for that package id");
+  }
+
+  const str = (v: unknown): string | null =>
+    typeof v === "string" && v.trim() ? decodeEntities(v) : null;
+
+  return {
+    packageId: pkg,
+    name: decodeEntities(String(app.title ?? pkg)),
+    developer: str(app.developer),
+    category: categoryFor(app.genreId),
+    tagline: str(app.summary),
+    description: str(app.description),
+    rating: typeof app.score === "number" ? Number(app.score.toFixed(2)) : null,
+    ratingCount: typeof app.ratings === "number" ? app.ratings : null,
+    playVersion: realVersion(app.version),
+    url: str(app.url) ?? `https://play.google.com/store/apps/details?id=${pkg}`,
+    iconUrl: str(app.icon),
+    bannerUrl: str(app.headerImage),
+    screenshotUrls: (Array.isArray(app.screenshots) ? app.screenshots : [])
+      .filter((s: unknown): s is string => typeof s === "string")
+      .slice(0, MAX_SCREENSHOTS),
+  };
+}
+
+/* -------------------------------------------------------------------- fill */
+
+/** What a fill did, field by field, so the answer can be shown rather than assumed. */
+export type PlayFill = {
+  /** Meta keys this fill wrote. */
+  written: string[];
+  /** Keys the app already carried, left exactly as they were. */
+  kept: string[];
+  images: { icon: boolean; banner: boolean; screenshots: number };
+};
+
+const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp", ".avif", ".gif"];
+
+/** True when `<dir>/<slug>.<some image extension>` is already there. */
+async function hasImage(dir: string, slug: string): Promise<boolean> {
+  const files = await fs.readdir(path.join(STORE_ROOT, dir)).catch(() => []);
+  return files.some((f) => {
+    const ext = path.extname(f).toLowerCase();
+    return IMAGE_EXTENSIONS.includes(ext) && f.slice(0, -ext.length) === slug;
+  });
+}
+
+async function hasScreenshots(slug: string): Promise<boolean> {
+  const dir = path.join(STORE_ROOT, STORE_DIRS.screenshots, slug);
+  const files = await fs.readdir(dir).catch(() => []);
+  return files.some((f) => IMAGE_EXTENSIONS.includes(path.extname(f).toLowerCase()));
+}
+
+/**
+ * Write a listing's words and pictures onto an app that already exists.
+ *
+ * **Gaps only, unless told otherwise.** An app created from a dropped APK has
+ * a name worked out from the file — "Instagram Piko", not "Instagram" — and
+ * that name is the whole reason someone can find the modified build in a
+ * library that also holds the stock one. The same goes for a category or a
+ * tagline written by hand. So an existing value is reported as kept, never
+ * replaced; `overwrite` exists for the one caller that just created the slug
+ * itself and knows there is nothing to protect.
+ *
+ * `source` is only written when the caller passes one. Filling in metadata
+ * does not make Play the app's source: an APK that came from Telegram or a
+ * GitHub release still came from there, and rewriting that field would lose
+ * the release tag the update check compares against.
+ */
+export async function fillFromPlay(
+  slug: string,
+  listing: PlayListing,
+  opts: { overwrite?: boolean; source?: AppSource } = {}
+): Promise<PlayFill> {
+  const meta = await readMetaRaw(slug);
+  const patch: Record<string, unknown> = {};
+  const written: string[] = [];
+  const kept: string[] = [];
+
+  const put = (key: string, value: unknown) => {
+    if (value === null || value === undefined || value === "") return;
+    const current = meta[key];
+    const filled = current !== undefined && current !== null && current !== "";
+    if (filled && !opts.overwrite) {
+      kept.push(key);
+      return;
+    }
+    patch[key] = value;
+    written.push(key);
+  };
+
+  put("name", listing.name);
+  put("developer", listing.developer);
+  put("category", listing.category);
+  put("tagline", listing.tagline);
+  put("description", listing.description);
+  put("rating", listing.rating);
+  put("ratingCount", listing.ratingCount);
+  if (opts.source) patch.source = opts.source;
+
+  const wantIcon =
+    listing.iconUrl && (opts.overwrite || !(await hasImage(STORE_DIRS.icons, slug)));
+  const icon = wantIcon
+    ? await saveImage(
+        listing.iconUrl!,
+        path.join(STORE_ROOT, STORE_DIRS.icons, slug),
+        "play"
+      )
+    : false;
+
+  const wantBanner =
+    listing.bannerUrl &&
+    (opts.overwrite || !(await hasImage(STORE_DIRS.banners, slug)));
+  const banner = wantBanner
+    ? await saveImage(
+        listing.bannerUrl!,
+        path.join(STORE_ROOT, STORE_DIRS.banners, slug),
+        "play"
+      )
+    : false;
+
+  // All or nothing: a folder holding two of someone's screenshots and six of
+  // this listing's would be worse than either, and the numbering is what the
+  // gallery sorts on.
+  let saved = 0;
+  if (opts.overwrite || !(await hasScreenshots(slug))) {
+    for (const [i, url] of listing.screenshotUrls.entries()) {
+      // Zero-padded: the catalog sorts these numerically, but a plain reader
+      // listing the folder should see them in order too.
+      const dest = path.join(
+        STORE_ROOT,
+        STORE_DIRS.screenshots,
+        slug,
+        String(i + 1).padStart(2, "0")
+      );
+      if (await saveImage(url, dest, "play")) saved++;
+    }
+  }
+
+  // Where the words came from, kept beside them. `source` answers this for an
+  // app added from Play, but not for one whose text was filled in afterwards
+  // — and that is exactly the app where someone later reads a description
+  // that does not sound like the build they installed and needs to know why.
+  //
+  // Only stamped when this fill actually put something there. Running it a
+  // second time finds every field already filled, and re-stamping would
+  // replace a true record of what came from Play with an empty one.
+  const did = written.length > 0 || icon || banner || saved > 0;
+  if (did) {
+    patch.playMeta = {
+      packageId: listing.packageId,
+      url: listing.url,
+      fetchedAt: new Date().toISOString(),
+      fields: written,
+      images: { icon: !!icon, banner: !!banner, screenshots: saved },
+    };
+  }
+  // A patch of nothing still means nothing to write: `writeMeta` merges and
+  // rewrites the file, and rewriting it identically is only a chance to lose it.
+  if (Object.keys(patch).length) await writeMeta(slug, patch);
+
+  invalidateCatalog();
+  return { written, kept, images: { icon: !!icon, banner: !!banner, screenshots: saved } };
+}
+
+/* --------------------------------------------------------------------- add */
 
 export type PlayAddResult = {
   slug: string;
@@ -128,85 +373,34 @@ export type PlayAddResult = {
  * every future drop of that app from attaching itself.
  */
 export async function addFromPlay(packageId: string): Promise<PlayAddResult> {
-  const pkg = packageId.trim();
-  if (!/^[a-zA-Z0-9._]+$/.test(pkg)) {
-    throw new Error("That does not look like a package id");
-  }
+  const listing = await fetchPlayListing(packageId);
 
   const clash = (await getApps()).find(
-    (a) => a.packageName?.toLowerCase() === pkg.toLowerCase()
+    (a) => a.packageName?.toLowerCase() === listing.packageId.toLowerCase()
   );
   if (clash) {
     throw new Error(`${clash.name} is already in the catalog as "${clash.slug}"`);
   }
 
-  const gp = await gplay();
-  let app: any;
-  try {
-    app = await gp.app({ appId: pkg });
-  } catch {
-    throw new Error("Play has no listing for that package id");
-  }
-
-  const name = String(app.title ?? pkg);
-  const slug = await uniqueSlug(name);
-
-  await writeMeta(slug, {
-    name,
-    packageName: pkg,
-    developer: typeof app.developer === "string" ? app.developer : undefined,
-    category: categoryFor(app.genreId),
-    tagline: typeof app.summary === "string" ? app.summary : undefined,
-    description: typeof app.description === "string" ? app.description : undefined,
-    rating: typeof app.score === "number" ? Number(app.score.toFixed(2)) : undefined,
-    ratingCount: typeof app.ratings === "number" ? app.ratings : undefined,
+  const slug = await uniqueSlug(listing.name);
+  // Nothing is on this slug yet, so there is no hand-written value to protect
+  // and the package id has to be written even though `fillFromPlay` does not
+  // deal in it — that field belongs to the binary everywhere else.
+  await writeMeta(slug, { packageName: listing.packageId });
+  const fill = await fillFromPlay(slug, listing, {
+    overwrite: true,
     source: {
       kind: "play",
-      url: String(app.url ?? `https://play.google.com/store/apps/details?id=${pkg}`),
-      // What Play showed at the time. The versions the store actually holds
-      // come from the APKs, so this is a note about upstream, not a claim
-      // about this library.
-      playVersion: realVersion(app.version),
+      url: listing.url,
+      playVersion: listing.playVersion ?? undefined,
       addedFrom: "manage/add",
     },
   });
 
-  const icon =
-    typeof app.icon === "string" &&
-    (await saveImage(
-      app.icon,
-      path.join(STORE_ROOT, STORE_DIRS.icons, slug),
-      "play"
-    ));
-  const banner =
-    typeof app.headerImage === "string" &&
-    (await saveImage(
-      app.headerImage,
-      path.join(STORE_ROOT, STORE_DIRS.banners, slug),
-      "play"
-    ));
-
-  const shots: string[] = Array.isArray(app.screenshots)
-    ? app.screenshots.filter((s: unknown) => typeof s === "string")
-    : [];
-  let saved = 0;
-  for (const [i, url] of shots.slice(0, MAX_SCREENSHOTS).entries()) {
-    // Zero-padded: the catalog sorts these numerically, but a plain reader
-    // listing the folder should see them in order too.
-    const dest = path.join(
-      STORE_ROOT,
-      STORE_DIRS.screenshots,
-      slug,
-      String(i + 1).padStart(2, "0")
-    );
-    if (await saveImage(url, dest, "play")) saved++;
-  }
-
-  invalidateCatalog();
   return {
     slug,
-    name,
-    packageId: pkg,
-    images: { icon: !!icon, banner: !!banner, screenshots: saved },
+    name: listing.name,
+    packageId: listing.packageId,
+    images: fill.images,
   };
 }
