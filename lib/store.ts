@@ -90,6 +90,10 @@ function readSource(raw: unknown): AppSource | undefined {
     : undefined;
 }
 
+export const ICON_FITS = ["cover", "contain"] as const;
+
+export type IconFit = (typeof ICON_FITS)[number];
+
 export type StoreApp = {
   slug: string;
   name: string;
@@ -121,6 +125,21 @@ export type StoreApp = {
   updateTo?: string;
   /** Media hrefs, already cache-busted. Absent when the file is not on disk. */
   icon?: string;
+  /**
+   * A flat colour to put behind the icon, `#rgb`/`#rrggbb`/`#rrggbbaa`.
+   *
+   * Plenty of icons are drawn as a transparent logo with no plate of their own
+   * (ytdlnis, Obtainium), and the fallback gradient — which exists to stand in
+   * for a missing icon — then shows through one that is present. Absent means
+   * the gradient, which is right for every icon that brings its own square.
+   */
+  iconBackground?: string;
+  /**
+   * How the icon meets its box. "cover" — the default — fills the square and
+   * crops what does not fit; "contain" fits the whole image inside it with a
+   * little air, which is what a wordmark or a non-square logo needs.
+   */
+  iconFit?: IconFit;
   banner?: string;
   screenshots: string[];
   /** Newest first. Empty when the app has meta but no APK yet. */
@@ -175,6 +194,10 @@ type MetaFile = {
   added?: string;
   /** Keeps the app out of the catalog without deleting it. */
   hidden?: boolean;
+  /** Set by hand: what to put behind a transparent icon. */
+  iconBackground?: string;
+  /** Set by hand: "contain" to fit the whole icon instead of filling the box. */
+  iconFit?: string;
 };
 
 /* ------------------------------------------------------------------ utils */
@@ -223,6 +246,29 @@ export function compareVersions(a: string, b: string): number {
     }
   }
   return 0;
+}
+
+/**
+ * A CSS colour this app is willing to put in a style attribute, or nothing.
+ *
+ * Meta files are hand-editable, so what comes out of one is input like any
+ * other. Hex is the whole of the vocabulary — it is what the colour picker in
+ * the edit form produces, and `#rrggbbaa` covers "no plate at all" (alpha 00)
+ * without a second spelling for it.
+ */
+export function normaliseHexColor(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const value = raw.trim().toLowerCase();
+  return /^#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/.test(value)
+    ? value
+    : undefined;
+}
+
+/** "cover" is the default, so only "contain" is worth carrying. */
+export function normaliseIconFit(raw: unknown): IconFit | undefined {
+  if (typeof raw !== "string") return undefined;
+  const value = raw.trim().toLowerCase();
+  return value === "contain" ? "contain" : undefined;
 }
 
 function normaliseCategory(raw: string | undefined): Category {
@@ -417,6 +463,8 @@ async function readFromDisk(): Promise<StoreApp[]> {
         icon: icon
           ? mediaHref(`${STORE_DIRS.icons}/${icon.file}`, icon.mtimeMs)
           : undefined,
+        iconBackground: normaliseHexColor(meta?.iconBackground),
+        iconFit: normaliseIconFit(meta?.iconFit),
         banner: banner
           ? mediaHref(`${STORE_DIRS.banners}/${banner.file}`, banner.mtimeMs)
           : undefined,

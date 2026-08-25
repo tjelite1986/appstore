@@ -46,6 +46,8 @@ export default function AppRows({
               <Thumb
                 seed={app.seed}
                 src={app.icon}
+                background={app.iconBackground}
+                fit={app.iconFit}
                 alt={app.name}
                 className="h-12 w-12 rounded-[var(--radius-sm)]"
               />

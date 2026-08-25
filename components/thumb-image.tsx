@@ -15,9 +15,12 @@ import { useState } from "react";
 export default function ThumbImage({
   src,
   alt = "",
+  fit = "cover",
 }: {
   src: string;
   alt?: string;
+  /** "contain" fits the whole image in the box; "cover" fills and crops. */
+  fit?: "cover" | "contain";
 }) {
   const [failed, setFailed] = useState(false);
   const [tracked, setTracked] = useState(src);
@@ -39,7 +42,14 @@ export default function ThumbImage({
       alt={alt}
       loading="lazy"
       decoding="async"
-      className="absolute inset-0 h-full w-full object-cover"
+      className={
+        fit === "contain"
+          ? // Inset rather than inset-0: an icon that has to be *fitted* is a
+            // logo, and a logo drawn hard against the edges of its plate looks
+            // like a mistake. The margin is part of what "fit" means here.
+            "absolute inset-[9%] h-[82%] w-[82%] object-contain"
+          : "absolute inset-0 h-full w-full object-cover"
+      }
       onError={() => setFailed(true)}
     />
   );

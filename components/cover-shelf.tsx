@@ -50,6 +50,8 @@ export default function CoverShelf({
             <Thumb
               seed={app.seed}
               src={app.icon}
+              background={app.iconBackground}
+              fit={app.iconFit}
               alt={app.name}
               className={cn(
                 "aspect-square w-full shadow-lg",

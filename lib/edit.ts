@@ -16,7 +16,13 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { STORE_DIRS, STORE_ROOT } from "@/lib/storage";
 import { writeMeta } from "@/lib/import";
-import { findApp, invalidateCatalog, type Category } from "@/lib/store";
+import {
+  findApp,
+  invalidateCatalog,
+  normaliseHexColor,
+  normaliseIconFit,
+  type Category,
+} from "@/lib/store";
 import { fetchImageBytes } from "@/lib/sources/net";
 
 /** What a person owns. Anything not in here is refused, not ignored. */
@@ -26,6 +32,8 @@ export const EDITABLE_FIELDS = [
   "category",
   "tagline",
   "description",
+  "iconBackground",
+  "iconFit",
 ] as const;
 
 export type EditableField = (typeof EDITABLE_FIELDS)[number];
@@ -56,6 +64,8 @@ const MAX_LENGTHS: Record<EditableField, number> = {
   category: 40,
   tagline: 300,
   description: 20_000,
+  iconBackground: 9,
+  iconFit: 8,
 };
 
 export type EditPatch = Partial<Record<EditableField, string>>;
@@ -101,6 +111,30 @@ export async function editApp(slug: string, patch: unknown): Promise<void> {
       throw new EditError(
         `${field} is longer than ${MAX_LENGTHS[field]} characters`
       );
+    }
+    // An icon drawn as a transparent logo has no plate of its own, and the
+    // gradient behind it is the *missing artwork* fallback rather than a
+    // choice anyone made. This is where that choice is made. Hex only: the
+    // form sends what its colour input produced, and a value that reaches a
+    // style attribute is not the place to be generous about spelling.
+    if (field === "iconBackground" && trimmed) {
+      const colour = normaliseHexColor(trimmed);
+      if (!colour) {
+        throw new EditError(
+          `${trimmed} is not a hex colour like #1b1b1b or #00000000`
+        );
+      }
+      write.iconBackground = colour;
+      continue;
+    }
+    // Two values, and only one of them is worth a key in the file: "cover" is
+    // what every icon does without being told, so choosing it is the deletion.
+    if (field === "iconFit" && trimmed) {
+      if (trimmed.toLowerCase() !== "cover" && !normaliseIconFit(trimmed)) {
+        throw new EditError(`${trimmed} is not "cover" or "contain"`);
+      }
+      write.iconFit = normaliseIconFit(trimmed);
+      continue;
     }
     if (field === "category" && trimmed) {
       const hit = CATEGORIES.find(

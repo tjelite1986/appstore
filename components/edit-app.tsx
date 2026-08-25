@@ -16,7 +16,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Link2, Pencil, Plus, Sparkles, Trash2, X } from "lucide-react";
 import { adminHeaders, readAdminToken } from "@/lib/admin-token";
-import { buttonClass, CARD, MUTED } from "@/components/primitives";
+import {
+  buttonClass,
+  CARD,
+  MUTED,
+  thumbBackground,
+} from "@/components/primitives";
 import { cn } from "@/lib/utils";
 
 const CATEGORIES = [
@@ -56,6 +61,12 @@ export type EditableApp = {
   tagline: string;
   description: string;
   icon?: string;
+  /** Empty for "no plate chosen" — the fallback gradient, keyed on `seed`. */
+  iconBackground?: string;
+  /** Absent means "cover", which is what an icon does untold. */
+  iconFit?: "cover" | "contain";
+  /** Only so the preview here shows the same gradient the store does. */
+  seed: number;
   banner?: string;
   screenshots: string[];
 };
@@ -70,6 +81,11 @@ export default function EditApp({ app }: { app: EditableApp }) {
     tagline: app.tagline,
     description: app.description,
   });
+  // Its own state and its own save, not a sixth row in `form`: this is a
+  // decision about a picture, made while looking at the picture, and it would
+  // be odd for "Save text" to be the button that applies a colour.
+  const [iconBg, setIconBg] = useState(app.iconBackground ?? "");
+  const [iconFit, setIconFit] = useState(app.iconFit ?? "cover");
   const [art, setArt] = useState<ArtworkFind | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -142,6 +158,25 @@ export default function EditApp({ app }: { app: EditableApp }) {
         });
       }
       setSaved(true);
+    });
+
+  const saveIconBg = (value: string) =>
+    run("iconbg", async () => {
+      // "" is a deletion, so this is also how the gradient comes back.
+      await call(`/api/apps/${app.slug}`, {
+        method: "PATCH",
+        body: JSON.stringify({ iconBackground: value }),
+      });
+      setIconBg(value);
+    });
+
+  const saveIconFit = (value: "cover" | "contain") =>
+    run("iconfit", async () => {
+      await call(`/api/apps/${app.slug}`, {
+        method: "PATCH",
+        body: JSON.stringify({ iconFit: value }),
+      });
+      setIconFit(value);
     });
 
   const upload = (kind: string, file: File) =>
@@ -295,11 +330,28 @@ export default function EditApp({ app }: { app: EditableApp }) {
             kind="icon"
             label="Icon"
             src={app.icon}
+            preview={thumbBackground(app.seed, iconBg || undefined)}
+            previewClassName={
+              // p-1, not a percentage: padding percentages resolve against the
+              // *parent's* width, and on a 48px thumbnail inside a full-width
+              // card that swallows the whole image.
+              iconFit === "contain" ? "object-contain p-1" : "object-cover"
+            }
             busy={busy}
             onPick={(f) => upload("icon", f)}
             onUrl={(u) => fromUrl("icon", u)}
             onDrop={() => drop("icon")}
-          />
+          >
+            <IconLook
+              value={iconBg}
+              fit={iconFit}
+              busy={busy === "iconbg"}
+              fitBusy={busy === "iconfit"}
+              onChange={setIconBg}
+              onSave={saveIconBg}
+              onFit={saveIconFit}
+            />
+          </Single>
           <Single
             kind="banner"
             label="Banner"
@@ -620,18 +672,26 @@ function Single({
   kind,
   label,
   src,
+  preview,
+  previewClassName,
   busy,
   onPick,
   onUrl,
   onDrop,
+  children,
 }: {
   kind: string;
   label: string;
   src?: string;
+  /** What to put behind the thumbnail, so it previews what the store renders. */
+  preview?: React.CSSProperties;
+  /** How it meets its box, the other half of the same preview. */
+  previewClassName?: string;
   busy: string | null;
   onPick: (file: File) => void;
   onUrl: (url: string) => Promise<boolean>;
   onDrop: () => void;
+  children?: React.ReactNode;
 }) {
   return (
     <div>
@@ -642,7 +702,11 @@ function Single({
           <img
             src={src}
             alt=""
-            className="h-12 w-12 shrink-0 rounded-[var(--radius)] border border-[color:var(--border)] object-cover"
+            style={preview}
+            className={cn(
+              "h-12 w-12 shrink-0 rounded-[var(--radius)] border border-[color:var(--border)]",
+              previewClassName ?? "object-cover"
+            )}
           />
         ) : (
           <div
@@ -671,6 +735,157 @@ function Single({
         )}
       </div>
       <UrlField busy={busy === `upload:${kind}`} onSubmit={onUrl} />
+      {children}
+    </div>
+  );
+}
+
+/**
+ * The plate behind a transparent icon.
+ *
+ * ytdlnis and Obtainium ship a logo with no square of its own, and the store's
+ * fallback gradient — which is there to stand in for artwork that is *missing*
+ * — then colours an icon that is present, differently for every app. Choosing
+ * one flat colour is the answer, and choosing it takes looking at the icon, so
+ * it sits under the icon field and not in the text form above.
+ *
+ * The presets are the four that actually come up: the two neutrals a logo is
+ * usually drawn for, this theme's own surfaces, and "None", which is the
+ * transparent plate — the tile then shows whatever it is sitting on rather
+ * than a colour of its own. "Default" is the way back to the gradient.
+ */
+const BG_PRESETS: { value: string; label: string; swatch: string }[] = [
+  { value: "#ffffff", label: "White", swatch: "#ffffff" },
+  { value: "#f2f2f2", label: "Off-white", swatch: "#f2f2f2" },
+  { value: "#1b1420", label: "Dark", swatch: "#1b1420" },
+  { value: "#000000", label: "Black", swatch: "#000000" },
+  { value: "#00000000", label: "None", swatch: "transparent" },
+];
+
+function IconLook({
+  value,
+  fit,
+  busy,
+  fitBusy,
+  onChange,
+  onSave,
+  onFit,
+}: {
+  value: string;
+  fit: "cover" | "contain";
+  busy: boolean;
+  fitBusy: boolean;
+  onChange: (v: string) => void;
+  onSave: (v: string) => Promise<boolean>;
+  onFit: (v: "cover" | "contain") => Promise<boolean>;
+}) {
+  // <input type="color"> has no way to say "nothing chosen" and no notion of
+  // alpha, so it is seeded with the opaque part of the value and a plain text
+  // field carries the rest. Typing is not validated here — the server owns
+  // that, and a half-typed "#1b1" is not an error yet.
+  const picker = /^#[0-9a-fA-F]{6}/.test(value) ? value.slice(0, 7) : "#ffffff";
+
+  return (
+    <div className="mt-2">
+      <span className={cn("mb-1 block text-[11px]", MUTED)}>
+        Background behind the icon
+      </span>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {BG_PRESETS.map((p) => (
+          <button
+            key={p.value}
+            type="button"
+            disabled={busy}
+            title={p.label}
+            aria-label={p.label}
+            aria-pressed={value.toLowerCase() === p.value}
+            onClick={() => void onSave(p.value)}
+            style={{ backgroundColor: p.swatch }}
+            className={cn(
+              "h-7 w-7 rounded-full border disabled:opacity-60",
+              value.toLowerCase() === p.value
+                ? "border-[color:var(--accent)] ring-2 ring-[color:var(--accent)]"
+                : "border-[color:var(--border)]",
+              // The transparent one needs to look transparent rather than look
+              // like the card it is drawn on.
+              p.swatch === "transparent" &&
+                "bg-[repeating-conic-gradient(#8886_0_25%,transparent_0_50%)] bg-[length:8px_8px]"
+            )}
+          />
+        ))}
+        <input
+          type="color"
+          disabled={busy}
+          value={picker}
+          onChange={(e) => onChange(e.target.value)}
+          aria-label="Pick a colour"
+          className="h-7 w-9 shrink-0 cursor-pointer rounded border border-[color:var(--border)] bg-transparent p-0.5 disabled:opacity-60"
+        />
+        <input
+          className={cn(FIELD, "h-7 w-24 shrink-0 px-2 py-0 font-mono text-xs")}
+          placeholder="#rrggbb"
+          spellCheck={false}
+          value={value}
+          disabled={busy}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter") return;
+            e.preventDefault();
+            void onSave(value);
+          }}
+        />
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void onSave(value)}
+          className={cn(buttonClass("secondary", "sm"), "disabled:opacity-60")}
+        >
+          {busy ? "Saving…" : "Apply"}
+        </button>
+        {value && (
+          <button
+            type="button"
+            disabled={busy}
+            // Empty is the deletion: the key leaves the meta file and the
+            // seeded gradient comes back.
+            onClick={() => void onSave("")}
+            className={cn(buttonClass("ghost", "sm"), "disabled:opacity-60")}
+          >
+            Default
+          </button>
+        )}
+      </div>
+
+      {/* The other half of the same decision. A plate is for an icon that does
+          not fill its square, and the same icon is usually the one that should
+          not be cropped to fit it either — a wide wordmark loses its ends to
+          "Fill". Two states, so a segmented pair rather than a select. */}
+      <span className={cn("mb-1 mt-2 block text-[11px]", MUTED)}>
+        How the icon fills it
+      </span>
+      <div className="flex gap-1.5">
+        {(
+          [
+            ["cover", "Fill", "Crops to the square"],
+            ["contain", "Fit inside", "Whole icon, with a margin"],
+          ] as const
+        ).map(([mode, label, hint]) => (
+          <button
+            key={mode}
+            type="button"
+            disabled={fitBusy}
+            title={hint}
+            aria-pressed={fit === mode}
+            onClick={() => void onFit(mode)}
+            className={cn(
+              buttonClass(fit === mode ? "primary" : "secondary", "sm"),
+              "disabled:opacity-60"
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

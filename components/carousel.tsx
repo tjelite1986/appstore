@@ -45,6 +45,10 @@ export default function Carousel({
             <Thumb
               seed={app.seed + 4}
               src={app.banner ?? app.icon}
+              // The icon standing in for a missing banner brings its plate
+              // with it; a real banner is a picture and keeps the gradient.
+              background={app.banner ? undefined : app.iconBackground}
+              fit={app.banner ? undefined : app.iconFit}
               alt={app.name}
               className="aspect-video w-full rounded-[var(--radius-sm)]"
             />

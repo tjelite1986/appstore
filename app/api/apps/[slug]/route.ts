@@ -1,5 +1,7 @@
 /**
- * PATCH /api/apps/<slug>   { name?, developer?, category?, tagline?, description? }
+ * PATCH /api/apps/<slug>
+ *   { name?, developer?, category?, tagline?, description?, iconBackground?,
+ *     iconFit? }
  *
  * The words on a listing, set by hand. Sources write what they can guess and
  * refuse to overwrite; this is the other half — see `lib/edit.ts` for which
@@ -51,6 +53,8 @@ export async function PATCH(
       category: app.category,
       tagline: app.tagline,
       description: app.description ?? "",
+      iconBackground: app.iconBackground ?? "",
+      iconFit: app.iconFit ?? "cover",
     },
   });
 }

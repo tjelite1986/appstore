@@ -7,6 +7,31 @@ export const CARD =
 export const MUTED = "text-[color:var(--muted)]";
 
 /**
+ * What sits behind the artwork.
+ *
+ * Two answers, and the caller picks by whether it has a chosen colour. The
+ * gradient is the fallback *for a missing image*, keyed on the app's `seed` so
+ * the same app keeps the same colours on every surface; `background` is a plate
+ * put there on purpose for an icon drawn as a transparent logo, and it replaces
+ * the gradient rather than sitting under it — a colour someone chose showing
+ * through a wash of hsl() is not the colour they chose.
+ *
+ * Shared with the edit form so the swatch preview there is the real thing.
+ */
+export function thumbBackground(
+  seed = 0,
+  background?: string
+): React.CSSProperties {
+  if (background) return { backgroundColor: background, backgroundImage: "none" };
+  const hue = (seed * 47 + 205) % 360;
+  return {
+    backgroundImage: `linear-gradient(135deg, hsl(${hue} 45% 42% / 0.85), hsl(${
+      (hue + 48) % 360
+    } 45% 24% / 0.85))`,
+  };
+}
+
+/**
  * Artwork, with a fallback.
  *
  * `src` is a real file out of the library. When there is none — the app has no
@@ -14,6 +39,8 @@ export const MUTED = "text-[color:var(--muted)]";
  * It is keyed on the app's `seed`, so the same app keeps the same colours on
  * every surface, which is what a real icon would do. The gradient also sits
  * behind the image, so a slow load is not a hole in the layout.
+ *
+ * `background` overrules it — see `thumbBackground`.
  */
 export function Thumb({
   seed = 0,
@@ -21,28 +48,29 @@ export function Thumb({
   alt = "",
   className,
   label,
+  background,
+  fit,
 }: {
   seed?: number;
   src?: string;
   alt?: string;
   className?: string;
   label?: string;
+  /** A chosen plate for this artwork, `#rrggbb(aa)`. */
+  background?: string;
+  /** "contain" fits the whole image inside the box instead of cropping it. */
+  fit?: "cover" | "contain";
 }) {
-  const hue = (seed * 47 + 205) % 360;
   return (
     <div
       className={cn(
         "relative flex items-center justify-center overflow-hidden bg-[var(--card-2)]",
         className
       )}
-      style={{
-        backgroundImage: `linear-gradient(135deg, hsl(${hue} 45% 42% / 0.85), hsl(${
-          (hue + 48) % 360
-        } 45% 24% / 0.85))`,
-      }}
+      style={thumbBackground(seed, background)}
     >
       {src ? (
-        <ThumbImage src={src} alt={alt} />
+        <ThumbImage src={src} alt={alt} fit={fit} />
       ) : label ? (
         <span className="px-1 text-center text-[10px] font-medium text-white/80">
           {label}

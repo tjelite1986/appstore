@@ -57,14 +57,36 @@ Every field of a meta file is optional:
   "rating": 4.6,
   "ratingCount": 128,
   "added": "2026-08-20T09:00:00Z",
-  "hidden": false
+  "hidden": false,
+  "iconBackground": "#ffffff",
+  "iconFit": "contain"
 }
 ```
 
 `category` is matched case-insensitively against the six the sketch names;
 anything else lands in **Other**, whose tile only appears while something is in
 it. `added` overrides the date derived from the files. `hidden` keeps an app out
-of the catalog without deleting it. A meta file that will not parse is logged
+of the catalog without deleting it.
+
+`iconBackground` is the plate behind the icon, and it exists because the
+fallback gradient is the wrong answer for a *present* icon. An app with no
+artwork gets a gradient keyed on its slug; an icon drawn as a transparent logo
+with no square of its own — ytdlnis, Obtainium — is then that same gradient
+with a logo on top, a different colour on every shelf. Setting one flat colour
+here replaces the gradient for that app: hex only (`#rgb`, `#rrggbb`,
+`#rrggbbaa`, and `#00000000` for no plate at all), refused rather than ignored
+if it is anything else, and absent means the gradient, which is right for every
+icon that brings its own background. The swatches under **Icon** in *Edit
+listing* on the app's page are the way to set it; it applies wherever that icon
+is drawn, including a carousel where it stands in for a missing banner.
+
+`iconFit` is the other half of the same decision. Icons are drawn to fill their
+square and are cropped to it, which is right for the ones that are square. A
+wide wordmark loses its ends that way, so `"contain"` fits the whole image
+inside the box with a small margin instead — the margin is part of it, because
+a logo hard against the edge of its plate reads as a mistake. `"cover"` is the
+default and writing it removes the key. Same place in the form: **Fill** /
+**Fit inside** under the swatches. A meta file that will not parse is logged
 and skipped — the app still appears if it has APKs, and disappears if it does
 not.
 

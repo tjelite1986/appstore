@@ -36,6 +36,8 @@ export default function AppGrid({
               <Thumb
                 seed={app.seed}
                 src={app.icon}
+                background={app.iconBackground}
+                fit={app.iconFit}
                 alt={app.name}
                 className="h-14 w-14 shrink-0 rounded-[var(--radius-sm)] shadow-lg"
               />

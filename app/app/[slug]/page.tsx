@@ -89,6 +89,8 @@ export default async function AppDetailPage({
         <Thumb
           seed={app.seed}
           src={app.icon}
+          background={app.iconBackground}
+          fit={app.iconFit}
           alt={app.name}
           className="h-20 w-20 shrink-0 rounded-[var(--radius)] border border-[color:var(--border)] shadow-xl"
         />
@@ -163,6 +165,9 @@ export default async function AppDetailPage({
             tagline: app.tagline,
             description: app.description ?? "",
             icon: app.icon,
+            iconBackground: app.iconBackground,
+            iconFit: app.iconFit,
+            seed: app.seed,
             banner: app.banner,
             screenshots: app.screenshots,
           }}
