@@ -35,7 +35,10 @@ export default async function RootLayout({
         <style dangerouslySetInnerHTML={{ __html: THEME_VARS }} />
       </head>
       <body style={{ fontFamily: FONT_STACK }}>
-        <TopBar email={user?.email} />
+        <TopBar
+          email={user?.email}
+          parentUrl={process.env.ELITE_APP_URL?.trim() || undefined}
+        />
         {children}
         <BottomNav pending={pending} />
       </body>

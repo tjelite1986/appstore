@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bookmark, Home, Settings, Wrench } from "lucide-react";
+import { Bookmark, CornerUpLeft, Home, Settings, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -21,7 +21,14 @@ const ACTIONS = [
   { href: "/settings", label: "Settings", Icon: Settings },
 ];
 
-export default function TopBar({ email }: { email?: string }) {
+export default function TopBar({
+  email,
+  parentUrl,
+}: {
+  email?: string;
+  /** Where the login comes from — a link back, when one is configured. */
+  parentUrl?: string;
+}) {
   const pathname = usePathname();
 
   return (
@@ -38,6 +45,20 @@ export default function TopBar({ email }: { email?: string }) {
         >
           <Home size={10} />
         </Link>
+
+        {/* The store borrows its login from another app, so it is somewhere a
+            person arrives *from*. This is the way back, and it is only drawn
+            when ELITE_APP_URL says there is one. */}
+        {parentUrl && (
+          <a
+            href={parentUrl}
+            aria-label="Back to the app this login comes from"
+            title="Back"
+            className="shrink-0 rounded-[var(--radius-sm)] p-1 text-[color:var(--muted-2)] transition hover:bg-[var(--card-2)]"
+          >
+            <CornerUpLeft size={13} />
+          </a>
+        )}
 
         <span className="min-w-0 flex-1 text-center">
           <span className="block truncate text-[13px] font-semibold tracking-wide">

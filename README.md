@@ -348,6 +348,10 @@ Reads skip the check; a cross-site navigation cannot read what it gets.
 `STORE_ADMIN_TOKEN` stays as the machine credential in the
 `x-store-admin-token` header.
 
+**The way back.** Borrowing a login makes this a place people arrive *from*,
+so `ELITE_APP_URL` puts a back arrow in the header pointing at that app. It is
+display only — nothing is verified through it — and unset means no arrow.
+
 **Unset means closed**, not open — with neither configured the routes refuse
 everything, because a missing variable must not read as "no gate configured,
 let it through". `lib/admin.ts` and `lib/sso.ts` are the whole of it.
