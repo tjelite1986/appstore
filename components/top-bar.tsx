@@ -2,13 +2,18 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bookmark, CornerUpLeft, Home, Settings, Wrench } from "lucide-react";
+import { Bookmark, Home, Settings, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
  * The sketch's `window-chrome` block: centred title, app icon on the left,
  * Manage / Saved / Settings plus an avatar on the right, compact, translucent
  * over the page (`solid: false`), no window controls.
+ *
+ * No way back sits here. It used to, from when the store was somewhere people
+ * were sent to; mounted as a section of another site the way out belongs in
+ * the bottom bar, next to the rest of that site's navigation, which is where
+ * someone who has been using it will look for it.
  *
  * Icon note: the sketch names two Material Symbols (`ms.handyman` for Manage,
  * `ms.videogame_asset` and `ms.deployed_code_update` in the bottom nav). This
@@ -21,14 +26,7 @@ const ACTIONS = [
   { href: "/settings", label: "Settings", Icon: Settings },
 ];
 
-export default function TopBar({
-  email,
-  parentUrl,
-}: {
-  email?: string;
-  /** Where the login comes from — a link back, when one is configured. */
-  parentUrl?: string;
-}) {
+export default function TopBar({ email }: { email?: string }) {
   const pathname = usePathname();
 
   return (
@@ -45,20 +43,6 @@ export default function TopBar({
         >
           <Home size={10} />
         </Link>
-
-        {/* The store borrows its login from another app, so it is somewhere a
-            person arrives *from*. This is the way back, and it is only drawn
-            when ELITE_APP_URL says there is one. */}
-        {parentUrl && (
-          <a
-            href={parentUrl}
-            aria-label="Back to the app this login comes from"
-            title="Back"
-            className="shrink-0 rounded-[var(--radius-sm)] p-1 text-[color:var(--muted-2)] transition hover:bg-[var(--card-2)]"
-          >
-            <CornerUpLeft size={13} />
-          </a>
-        )}
 
         <span className="min-w-0 flex-1 text-center">
           <span className="block truncate text-[13px] font-semibold tracking-wide">

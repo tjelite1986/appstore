@@ -33,14 +33,29 @@ export default async function RootLayout({
         {/* The tokens are static text built from lib/theme.ts — no user input
             reaches this string, so there is nothing to escape. */}
         <style dangerouslySetInnerHTML={{ __html: THEME_VARS }} />
+        {/* The store is a section of the site the login comes from, so it is
+            painted the way that account paints the rest of it: the same accent
+            and the same background, overriding the two tokens above and
+            nothing else. The derived accent shades have to be recomputed here
+            — they were mixed from the default one line up. Both values are
+            checked in lib/sso.ts before reaching this string. Absent, either
+            because nobody is signed in or because that app does not send it,
+            the store keeps its own colours. */}
+        {user?.appearance && (
+          <style
+            dangerouslySetInnerHTML={{
+              __html: `:root{--accent:${user.appearance.accent};--accent-soft:color-mix(in srgb, ${user.appearance.accent}, transparent 82%);--accent-text:color-mix(in srgb, ${user.appearance.accent}, white 42%);--app-bg:${user.appearance.bg};}`,
+            }}
+          />
+        )}
       </head>
       <body style={{ fontFamily: FONT_STACK }}>
-        <TopBar
-          email={user?.email}
+        <TopBar email={user?.email} />
+        {children}
+        <BottomNav
+          pending={pending}
           parentUrl={process.env.ELITE_APP_URL?.trim() || undefined}
         />
-        {children}
-        <BottomNav pending={pending} />
       </body>
     </html>
   );

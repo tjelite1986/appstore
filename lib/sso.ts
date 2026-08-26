@@ -23,6 +23,41 @@ export interface EliteUser {
   id: number;
   email: string;
   role: "user" | "admin";
+  /**
+   * How the site this login comes from is painted for this account. Present
+   * only when that app sends it — an older one, or none at all, simply leaves
+   * the store looking like itself.
+   */
+  appearance?: Appearance;
+}
+
+/**
+ * Two CSS values, not a theme. Both apps name these tokens `--accent` and
+ * `--app-bg`, so adopting them is a matter of writing two custom properties;
+ * everything else about the store's look stays its own.
+ */
+export interface Appearance {
+  accent: string;
+  bg: string;
+}
+
+/**
+ * Values from another app end up inside a `<style>` block, so they are checked
+ * here rather than trusted: an accent must be a plain hex colour, and a
+ * background may not carry anything that could close the declaration it sits
+ * in. elite-v2 already validates both on its side — this is the second lock,
+ * for the day something else answers that endpoint.
+ */
+function cleanAppearance(value: unknown): Appearance | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const { accent, bg } = value as { accent?: unknown; bg?: unknown };
+  if (typeof accent !== "string" || !/^#[0-9a-fA-F]{6}$/.test(accent)) {
+    return undefined;
+  }
+  if (typeof bg !== "string" || bg.length > 400 || /[;{}<>@\\]/.test(bg)) {
+    return undefined;
+  }
+  return { accent, bg };
 }
 
 type Entry = { at: number; user: EliteUser | null };
@@ -100,6 +135,7 @@ export async function eliteUser(req: Request): Promise<EliteUser | null> {
   const body = (await res.json().catch(() => null)) as {
     ok?: boolean;
     user?: { id?: unknown; email?: unknown; role?: unknown };
+    appearance?: unknown;
   } | null;
   const user = body?.ok ? body.user : undefined;
   if (
@@ -110,5 +146,10 @@ export async function eliteUser(req: Request): Promise<EliteUser | null> {
     console.error("[sso] verify returned a body this app does not understand");
     return null;
   }
-  return remember(token, { id: user.id, email: user.email, role: user.role });
+  return remember(token, {
+    id: user.id,
+    email: user.email,
+    role: user.role,
+    appearance: cleanAppearance(body?.appearance),
+  });
 }

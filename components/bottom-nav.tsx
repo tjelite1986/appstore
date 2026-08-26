@@ -6,6 +6,7 @@ import {
   Gamepad2,
   Home,
   LayoutDashboard,
+  Menu,
   PackageCheck,
   Search,
 } from "lucide-react";
@@ -26,7 +27,14 @@ const TABS = [
 ];
 
 /** `pending` is counted in the layout — this bar runs on the client. */
-export default function BottomNav({ pending = 0 }: { pending?: number }) {
+export default function BottomNav({
+  pending = 0,
+  parentUrl,
+}: {
+  pending?: number;
+  /** The site this store is a section of, when it is one. */
+  parentUrl?: string;
+}) {
   const pathname = usePathname();
 
   return (
@@ -59,6 +67,27 @@ export default function BottomNav({ pending = 0 }: { pending?: number }) {
             </Link>
           );
         })}
+
+        {/* The rest of the site. When the store is mounted as a section of
+            another app, this bar is the only one a person sees — without this
+            the store is a room with no door. The menu itself belongs to that
+            app and is rendered by it, so the button asks it to open on
+            arrival rather than reproducing it here, where it would be a copy
+            to keep in step. A real navigation: that address is not ours. */}
+        {parentUrl && (
+          <a
+            href={`${parentUrl}/?menu=1`}
+            className={cn(
+              "relative mx-1 my-1 flex flex-1 flex-col items-center gap-0.5 rounded-full py-1.5 text-[11px] transition",
+              MUTED
+            )}
+          >
+            <span className="relative">
+              <Menu size={22} strokeWidth={2} />
+            </span>
+            Menu
+          </a>
+        )}
       </div>
     </nav>
   );
