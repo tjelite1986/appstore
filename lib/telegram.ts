@@ -94,7 +94,7 @@ export function telegramConfig() {
       .map((c) => c.trim().replace(/^https?:\/\/t\.me\//i, "").replace(/^@/, ""))
       .filter(Boolean),
     maxFiles: num("TELEGRAM_MAX_FILES_PER_RUN", 5),
-    maxBytes: num("TELEGRAM_MAX_FILE_MB", 400) * 1024 * 1024,
+    maxBytes: num("TELEGRAM_MAX_FILE_MB", 2048) * 1024 * 1024,
     scanLimit: num("TELEGRAM_SCAN_LIMIT", 100),
     initialLimit: num("TELEGRAM_INITIAL_LIMIT", 20),
     minFreeBytes: num("TELEGRAM_MIN_FREE_GB", 5) * 1024 * 1024 * 1024,

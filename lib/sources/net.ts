@@ -28,9 +28,10 @@ const IMAGE_TIMEOUT_MS = 15_000;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
 /** Room above the biggest thing the library holds — a 244 MB patched client. */
-export const MAX_APK_BYTES = 900 * 1024 * 1024;
-// A 400 MB release over a home line, with the far end setting the rate.
-const APK_TIMEOUT_MS = 30 * 60_000;
+export const MAX_APK_BYTES = 2 * 1024 * 1024 * 1024;
+// A 2 GB release over a home line, with the far end setting the rate: at the
+// old 30 minutes the cap would have been unreachable, not just generous.
+const APK_TIMEOUT_MS = 120 * 60_000;
 
 const IMAGE_EXT_BY_TYPE: Record<string, string> = {
   "image/webp": ".webp",
