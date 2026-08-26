@@ -17,9 +17,12 @@
  * two rows carrying the same address: one plain, one with `?fingerprint=`.
  * The second appears only once something has actually been signed.
  *
- * The origin is read off the browser rather than passed down from the server:
- * the value has to be exactly what a phone on this network would type, and
- * the page it is shown on is already at that address.
+ * The address comes from the deployment when it pins one (FDROID_PUBLIC_URL —
+ * see lib/fdroid-url.ts), because that is the address the signed index names
+ * and this row must hand out the same one. Otherwise it is read off the
+ * browser: the value has to be exactly what a phone on this network would
+ * type, and the page it is shown on is already at that address, plus the
+ * mount prefix — see lib/base-path.ts.
  *
  * Hand-rolled like `adults-toggle.tsx`, and for the same reason — this needs
  * state, and `rows.tsx` is imported by server components.
@@ -35,6 +38,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CARD, MUTED, SectionTitle } from "@/components/primitives";
+import { withBasePath } from "@/lib/base-path";
 
 const ROW = "flex w-full items-center gap-3 px-3.5 py-3 text-left";
 
@@ -42,11 +46,14 @@ export default function RepoUrl({
   path,
   signedIn,
   fingerprint,
+  baseUrl,
 }: {
   path: string;
   signedIn: boolean;
   /** Null until the signing job has run at least once. */
   fingerprint: string | null;
+  /** Set when the deployment pins where the repository answers. */
+  baseUrl?: string;
 }) {
   const [current, setCurrent] = useState(path);
   const [origin, setOrigin] = useState("");
@@ -55,7 +62,15 @@ export default function RepoUrl({
   const [failed, setFailed] = useState(false);
 
   useEffect(() => setOrigin(window.location.origin), []);
-  const url = origin ? `${origin}${current}` : "";
+  // A pinned address wins: the signed index names that one, and this row has
+  // to hand out the same URL the index vouches for. Without one, the browser's
+  // origin plus the mount prefix — `current` is an app path, and everything
+  // below the prefix belongs to this app.
+  const url = baseUrl
+    ? `${baseUrl}${current}`
+    : origin
+      ? `${origin}${withBasePath(current)}`
+      : "";
   // What an F-Droid client is given: the same address, plus the key it should
   // insist on. Uppercase hex with no separators is the form those clients
   // parse — see scripts/fdroid-sign.sh, which is where the value comes from.
@@ -86,7 +101,7 @@ export default function RepoUrl({
     setFailed(false);
     setBusy(true);
     try {
-      const res = await fetch("/api/me/repo", { method: "POST" });
+      const res = await fetch(withBasePath("/api/me/repo"), { method: "POST" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const { token } = (await res.json()) as { token: string };
       setCurrent(`/fdroid/t/${token}/repo`);

@@ -596,6 +596,37 @@ Updates.
 Search works: it is a plain GET form over the in-memory catalog, so the query
 lives in the URL. Every other chip row is still a shape.
 
+## Mounting it under a path
+
+By default the store expects a host of its own and lives at the root. It can
+also run as a *section* of a larger site — same origin, one prefix down:
+
+```
+STORE_BASE_PATH=/store npm run build
+```
+
+That is Next's `basePath`, so it has to be set at **build** time: every link,
+asset URL and route in the output is written with the prefix, and the proxy in
+front hands the path through unchanged rather than stripping it. Next rewrites
+`<Link>`, `router.push` and `next/image` on its own; a string passed to `fetch`
+and a URL built from `window.location.origin` it cannot see, so those go
+through `withBasePath()` in `lib/base-path.ts`.
+
+Two things live outside the app and have to be told:
+
+- `APPSTORE_URL` in `scripts/cron.env` — the timers call the store's own
+  routes, so the prefix belongs in that URL.
+- The site linking here. A path this app answers is not a route of *that*
+  app, so its links must be real navigations (`<a>`), not client-side ones,
+  and a service worker scoped to the root should let the prefix alone.
+
+**The F-Droid repository does not have to move with it.** A signed index
+carries exactly one address, baked in when the signing job runs, and a phone
+that subscribed months ago is still holding the one it was given. Set
+`FDROID_PUBLIC_URL` to pin where the repository answers, keep that path routed
+to this app, and the store's pages can move without anything being re-added by
+hand. Unset, the address is derived from the request as before.
+
 ## Deploying
 
 Built on the host and bind-mounted into a bare `node:20-slim`. Compose lives outside

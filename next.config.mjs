@@ -14,8 +14,18 @@ const CSP = [
   "frame-ancestors 'none'",
 ].join("; ");
 
+// Mount point. Empty by default: the store answers on a host of its own.
+// Set STORE_BASE_PATH=/store at build time to serve it as a section of a
+// larger site instead — Traefik routes that prefix here, and Next then owns
+// every URL below it. The same value reaches the browser as
+// NEXT_PUBLIC_BASE_PATH for the handful of places Next cannot rewrite on its
+// own; see lib/base-path.ts.
+const BASE_PATH = process.env.STORE_BASE_PATH?.trim() ?? "";
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  ...(BASE_PATH ? { basePath: BASE_PATH } : {}),
+  env: { NEXT_PUBLIC_BASE_PATH: BASE_PATH },
   // Built on the host and bind-mounted into a bare node:20-slim container.
   // Deploy is `npm run build` + `docker restart`.
   output: "standalone",

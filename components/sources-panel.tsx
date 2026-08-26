@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { buttonClass } from "@/components/primitives";
 import { adminHeaders, readAdminToken } from "@/lib/admin-token";
 import type { SourceCheck, SourceReport } from "@/lib/sources/updates";
+import { withBasePath } from "@/lib/base-path";
 
 /**
  * "Sources", on Manage.
@@ -65,7 +66,7 @@ export default function SourcesPanel({ counts }: { counts: SourceCounts }) {
     setBusy(install ? "fetch" : "check");
     setError(null);
     try {
-      const res = await fetch("/api/sources/check", {
+      const res = await fetch(withBasePath("/api/sources/check"), {
         method: install ? "POST" : "GET",
         headers: {
           ...(install ? { "Content-Type": "application/json" } : {}),

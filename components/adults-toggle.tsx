@@ -20,6 +20,7 @@ import { useRouter } from "next/navigation";
 import { ShieldAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CARD, MUTED, SectionTitle } from "@/components/primitives";
+import { withBasePath } from "@/lib/base-path";
 
 export default function AdultsToggle({
   on,
@@ -44,7 +45,7 @@ export default function AdultsToggle({
     }
     setFailed(false);
     try {
-      const res = await fetch("/api/me/adults", {
+      const res = await fetch(withBasePath("/api/me/adults"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ on: next }),

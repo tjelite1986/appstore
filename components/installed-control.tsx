@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Check, PackageCheck, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CARD, MUTED, buttonClass } from "@/components/primitives";
+import { withBasePath } from "@/lib/base-path";
 
 /**
  * "What you have", on the detail page.
@@ -39,7 +40,7 @@ export default function InstalledControl({
     setVersion(next);
     setFailed(false);
     try {
-      const res = await fetch("/api/me/installed", {
+      const res = await fetch(withBasePath("/api/me/installed"), {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ slug, version: next }),

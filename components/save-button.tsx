@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Bookmark } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { buttonClass, type ButtonSize } from "@/components/primitives";
+import { withBasePath } from "@/lib/base-path";
 
 /**
  * The bookmark, for a signed-in account.
@@ -41,7 +42,7 @@ export default function SaveButton({
     setSaved(next);
     setFailed(false);
     try {
-      const res = await fetch("/api/me/saved", {
+      const res = await fetch(withBasePath("/api/me/saved"), {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ slug, saved: next }),

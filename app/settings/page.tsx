@@ -97,6 +97,7 @@ export default async function SettingsPage() {
         path={repoPath}
         signedIn={!!user}
         fingerprint={await repoFingerprint()}
+        baseUrl={process.env.FDROID_PUBLIC_URL?.trim() || undefined}
       />
 
       <RowCard

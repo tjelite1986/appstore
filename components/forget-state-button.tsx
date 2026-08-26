@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { buttonClass } from "@/components/primitives";
+import { withBasePath } from "@/lib/base-path";
 
 /**
  * Drop everything this store remembers about the account.
@@ -30,7 +31,7 @@ export default function ForgetStateButton({ count }: { count: number }) {
     }
     setFailed(false);
     try {
-      const res = await fetch("/api/me", { method: "DELETE" });
+      const res = await fetch(withBasePath("/api/me"), { method: "DELETE" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setDone(true);
       startTransition(() => router.refresh());

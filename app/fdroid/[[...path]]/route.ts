@@ -48,6 +48,7 @@ import { userForRepoToken } from "@/lib/repo-token";
 import { contentTypeFor, fileResponse, resolveInStore } from "@/lib/serve";
 import { STORE_DIRS } from "@/lib/storage";
 import { adultsAllowed, catalogFor } from "@/lib/user-state";
+import { repoBaseUrl } from "@/lib/fdroid-url";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -184,7 +185,7 @@ export async function GET(
   const apps = await catalogFor(target.userId);
   const url = new URL(req.url);
   const dir = url.pathname.slice(0, url.pathname.lastIndexOf("/"));
-  const repoUrl = `${publicOrigin(req, url)}${dir}`;
+  const repoUrl = `${repoBaseUrl(publicOrigin(req, url))}${dir}`;
 
   // Every app at once, which the index cannot do — see buildObtainiumImport.
   if (file === IMPORT_FILE) {

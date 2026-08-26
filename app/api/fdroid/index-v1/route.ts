@@ -22,6 +22,7 @@ import { requireAdmin } from "@/lib/admin";
 import { forgetApkFacts } from "@/lib/apk-facts";
 import { buildIndexV1 } from "@/lib/fdroid-index-v1";
 import { getApps, withoutAdults } from "@/lib/store";
+import { repoBaseUrl } from "@/lib/fdroid-url";
 
 export const dynamic = "force-dynamic";
 // A first build hashes the whole shelf; after that it is a stat per file.
@@ -49,7 +50,7 @@ export async function GET(req: Request): Promise<Response> {
     // so this field is documentation rather than routing — and it has to name
     // a single URL, which for a per-account token cannot be that account's.
     // The signed-out directory is the honest answer.
-    repoUrl: `${publicOrigin(req, url)}/fdroid/repo`,
+    repoUrl: `${repoBaseUrl(publicOrigin(req, url))}/fdroid/repo`,
     repoName: "App Store",
     description:
       "A self-hosted shelf. Add this URL to an F-Droid client to be told about new apps.",
