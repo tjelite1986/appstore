@@ -23,6 +23,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { STORE_DIRS, STORE_ROOT } from "./storage";
+import { withBasePath } from "./base-path";
 import { PLACEHOLDER_APPS, PLACEHOLDER_CHANGELOG } from "./catalog";
 
 export type Category =
@@ -306,10 +307,15 @@ async function listDir(abs: string): Promise<string[]> {
  * Media goes through the route handler, not /public — the library lives
  * outside the repo. `?v=` is the file's mtime, so a replaced icon gets a new
  * URL and the immutable cache on the route stays safe.
+ *
+ * The prefix has to be written in: these end up in `src` attributes and CSS
+ * `url()`, neither of which Next rewrites, and a mounted store would ask the
+ * host site for them instead. `iconName()` in fdroid-shelf.ts reads only the
+ * last segment, so the repository index is unaffected either way.
  */
 function mediaHref(rel: string, mtimeMs: number): string {
   const encoded = rel.split("/").map(encodeURIComponent).join("/");
-  return `/api/media/${encoded}?v=${Math.round(mtimeMs).toString(36)}`;
+  return withBasePath(`/api/media/${encoded}?v=${Math.round(mtimeMs).toString(36)}`);
 }
 
 /* ------------------------------------------------------------------- read */

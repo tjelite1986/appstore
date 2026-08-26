@@ -13,6 +13,7 @@ import type { ImportSummary, ReviewItem } from "@/lib/import";
 import type { PlayListing } from "@/lib/sources/play";
 import type { TelegramRun } from "@/lib/telegram";
 import { ADMIN_TOKEN_KEY, adminHeaders } from "@/lib/admin-token";
+import { withBasePath } from "@/lib/base-path";
 
 /**
  * Everything on Manage that writes to the library: the Telegram feed, the
@@ -131,7 +132,7 @@ export default function ImportPanel({ storePath, waiting, apps }: Props) {
   /** One place to turn a response into either data or a readable message. */
   const call = useCallback(
     async (path: string, init?: RequestInit) => {
-      const res = await fetch(path, {
+      const res = await fetch(withBasePath(path), {
         ...init,
         headers: {
           ...(init?.body ? { "Content-Type": "application/json" } : {}),

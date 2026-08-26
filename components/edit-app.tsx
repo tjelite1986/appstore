@@ -23,6 +23,7 @@ import {
   thumbBackground,
 } from "@/components/primitives";
 import { cn } from "@/lib/utils";
+import { withBasePath } from "@/lib/base-path";
 
 const CATEGORIES = [
   "Editor",
@@ -120,7 +121,7 @@ export default function EditApp({ app }: { app: EditableApp }) {
   const call = useCallback(
     async (path: string, init?: RequestInit) => {
       const json = init?.body && typeof init.body === "string";
-      const res = await fetch(path, {
+      const res = await fetch(withBasePath(path), {
         ...init,
         headers: {
           ...(json ? { "Content-Type": "application/json" } : {}),

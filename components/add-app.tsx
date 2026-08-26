@@ -11,6 +11,7 @@ import { detectSource } from "@/lib/sources/detect";
 import type { PlayAddResult, PlayHit } from "@/lib/sources/play";
 import type { GithubAddResult } from "@/lib/sources/github";
 import type { FdroidAddResult } from "@/lib/sources/fdroid";
+import { withBasePath } from "@/lib/base-path";
 
 /**
  * "Add an app" — one address, and the store works out who it belongs to.
@@ -54,7 +55,7 @@ const SOURCE_LABEL: Record<"github" | "fdroid" | "play", string> = {
 
 /** Play icons are on Google's CDN and the CSP is `img-src 'self'`. */
 function iconSrc(url: string): string {
-  return `/api/sources/play/icon?u=${encodeURIComponent(url)}`;
+  return withBasePath(`/api/sources/play/icon?u=${encodeURIComponent(url)}`);
 }
 
 export default function AddApp() {
@@ -73,7 +74,7 @@ export default function AddApp() {
 
   const call = useCallback(
     async (path: string, init?: RequestInit) => {
-      const res = await fetch(path, {
+      const res = await fetch(withBasePath(path), {
         ...init,
         headers: {
           ...(init?.body ? { "Content-Type": "application/json" } : {}),
