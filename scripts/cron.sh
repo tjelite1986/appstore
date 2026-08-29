@@ -6,10 +6,15 @@
 #   scan     run the importer over the drop folder
 #   sources  ask GitHub and F-Droid what they have, and fetch what is newer
 #
-# Both are HTTP calls into the container: the work belongs to the app, and a
-# host script that touched the library directly would be a second implementation
-# of the importer's rules. The admin token is read from the compose env file
-# rather than copied into a unit, so rotating it is one edit.
+# All three are HTTP calls into the container: the work belongs to the app, and
+# a host script that touched the library directly would be a second
+# implementation of the importer's rules. The admin token is read from the
+# compose env file rather than copied into a unit, so rotating it is one edit.
+#
+# The exit status is the point of running these under systemd: a run the app
+# reports as failed — a Telegram session that is no longer authorised, a source
+# check where every call fell over — exits non-zero here so the unit shows red,
+# rather than logging the failure and finishing green.
 #
 # Where this machine keeps those two things is not a fact about the app, so it
 # lives beside this script in cron.env, which is not in the repository — see
@@ -76,13 +81,17 @@ case "${1:-}" in
     # The app installs what is newer by itself; a POST with no body means
     # "fetch". One request for the whole run, held open until it is done —
     # the store runs one check at a time, so a slow run cannot pile up.
-    call POST /api/sources/check 3600 | "$JQ" -r '
-      if .error then "sources: \(.error)"
-      else "sources: \(.checked) checked, \(.installed) fetched"
-         + (if .errors > 0 then ", \(.errors) failed" else "" end)
-         + (.apps // [] | map(select(.status == "installed" or .status == "error"))
-              | map("\n  \(.name): \(.status) \(.detail // "")") | join(""))
-      end'
+    report=$(call POST /api/sources/check 3600)
+    "$JQ" -r '
+      "sources: \(.checked) checked, \(.installed) fetched"
+        + (if .errors > 0 then ", \(.errors) failed" else "" end)
+        + (.apps // [] | map(select(.status == "installed" or .status == "error"))
+             | map("\n  \(.name): \(.status) \(.detail // "")") | join(""))' <<<"$report"
+    # One failed app is that app's problem and is listed above. Every app
+    # failing is this machine's — no network, GitHub rate-limited, the token
+    # gone — and that is what the timer's status is for.
+    "$JQ" -e '.checked == 0 or .errors < .checked' <<<"$report" >/dev/null \
+      || die "sources: every one of the $("$JQ" -r .checked <<<"$report") check(s) failed"
     ;;
 
   sync)
@@ -105,6 +114,10 @@ case "${1:-}" in
         "$JQ" -r '"downloaded: \(.run.downloaded) file(s)"' <<<"$status"
         "$JQ" -r '.run.log[-6:][]? | "  " + .' <<<"$status"
         "$JQ" -r '.run.imported' <<<"$status" | summarise_import
+        # The app finishes a failed run as cleanly as a good one; it says which
+        # in `run.error`.
+        error=$("$JQ" -r '.run.error // empty' <<<"$status")
+        [ -z "$error" ] || die "sync failed — $error"
         exit 0
       }
     done

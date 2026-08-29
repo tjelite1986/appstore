@@ -548,6 +548,9 @@ function TelegramCard({
           <span className={cn("text-xs", MUTED_CLS)}>
             Last run {new Date(when).toLocaleString("sv-SE")} —{" "}
             {status.run.downloaded} file(s)
+            {status.run.error && (
+              <span className="text-red-400"> — failed: {status.run.error}</span>
+            )}
           </span>
         )}
       </div>

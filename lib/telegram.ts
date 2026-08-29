@@ -166,6 +166,13 @@ export type TelegramRun = {
   log: string[];
   /** The importer's own summary, when the run went on to trigger a scan. */
   imported?: ImportSummary;
+  /**
+   * Why the run's result is not to be trusted: the session is not authorised,
+   * a channel failed, the run threw, or the server restarted under it. The
+   * timer reads this to exit non-zero — a run that logged its failure and
+   * finished cleanly looks like a healthy one from systemd's side.
+   */
+  error?: string;
 };
 
 export type TelegramState = {
@@ -477,11 +484,8 @@ export function syncRunning(): boolean {
 export async function readRun(): Promise<TelegramRun> {
   const { run } = await readState();
   if (run.running && !syncRunning()) {
-    return {
-      ...run,
-      running: false,
-      log: [...run.log, "interrupted — the server restarted mid-run"],
-    };
+    const why = "interrupted — the server restarted mid-run";
+    return { ...run, running: false, error: why, log: [...run.log, why] };
   }
   return run;
 }
@@ -1048,9 +1052,11 @@ async function run(): Promise<void> {
   try {
     await client.connect();
     if (!(await client.isUserAuthorized())) {
-      say("TELEGRAM_SESSION is not authorized — run scripts/telegram-login.mjs");
-      return finish();
+      const why = "TELEGRAM_SESSION is not authorized — run scripts/telegram-login.mjs";
+      say(why);
+      return finish({ error: why });
     }
+    let failed = 0;
     for (const channel of cfg.channels) {
       try {
         await syncChannel(channel);
@@ -1060,9 +1066,14 @@ async function run(): Promise<void> {
         chan.lastSyncedAt = new Date().toISOString();
         state.channels[channel] = chan;
         say(`${channel}: sync failed — ${msgOf(err)}`);
+        failed++;
       }
     }
     say(`done: ${downloaded} file(s) downloaded`);
+    // A failed channel is logged above and the run goes on to import what the
+    // others fetched, but it is still a failed run.
+    const error =
+      failed > 0 ? `${failed} of ${cfg.channels.length} channel(s) failed` : undefined;
 
     // Hand over to the importer. It ignores anything younger than 60 s — a
     // Samba drop appears at its first byte — so the run waits that out rather
@@ -1074,12 +1085,12 @@ async function run(): Promise<void> {
       say(
         `import: ${summary.imported.length} attached, ${summary.parked.length} held for review`
       );
-      return finish({ imported: summary });
+      return finish({ imported: summary, error });
     }
-    return finish();
+    return finish({ error });
   } catch (err) {
     say(`sync failed — ${msgOf(err)}`);
-    return finish();
+    return finish({ error: msgOf(err) });
   } finally {
     await client.disconnect().catch(() => {});
   }
