@@ -29,12 +29,18 @@
  * name is in — so both are written, and the repository route answers both
  * shapes. See `iconName` below.
  *
- * What a package entry deliberately omits: `minSdkVersion`, `targetSdkVersion`,
- * `nativecode` and `uses-permission`. A client treats an absent minSdk and an
- * empty nativecode list as "compatible with this phone", which is the right
- * answer for a shelf whose APKs were installed by hand anyway, and reading
- * them would mean parsing every manifest past its root element for a field
- * nothing here gates on.
+ * What a package entry deliberately omits: `minSdkVersion`,
+ * `targetSdkVersion` and `uses-permission`. A client treats an absent minSdk
+ * as "compatible with this phone", which is the right answer for a shelf
+ * whose APKs were installed by hand anyway, and reading them would mean
+ * parsing every manifest past its root element for a field nothing here gates
+ * on.
+ *
+ * `nativecode` is written, though, and it is the exception that proves the
+ * rule: a version here can hold an arm64 and an arm32 build of one release,
+ * and without that field a client has two downloads it cannot tell apart —
+ * one of which will not install. It costs nothing to fill, because the
+ * catalog reads it from the zip's central directory and caches it.
  */
 import { collectShelf, iconName, ms } from "./fdroid-shelf";
 import type { StoreApp } from "./store";
@@ -98,6 +104,11 @@ export async function buildIndexV1(
       signer: entry.signer,
       size: entry.size,
       added: entry.added,
+      // Only when there is something to say: a client reads an absent list as
+      // "runs anywhere", which is exactly what an APK with no native code
+      // does, and writing an empty array would say the same thing in a way
+      // older readers have been known to get wrong.
+      ...(entry.nativecode.length ? { nativecode: entry.nativecode } : {}),
     }));
     packageCount += entries.length;
 

@@ -21,13 +21,15 @@
  *     read this later and because an app name is not trusted markup.
  *
  * What is deliberately *not* here: `<hash>`, `<versioncode>` and `<sig>`.
- * Obtainium reads none of them, and each would mean opening every APK on the
- * shelf on every index request — the catalog knows a file's name, size and
- * date without touching its bytes, and this endpoint stays that cheap. A
- * signed `index-v1.jar`, which is what the official F-Droid client and
- * Droid-ify need, would want all three; that is the day to add them.
+ * Obtainium reads none of them, and each would mean *hashing* every APK on the
+ * shelf on every index request. The catalog knows a file's name, size, date
+ * and ABIs without that — the last of those is read from the zip's central
+ * directory and cached — so this endpoint stays cheap. A signed
+ * `index-v1.jar`, which is what the official F-Droid client and Droid-ify
+ * need, would want all three; that is the day to add them.
  */
-import type { StoreApp, AppVersion } from "./store";
+import { abiKey } from "./apk-abi";
+import type { AppVersion, AppVersionFile, StoreApp } from "./store";
 
 /** The one repository-format version this file claims to speak. */
 const INDEX_VERSION = 18;
@@ -59,20 +61,34 @@ function tag(name: string, value: string | undefined | null): string {
  * generated names, so a slug or version holding a character this strips can
  * only ever collide with itself, and the newest matching version wins.
  */
-export function apkFileName(app: StoreApp, version: AppVersion): string {
-  const ext = version.file.slice(version.file.lastIndexOf("."));
+export function apkFileName(
+  app: StoreApp,
+  version: AppVersion,
+  build: AppVersionFile = version.files[0]
+): string {
+  const ext = build.file.slice(build.file.lastIndexOf("."));
   const safe = (s: string) => s.replace(/[^A-Za-z0-9._-]+/g, "-");
-  return `${safe(app.slug)}_${safe(version.version)}${safe(ext)}`;
+  // A version with one build keeps the name it has always had — a client that
+  // cached the old one still resolves it. A version with several needs the
+  // builds told apart, and the ABI set is what tells them apart: it is what
+  // the index calls them and the one thing that is different about them.
+  const variant =
+    version.files.length > 1 ? `_${safe(abiKey(build.abis))}` : "";
+  return `${safe(app.slug)}_${safe(version.version)}${variant}${safe(ext)}`;
 }
 
-/** The app and version a requested file name stands for, or null. */
+/** The app, version and build a requested file name stands for, or null. */
 export function findByApkFileName(
   apps: StoreApp[],
   wanted: string
-): { app: StoreApp; version: AppVersion } | null {
+): { app: StoreApp; version: AppVersion; build: AppVersionFile } | null {
   for (const app of apps) {
     for (const version of app.versions) {
-      if (apkFileName(app, version) === wanted) return { app, version };
+      for (const build of version.files) {
+        if (apkFileName(app, version, build) === wanted) {
+          return { app, version, build };
+        }
+      }
     }
   }
   return null;
@@ -102,13 +118,24 @@ export type IndexOptions = {
  * anything else would install once and then never notice its own updates.
  */
 function application(app: StoreApp, latest: AppVersion): string {
+  // One entry per file, not per version: a release published as separate
+  // arm64 and arm32 APKs is two downloads under one version number. The
+  // store's own order is kept, so the build a client takes when it reads no
+  // further — Obtainium takes the first — is the one this store would hand a
+  // phone anyway. `nativecode` is the one field here that costs nothing to
+  // fill and changes what a careful client installs, so it is filled.
   const packages = app.versions
+    .flatMap((v) => v.files.map((f) => ({ v, f })))
     .map(
-      (v) => `    <package>
+      ({ v, f }) => `    <package>
       <version>${xml(v.version)}</version>
-      <apkname>${xml(apkFileName(app, v))}</apkname>
-      <size>${v.bytes}</size>
-      <added>${xml(day(v.added))}</added>
+      <apkname>${xml(apkFileName(app, v, f))}</apkname>
+      <size>${f.bytes}</size>
+      <added>${xml(day(f.added))}</added>${
+        f.abis.length
+          ? `\n      <nativecode>${xml(f.abis.join(","))}</nativecode>`
+          : ""
+      }
     </package>`
     )
     .join("\n");

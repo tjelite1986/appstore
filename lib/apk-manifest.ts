@@ -289,3 +289,68 @@ export async function readApkInfo(filePath: string): Promise<ApkManifestInfo> {
     }
   }
 }
+
+/* --------------------------------------------------------------------- abi */
+
+// Android's four live ABI directory names. Anything else under lib/ is not an
+// ABI Android would load from, so it is ignored rather than reported.
+const KNOWN_ABIS = new Set([
+  "armeabi-v7a",
+  "arm64-v8a",
+  "x86",
+  "x86_64",
+]);
+
+// A split's ABI is spelled with underscores in its file name — "arm64_v8a" —
+// because a dot or a dash there would collide with the split naming scheme.
+function abiFromSplitName(name: string): string | null {
+  const m = /(?:^|\/)(?:split_)?config[._]([A-Za-z0-9_]+)\.apk$/i.exec(name);
+  if (!m) return null;
+  const abi = m[1].toLowerCase().replace(/_/g, "-").replace(/^x86-64$/, "x86_64");
+  return KNOWN_ABIS.has(abi) ? abi : null;
+}
+
+function abisFromEntries(entries: ZipEntry[]): string[] {
+  const out = new Set<string>();
+  for (const entry of entries) {
+    // The native libraries themselves: lib/<abi>/libfoo.so. A bare lib/<abi>/
+    // directory entry carries no code, so a file is required.
+    const m = /^lib\/([^/]+)\/[^/]+/.exec(entry.name);
+    if (m && KNOWN_ABIS.has(m[1])) out.add(m[1]);
+    const split = abiFromSplitName(entry.name);
+    if (split) out.add(split);
+  }
+  return [...out].sort();
+}
+
+/**
+ * Which ABIs an APK carries native code for — read from the file, never from
+ * its name.
+ *
+ * An empty list is a real answer and the common one: an app with no `.so` at
+ * all runs everywhere, which is what a client does with an empty `nativecode`.
+ * So a caller must not read "no ABIs" as "could not tell" — an unreadable file
+ * throws nothing here either, it simply has no entries to report.
+ *
+ * Only the zip's central directory is read, which is a few kilobytes at the
+ * tail of the file however large the APK is. That is the whole reason the
+ * catalog can afford to ask this per file.
+ */
+export function readApkAbis(filePath: string): string[] {
+  let fd: number | null = null;
+  try {
+    const fileSize = fs.statSync(filePath).size;
+    fd = fs.openSync(filePath, "r");
+    return abisFromEntries(listEntries(fd, fileSize));
+  } catch {
+    return [];
+  } finally {
+    if (fd !== null) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}

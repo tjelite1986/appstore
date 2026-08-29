@@ -81,7 +81,8 @@ export type SignerChoice = "keep" | "adopt";
 
 export type MergeVersion = {
   version: string;
-  file: string;
+  /** Every binary in the version directory — a release can hold one per ABI. */
+  files: string[];
   /** The target already serves this version — the source's copy is archived. */
   taken: boolean;
 };
@@ -239,7 +240,7 @@ export async function planMerge(from: string, into: string): Promise<MergePlan> 
   const held = new Set(target.versions.map((v) => v.version));
   const versions: MergeVersion[] = source.versions.map((v) => ({
     version: v.version,
-    file: v.file,
+    files: v.files.map((f) => f.file),
     taken: held.has(v.version),
   }));
 
@@ -293,26 +294,33 @@ export async function planMerge(from: string, into: string): Promise<MergePlan> 
 /**
  * Follow the moved binaries in the fact cache.
  *
- * `apk_facts` is keyed on the path relative to the store root, and every row
- * is a SHA-256 of a file measured in hundreds of megabytes. A rename keeps the
- * size and the mtime the row is validated against, so re-pointing the key
- * keeps the cache warm — the alternative is the next index build re-hashing
- * the whole merged app, which on this machine is minutes of disk for an answer
- * that has not changed.
+ * Both caches keyed on a file — `apk_facts` and `apk_abis` — are keyed on the
+ * path relative to the store root, and an `apk_facts` row is a SHA-256 of a
+ * file measured in hundreds of megabytes. A rename keeps the size and the
+ * mtime the rows are validated against, so re-pointing the key keeps them warm
+ * — the alternative is the next index build re-hashing the whole merged app,
+ * which on this machine is minutes of disk for an answer that has not changed.
  */
 function followFacts(moves: { fromKey: string; toKey: string }[]): void {
   if (!moves.length) return;
   const conn = db();
-  const update = conn.prepare("UPDATE apk_facts SET path = ? WHERE path = ?");
+  const tables = ["apk_facts", "apk_abis"] as const;
+  const update = tables.map((t) =>
+    conn.prepare(`UPDATE ${t} SET path = ? WHERE path = ?`)
+  );
   // A row may already exist for the destination if that exact file was ever
   // there before; the old key is then simply dropped.
-  const drop = conn.prepare("DELETE FROM apk_facts WHERE path = ?");
+  const drop = tables.map((t) =>
+    conn.prepare(`DELETE FROM ${t} WHERE path = ?`)
+  );
   conn.transaction(() => {
     for (const m of moves) {
-      try {
-        update.run(m.toKey, m.fromKey);
-      } catch {
-        drop.run(m.fromKey);
+      for (let i = 0; i < tables.length; i++) {
+        try {
+          update[i].run(m.toKey, m.fromKey);
+        } catch {
+          drop[i].run(m.fromKey);
+        }
       }
     }
   })();
@@ -402,10 +410,14 @@ export async function mergeApps(
     }
     const dest = path.join(STORE_ROOT, STORE_DIRS.apks, into, v.version);
     await move(src, dest);
-    facts.push({
-      fromKey: path.join(STORE_DIRS.apks, from, v.version, v.file),
-      toKey: path.join(STORE_DIRS.apks, into, v.version, v.file),
-    });
+    // One entry per binary: the directory moves in one call, but the cache is
+    // keyed per file, and a version can hold several builds.
+    for (const file of v.files) {
+      facts.push({
+        fromKey: path.join(STORE_DIRS.apks, from, v.version, file),
+        toKey: path.join(STORE_DIRS.apks, into, v.version, file),
+      });
+    }
     moved.push(v.version);
   }
   // Empty now, unless something arrived in it mid-merge — in which case

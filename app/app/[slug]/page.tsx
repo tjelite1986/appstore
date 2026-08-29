@@ -18,6 +18,7 @@ import EditApp from "@/components/edit-app";
 import MergeApp from "@/components/merge-app";
 import ShareApp from "@/components/share-app";
 import { storedText } from "@/lib/edit";
+import { abiShortLabel } from "@/lib/apk-abi";
 import { appFor, catalogFor } from "@/lib/user-state";
 import type { StoreApp } from "@/lib/store";
 import { withBasePath } from "@/lib/base-path";
@@ -249,6 +250,26 @@ export default async function AppDetailPage({
         />
       </div>
 
+      {/* A release published as separate per-ABI builds. The button above
+          already installs the right one for a phone — this row is for the
+          case it cannot know about: a tablet, an emulator, someone keeping a
+          copy for a device that is not the one they are browsing from. Named
+          by ABI rather than by file, because the file names on this shelf are
+          whatever the person who packaged them felt like typing. */}
+      {latest && latest.files.length > 1 && (
+        <div className="px-[var(--pad)] pt-3">
+          <div className="flex flex-wrap gap-2">
+            {latest.files.map((f) => (
+              <a key={f.file} href={f.href}>
+                <Button size="sm" variant="secondary">
+                  <Download size={13} /> {f.abi} · {f.size}
+                </Button>
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Nothing to install — no file here and no link out — means nothing to
           mark as installed, and the card would offer no button at all. */}
       {userId !== null && (latest || linked) && (
@@ -375,9 +396,8 @@ export default async function AppDetailPage({
           <SectionTitle title="Older versions" />
           <div className={cn(CARD, "overflow-hidden")}>
             {older.map((v, i) => (
-              <a
+              <div
                 key={v.version}
-                href={v.href}
                 className={cn(
                   "flex items-center gap-3 px-3.5 py-3",
                   i > 0 && "border-t border-[color:var(--border)]"
@@ -388,7 +408,11 @@ export default async function AppDetailPage({
                     {v.version}
                   </span>
                   <span className={cn("block truncate text-xs", MUTED)}>
-                    {v.size} ·{" "}
+                    {/* One size is a fact about one file. Where the version
+                        holds several builds they are not the same size, and
+                        printing the default one's would describe a download
+                        the person may not be about to start. */}
+                    {v.files.length > 1 ? `${v.files.length} builds` : v.size} ·{" "}
                     {new Date(v.added).toLocaleDateString("en-GB", {
                       day: "numeric",
                       month: "short",
@@ -397,10 +421,20 @@ export default async function AppDetailPage({
                     })}
                   </span>
                 </span>
-                <Button size="sm" variant="secondary">
-                  <Download size={13} /> Get
-                </Button>
-              </a>
+                {/* One button per build. A version with a single file keeps
+                    the plain "Get" it has always had — naming its ABI would
+                    ask a question nobody has to answer. */}
+                <span className="flex shrink-0 flex-wrap justify-end gap-1.5">
+                  {v.files.map((f) => (
+                    <a key={f.file} href={f.href}>
+                      <Button size="sm" variant="secondary">
+                        <Download size={13} />{" "}
+                        {v.files.length > 1 ? abiShortLabel(f.abis) : "Get"}
+                      </Button>
+                    </a>
+                  ))}
+                </span>
+              </div>
             ))}
           </div>
         </section>

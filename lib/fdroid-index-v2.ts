@@ -25,10 +25,12 @@
  *   them, and `scripts/fdroid-sign.sh` writes the response to disk verbatim.
  *
  * The same omissions as v1, for the same reasons: no `usesSdk`, no
- * `nativecode`, no permissions. An absent `usesSdk` reads as "compatible",
- * which is the right answer for a shelf of hand-collected APKs, and filling it
- * in would mean parsing every manifest past its root element for a field
- * nothing here gates on.
+ * permissions. An absent `usesSdk` reads as "compatible", which is the right
+ * answer for a shelf of hand-collected APKs, and filling it in would mean
+ * parsing every manifest past its root element for a field nothing here gates
+ * on. `nativecode` is written for the same reason v1 writes it: a version
+ * with an arm64 and an arm32 build is two files a client has to choose
+ * between.
  */
 import { collectShelf, iconName, ms } from "./fdroid-shelf";
 import type { StoreApp } from "./store";
@@ -134,6 +136,13 @@ export async function buildIndexV2(
               // A list, because an APK can carry more than one signer. This
               // store pins exactly one per app and refuses the rest.
               signer: { sha256: [entry.signer] },
+              // Absent rather than empty for an APK with no native code —
+              // that is how a client reads "installs on any phone", and it is
+              // the field that lets it choose between two builds of one
+              // version instead of offering the person both.
+              ...(entry.nativecode.length
+                ? { nativecode: entry.nativecode }
+                : {}),
             },
           },
         ])

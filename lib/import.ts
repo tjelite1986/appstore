@@ -33,7 +33,8 @@ import {
   type Category,
   type StoreApp,
 } from "./store";
-import { readApkInfo } from "./apk-manifest";
+import { readApkAbis, readApkInfo } from "./apk-manifest";
+import { abiKey } from "./apk-abi";
 import { computeSha256, extractSignerSha256, verifyApk } from "./apk-verify";
 
 const IMPORT_DIR = path.join(STORE_ROOT, STORE_DIRS.import);
@@ -415,13 +416,27 @@ export async function attachApk(
   const versionDir = path.join(STORE_ROOT, STORE_DIRS.apks, slug, version);
   await ensureDir(versionDir);
 
-  // One binary per version directory: the catalog reader takes the first APK
-  // it finds in there, so leaving a second one behind makes which file the
-  // store serves depend on readdir order. Displaced files are kept.
+  // One binary per *build* in a version directory, not one per version: an
+  // app published as separate arm64 and arm32 APKs is one version with two
+  // files, and both belong on the shelf. So only a file this drop replaces is
+  // moved aside — same ABIs, or the same name under a different extension —
+  // and a build the version does not have yet lands beside the others.
+  //
+  // Getting this wrong is a data-loss path, which is why the ABIs come from
+  // the files themselves: dropping the arm32 build of a version used to
+  // displace the arm64 one already serving it, on nothing but the fact that
+  // it arrived second.
+  const incomingAbis = readApkAbis(absPath);
+  const incomingKey = abiKey(incomingAbis);
   for (const existing of await fs.readdir(versionDir).catch(() => [])) {
     if (!APK_EXT.test(existing)) continue;
+    const existingPath = path.join(versionDir, existing);
+    const sameName = existing === fileName;
+    const sameBuild = abiKey(readApkAbis(existingPath)) === incomingKey;
+    if (!sameName && !sameBuild) continue;
+    // Displaced files are kept.
     await moveFile(
-      path.join(versionDir, existing),
+      existingPath,
       await freeName(path.join(DISCARD_DIR, slug, version), existing)
     );
   }
@@ -755,18 +770,24 @@ async function scan(): Promise<ImportSummary> {
       { slug: app.slug, name: app.name, score: 1, why: match.autoWhy || "match" },
     ];
 
-    // This version is already on disk. Identical bytes means the drop is a
-    // re-upload of what is already served and can go; different bytes is a
-    // question only a person can answer.
+    // This version is already on disk. Three different answers, and which one
+    // applies is a question about the bytes rather than about the number:
+    // identical bytes to a file already served means the drop is a re-upload
+    // and can go; a build this version does not have — the arm32 APK of a
+    // release the shelf holds in arm64 — is a new file, not a duplicate; the
+    // same build with different bytes is a question only a person can answer.
     const existing = app.versions.find((v) => v.version === version);
     if (existing) {
-      const [dropSha, servedSha] = await Promise.all([
-        computeSha256(abs),
-        computeSha256(
-          path.join(STORE_ROOT, STORE_DIRS.apks, app.slug, version, existing.file)
-        ).catch(() => null),
-      ]);
-      if (servedSha && servedSha === dropSha) {
+      const dropSha = await computeSha256(abs);
+      const served = await Promise.all(
+        existing.files.map(async (f) => ({
+          abis: f.abis,
+          sha: await computeSha256(
+            path.join(STORE_ROOT, STORE_DIRS.apks, app.slug, version, f.file)
+          ).catch(() => null),
+        }))
+      );
+      if (served.some((f) => f.sha && f.sha === dropSha)) {
         await moveFile(abs, await freeName(DISCARD_DIR, entry.name));
         res.skipped.push({
           file: entry.name,
@@ -774,17 +795,23 @@ async function scan(): Promise<ImportSummary> {
         });
         continue;
       }
-      await parkForReview(abs, {
-        ...fields,
-        reason: "duplicate",
-        matchedSlug: app.slug,
-        suggestions: matched,
-      });
-      res.parked.push({
-        file: entry.name,
-        reason: `version ${version} of ${app.name} already exists with different content`,
-      });
-      continue;
+      const dropKey = abiKey(readApkAbis(abs));
+      const collides = served.some((f) => abiKey(f.abis) === dropKey);
+      if (collides) {
+        await parkForReview(abs, {
+          ...fields,
+          reason: "duplicate",
+          matchedSlug: app.slug,
+          suggestions: matched,
+        });
+        res.parked.push({
+          file: entry.name,
+          reason: `version ${version} of ${app.name} already has a ${dropKey} build with different content`,
+        });
+        continue;
+      }
+      // Falls through to the attach below, which is the same signer check
+      // every other file gets.
     }
 
     const attach = await attachApk(app.slug, abs, {

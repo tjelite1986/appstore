@@ -238,7 +238,7 @@ export async function GET(
     STORE_DIRS.apks,
     found.app.slug,
     found.version.version,
-    found.version.file
+    found.build.file
   );
   if (!abs) return notFound();
 
@@ -251,7 +251,7 @@ export async function GET(
   if (!stat.isFile()) return notFound();
 
   return fileResponse(abs, stat, req, {
-    contentType: contentTypeFor(found.version.file),
+    contentType: contentTypeFor(found.build.file),
     download: file,
   });
 }

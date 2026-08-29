@@ -24,6 +24,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { STORE_DIRS, STORE_ROOT } from "./storage";
 import { withBasePath } from "./base-path";
+import { abiLabel, abiRank, apkAbis } from "./apk-abi";
 import { PLACEHOLDER_APPS, PLACEHOLDER_CHANGELOG } from "./catalog";
 
 export type Category =
@@ -35,8 +36,12 @@ export type Category =
   | "Adults"
   | "Other";
 
-export type AppVersion = {
-  version: string;
+/**
+ * One binary. A version usually has exactly one; an app published as separate
+ * per-ABI builds has several, and they are the same version — same features,
+ * same number on the page — differing only in which phone can install them.
+ */
+export type AppVersionFile = {
   /** File name inside apks/<slug>/<version>/. */
   file: string;
   bytes: number;
@@ -44,7 +49,32 @@ export type AppVersion = {
   size: string;
   /** ISO date the file landed — its mtime. */
   added: string;
-  /** Ready-to-use href for this exact version. */
+  /** ABIs read out of the APK itself. Empty means it runs anywhere. */
+  abis: string[];
+  /** What to call this build on a button: "arm64-v8a", "universal". */
+  abi: string;
+  /** Ready-to-use href for this exact file. */
+  href: string;
+};
+
+export type AppVersion = {
+  version: string;
+  /**
+   * Every binary under this version, best default first — see `abiRank`.
+   * Never empty: a version directory with no APK in it is not a version.
+   */
+  files: AppVersionFile[];
+  /**
+   * The default build, `files[0]` flattened. It is repeated here rather than
+   * reached through `files` because most of this app only ever wants the one
+   * download — and because before per-ABI builds existed, this was the whole
+   * type. A caller that does not care which build it gets still reads right.
+   */
+  file: string;
+  bytes: number;
+  size: string;
+  added: string;
+  /** Ready-to-use href for this version, letting the store pick the build. */
   href: string;
 };
 
@@ -362,44 +392,83 @@ async function readScreenshots(slug: string): Promise<string[]> {
   return out;
 }
 
-/** One directory per version, one binary inside it. */
+/**
+ * One directory per version, every binary inside it.
+ *
+ * A second APK in a version directory used to be invisible — the reader took
+ * whichever one `readdir` returned first — so the importer moved it out of the
+ * way to keep the answer stable. Both halves of that are gone: the files are
+ * all listed, ordered so that `files[0]` is the one to hand someone who just
+ * pressed Install.
+ */
 async function readVersions(slug: string): Promise<AppVersion[]> {
   const base = path.join(STORE_ROOT, STORE_DIRS.apks, slug);
   const out: AppVersion[] = [];
   for (const version of await listDir(base)) {
     if (version.startsWith(".")) continue;
     const dir = path.join(base, version);
-    let files: string[];
+    let names: string[];
     try {
       if (!(await fs.stat(dir)).isDirectory()) continue;
-      files = await fs.readdir(dir);
+      names = await fs.readdir(dir);
     } catch {
       continue;
     }
-    const file = files.find((f) =>
-      APK_EXTENSIONS.includes(path.extname(f).toLowerCase())
-    );
-    if (!file) continue;
-    try {
-      const st = await fs.stat(path.join(dir, file));
-      out.push({
-        version,
+    const apks = names
+      .filter((f) => APK_EXTENSIONS.includes(path.extname(f).toLowerCase()))
+      .sort();
+    if (!apks.length) continue;
+
+    const files: AppVersionFile[] = [];
+    for (const file of apks) {
+      let st;
+      try {
+        st = await fs.stat(path.join(dir, file));
+      } catch {
+        continue; /* vanished between readdir and stat */
+      }
+      const abis = await apkAbis(path.join(dir, file));
+      files.push({
         file,
         bytes: st.size,
         size: formatBytes(st.size),
         added: new Date(st.mtimeMs).toISOString(),
+        abis,
+        abi: abiLabel(abis),
         // Through withBasePath, because this ends up in a plain `<a href>`.
         // Next rewrites `<Link>` and `next/image` for a mount prefix and
         // nothing else, so an app-absolute path written here lands on the
         // host's root — which, where the store is mounted as a section of a
         // larger site, is a different application entirely.
         href: withBasePath(
-          `/api/download/${encodeURIComponent(slug)}?v=${encodeURIComponent(version)}`
+          `/api/download/${encodeURIComponent(slug)}?v=${encodeURIComponent(version)}&f=${encodeURIComponent(file)}`
         ),
       });
-    } catch {
-      /* vanished */
     }
+    if (!files.length) continue;
+
+    // Best build first, and by file name within a tie so that two files the
+    // ranking cannot separate still order the same way on every read.
+    files.sort(
+      (a, b) => abiRank(b.abis) - abiRank(a.abis) || a.file.localeCompare(b.file)
+    );
+
+    const [best] = files;
+    out.push({
+      version,
+      files,
+      file: best.file,
+      bytes: best.bytes,
+      size: best.size,
+      // The version arrived when its first file did, not when the last build
+      // was dropped beside it.
+      added: files.reduce((a, f) => (f.added < a ? f.added : a), best.added),
+      // No `f=`: this is the link that lets the store choose, which is what
+      // the Install button wants and what every older link already says.
+      href: withBasePath(
+        `/api/download/${encodeURIComponent(slug)}?v=${encodeURIComponent(version)}`
+      ),
+    });
   }
   return out.sort((a, b) => compareVersions(a.version, b.version));
 }

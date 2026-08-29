@@ -9,10 +9,10 @@
  * two tabs can write them at the same moment. That is a database's job, so
  * this is where it lives: the tables keyed on the elite-v2 account id.
  *
- * One table here is neither content nor a person's doing — `apk_facts` caches
- * what reading an APK's bytes costs. It is here rather than in a file because
- * it is written per file, read per index build, and can be thrown away
- * without losing anything.
+ * Two tables here are neither content nor a person's doing — `apk_facts` and
+ * `apk_abis` cache what reading an APK's bytes costs. They are here rather
+ * than in files because they are written per file, read per index build or
+ * per catalog read, and can be thrown away without losing anything.
  *
  * It lives under `_state/`, beside the Telegram cursor — bookkeeping, not
  * content — so a backup of the library still picks it up and nothing in
@@ -119,6 +119,28 @@ function migrate(conn: Database.Database): void {
       -- no v2/v3 signing block. NULL is a real answer, not a missing one.
       signer       TEXT,
       read_at      TEXT    NOT NULL
+    );
+
+    -- Which ABIs an APK carries native code for, keyed on the file.
+    --
+    -- A second cache beside apk_facts rather than a column in it, because the
+    -- two are filled by different callers at different costs: apk_facts is
+    -- written by the index build, which hashes whole files, while this one is
+    -- written by an ordinary catalog read, which may only ever open the zip's
+    -- central directory. Folding them together would mean either hashing the
+    -- shelf to render a page or carrying a nullable sha256 that no index dare
+    -- trust.
+    --
+    -- Same key and same invalidation as apk_facts: a library-relative path
+    -- plus (size, mtime). The abis column is a comma-separated list, and an
+    -- empty string is a real answer -- an app with no native code at all runs
+    -- everywhere.
+    CREATE TABLE IF NOT EXISTS apk_abis (
+      path    TEXT    PRIMARY KEY,
+      size    INTEGER NOT NULL,
+      mtime   INTEGER NOT NULL,
+      abis    TEXT    NOT NULL,
+      read_at TEXT    NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS user_installed (

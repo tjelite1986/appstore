@@ -20,6 +20,7 @@
  */
 import { requireAdmin } from "@/lib/admin";
 import { forgetApkFacts } from "@/lib/apk-facts";
+import { forgetApkAbis } from "@/lib/apk-abi";
 import { buildIndexV1 } from "@/lib/fdroid-index-v1";
 import { getApps, withoutAdults } from "@/lib/store";
 import { repoBaseUrl } from "@/lib/fdroid-url";
@@ -63,9 +64,11 @@ export async function GET(req: Request): Promise<Response> {
 
   // Only the full shelf has seen every file; pruning off the filtered build
   // would delete the cache rows for exactly the APKs it was told to leave out.
+  // Both caches are swept, because both are keyed on the same paths — the
+  // count below is rows dropped, not files.
   const pruned =
     adults && url.searchParams.get("prune") === "1"
-      ? forgetApkFacts(result.seen)
+      ? forgetApkFacts(result.seen) + forgetApkAbis(result.seen)
       : 0;
 
   return new Response(result.json, {

@@ -17,7 +17,7 @@ import { apkFacts, apkFactsKey } from "./apk-facts";
 import { apkFileName } from "./fdroid-index";
 import { resolveInStore } from "./serve";
 import { STORE_DIRS } from "./storage";
-import type { AppVersion, StoreApp } from "./store";
+import type { AppVersion, AppVersionFile, StoreApp } from "./store";
 
 /** One APK, as far as any index format is concerned. */
 export type PackageEntry = {
@@ -31,6 +31,12 @@ export type PackageEntry = {
   signer: string;
   size: number;
   added: number;
+  /**
+   * The ABIs this file carries native code for. Empty means it runs on any
+   * phone, which is what both index formats mean by an absent list — so an
+   * empty array is written as no field at all rather than as `[]`.
+   */
+  nativecode: string[];
 };
 
 /** One package id, the listing that describes it, and its files. */
@@ -99,37 +105,46 @@ export function iconName(app: StoreApp): string | null {
 async function packageFor(
   app: StoreApp,
   version: AppVersion,
+  build: AppVersionFile,
   seen: Set<string>
 ): Promise<{ entry: PackageEntry | null; reason?: string }> {
+  // Which build a reason is about, when a version has more than one — "46.7.5:
+  // unreadable" would otherwise name a version that is half on the shelf.
+  const where =
+    version.files.length > 1
+      ? `${version.version} (${build.abi})`
+      : version.version;
+
   const abs = await resolveInStore(
     STORE_DIRS.apks,
     app.slug,
     version.version,
-    version.file
+    build.file
   );
-  if (!abs) return { entry: null, reason: `${version.version}: file missing` };
+  if (!abs) return { entry: null, reason: `${where}: file missing` };
 
   const facts = await apkFacts(abs);
-  if (!facts) return { entry: null, reason: `${version.version}: unreadable` };
+  if (!facts) return { entry: null, reason: `${where}: unreadable` };
   seen.add(apkFactsKey(abs));
 
   if (facts.versionCode === null) {
-    return { entry: null, reason: `${version.version}: no versionCode` };
+    return { entry: null, reason: `${where}: no versionCode` };
   }
   if (!facts.signer) {
-    return { entry: null, reason: `${version.version}: not v2/v3-signed` };
+    return { entry: null, reason: `${where}: not v2/v3-signed` };
   }
 
   return {
     entry: {
       packageName: app.packageName!,
-      apkName: apkFileName(app, version),
+      apkName: apkFileName(app, version, build),
       versionName: version.version,
       versionCode: facts.versionCode,
       hash: facts.sha256,
       signer: facts.signer,
-      size: version.bytes,
-      added: ms(version.added),
+      size: build.bytes,
+      added: ms(build.added),
+      nativecode: build.abis,
     },
   };
 }
@@ -163,9 +178,14 @@ export async function collectShelf(apps: StoreApp[]): Promise<Shelf> {
 
     const entries: PackageEntry[] = [];
     for (const version of app.versions) {
-      const { entry, reason } = await packageFor(app, version, seen);
-      if (entry) entries.push(entry);
-      else if (reason) skipped.push({ slug: app.slug, reason });
+      // Every build, in the order the catalog ranked them, so a client that
+      // reads no further than the first entry for a version gets the one this
+      // store would have handed it.
+      for (const build of version.files) {
+        const { entry, reason } = await packageFor(app, version, build, seen);
+        if (entry) entries.push(entry);
+        else if (reason) skipped.push({ slug: app.slug, reason });
+      }
     }
     if (!entries.length) continue;
 
@@ -181,15 +201,20 @@ export async function collectShelf(apps: StoreApp[]): Promise<Shelf> {
   const packages: ShelfPackage[] = order.map((id) => {
     // Newest first, which is the order a client shows and the order it picks
     // a suggestion from. A version code repeated across two listings would be
-    // one entry too many, so the first one to claim it wins.
-    const byCode = new Map<number, PackageEntry>();
+    // one entry too many, so the first one to claim it wins — but the key is
+    // the code *and* the ABIs, because per-ABI builds of one release commonly
+    // share a version code, and dropping one of those would leave half the
+    // phones that asked with nothing to install.
+    const byBuild = new Map<string, PackageEntry>();
     for (const entry of files.get(id)!) {
-      if (!byCode.has(entry.versionCode)) byCode.set(entry.versionCode, entry);
+      const key = `${entry.versionCode}|${entry.nativecode.join(",")}`;
+      if (!byBuild.has(key)) byBuild.set(key, entry);
     }
+    // A stable sort, so builds of one version keep the order they went in.
     return {
       id,
       app: meta.get(id)!,
-      entries: [...byCode.values()].sort(
+      entries: [...byBuild.values()].sort(
         (a, b) => b.versionCode - a.versionCode
       ),
     };
