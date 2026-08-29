@@ -205,6 +205,18 @@ export type StoreApp = {
    * nearly all of them. Settled against the catalog in `resolvePlugins`.
    */
   requires: string[];
+  /**
+   * Set by hand on the one listing that speaks for its package id in the
+   * F-Droid repository.
+   *
+   * A repository index holds one app per package id — that is Android's own
+   * unit, not a choice this store gets to make — so where two listings share
+   * an id only one of them can be published. `collectShelf` picks by rule and
+   * says in `skipped` which listing lost; this is how a person overrules that
+   * pick. Absent on nearly every listing, and meaningless on an id only one
+   * listing claims.
+   */
+  repoHead?: boolean;
   /** Newest first. Empty when the app has meta but no APK yet. */
   versions: AppVersion[];
   /** ISO date the app was first seen. Empty for placeholder rows. */
@@ -286,6 +298,11 @@ type MetaFile = {
    * because that is what a person writes when there is only one host.
    */
   requires?: string | string[];
+  /**
+   * Set by hand: publish this listing for its package id rather than the one
+   * the rule would pick. See `repoHead` on StoreApp.
+   */
+  repoHead?: boolean;
 };
 
 /* ------------------------------------------------------------------ utils */
@@ -588,6 +605,7 @@ async function readFromDisk(): Promise<StoreApp[]> {
         family: meta?.family?.trim() || undefined,
         // Likewise unresolved — `resolvePlugins` drops what names nothing.
         requires: readSlugList(meta?.requires),
+        repoHead: meta?.repoHead === true ? true : undefined,
         source,
         signingCert: meta?.signingCert,
         // A linked app holds no file, so the newest version and its size are

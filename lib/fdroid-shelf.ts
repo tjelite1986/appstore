@@ -17,6 +17,7 @@ import { apkFacts, apkFactsKey } from "./apk-facts";
 import { apkFileName } from "./fdroid-index";
 import { resolveInStore } from "./serve";
 import { STORE_DIRS } from "./storage";
+import { compareVersions } from "./store";
 import type { AppVersion, AppVersionFile, StoreApp } from "./store";
 
 /** One APK, as far as any index format is concerned. */
@@ -150,21 +151,58 @@ async function packageFor(
 }
 
 /**
+ * Which of several listings speaks for a package id.
+ *
+ * Lowest wins. Being told (`repoHead`) beats being the family's head, which
+ * beats holding the newer version, which beats being the fuller archive; the
+ * slug is the tiebreak, so the same shelf always publishes the same choice —
+ * an index that reshuffled itself between builds would offer a client an
+ * "update" that is only a different listing's turn.
+ */
+function byRepoClaim(a: StoreApp, b: StoreApp): number {
+  if (Boolean(a.repoHead) !== Boolean(b.repoHead)) return a.repoHead ? -1 : 1;
+  // `family === slug` is the catalog's own "this is the card the shelf shows".
+  const aHead = a.family === a.slug;
+  const bHead = b.family === b.slug;
+  if (aHead !== bHead) return aHead ? -1 : 1;
+  const version = compareVersions(a.version, b.version);
+  if (version !== 0) return version;
+  if (a.versions.length !== b.versions.length) {
+    return b.versions.length - a.versions.length;
+  }
+  return a.slug.localeCompare(b.slug);
+}
+
+/**
  * Read the shelf.
  *
  * Both index formats key on the package id, and nothing in this store promises
- * two listings do not share one. So the id is the unit here, not the slug: the
- * first listing to claim an id describes the app, later ones only add their
- * files. Merging beats dropping — two listings for one id are usually the same
- * app twice, and a client keys on the id either way.
+ * two listings do not share one — the review queue hands a second signer of an
+ * id its own slug rather than refusing the file, and a modded build repacked a
+ * second time keeps the id it was repacked from. Android's unit is the id, so
+ * **a repository publishes one listing per id and this picks which.**
+ *
+ * The rejected alternative was to merge them: describe the id with whichever
+ * listing came first and serve every listing's files under it. It reads as
+ * generous and it lies. A person subscribed to this repo sees one name, one
+ * icon and one description, and is offered binaries that belong to a different
+ * listing behind them — installing "Elitogram" and getting a Piko build. Worse,
+ * the modded builds this shelf holds all pin their versionCode to the same
+ * near-INT_MAX sentinel to stop Play updating them, so the merged list would
+ * silently drop every collision anyway: the losing half was never published,
+ * it just was not reported either.
+ *
+ * So every listing that does not win its id is named in `skipped`, with the
+ * winner and the way to overrule it. Where two listings really are the same
+ * app twice, the answer is `lib/merge.ts` — fold them, and the id has one
+ * claimant again.
  */
 export async function collectShelf(apps: StoreApp[]): Promise<Shelf> {
   const skipped: { slug: string; reason: string }[] = [];
   const seen = new Set<string>();
 
   const order: string[] = [];
-  const meta = new Map<string, StoreApp>();
-  const files = new Map<string, PackageEntry[]>();
+  const claimants = new Map<string, StoreApp[]>();
 
   for (const app of apps) {
     if (!app.packageName) {
@@ -175,50 +213,66 @@ export async function collectShelf(apps: StoreApp[]): Promise<Shelf> {
       skipped.push({ slug: app.slug, reason: "nothing on the shelf" });
       continue;
     }
+    const id = app.packageName;
+    if (!claimants.has(id)) {
+      order.push(id);
+      claimants.set(id, []);
+    }
+    claimants.get(id)!.push(app);
+  }
 
+  const packages: ShelfPackage[] = [];
+
+  for (const id of order) {
+    const [chosen, ...rest] = [...claimants.get(id)!].sort(byRepoClaim);
+    for (const other of rest) {
+      skipped.push({
+        slug: other.slug,
+        reason: `${id} is published as ${chosen.slug} (repoHead overrules)`,
+      });
+    }
+
+    // Newest first, which is the order a client shows and the order it picks a
+    // suggestion from. One listing can still repeat a version code across two
+    // of its own versions — the same sentinel on every build of a mod — and a
+    // client cannot hold two of those, so the first wins and the loss is said
+    // out loud. The key is the code *and* the ABIs, because per-ABI builds of
+    // one release commonly share a code, and dropping one of those would leave
+    // half the phones that asked with nothing to install.
+    const byBuild = new Map<string, PackageEntry>();
     const entries: PackageEntry[] = [];
-    for (const version of app.versions) {
+    for (const version of chosen.versions) {
       // Every build, in the order the catalog ranked them, so a client that
       // reads no further than the first entry for a version gets the one this
       // store would have handed it.
       for (const build of version.files) {
-        const { entry, reason } = await packageFor(app, version, build, seen);
-        if (entry) entries.push(entry);
-        else if (reason) skipped.push({ slug: app.slug, reason });
+        const { entry, reason } = await packageFor(chosen, version, build, seen);
+        if (!entry) {
+          if (reason) skipped.push({ slug: chosen.slug, reason });
+          continue;
+        }
+        const key = `${entry.versionCode}|${entry.nativecode.join(",")}`;
+        const held = byBuild.get(key);
+        if (held) {
+          skipped.push({
+            slug: chosen.slug,
+            reason: `${version.version} (${build.abi}): versionCode ${entry.versionCode} is already published as ${held.versionName}`,
+          });
+          continue;
+        }
+        byBuild.set(key, entry);
+        entries.push(entry);
       }
     }
     if (!entries.length) continue;
 
-    const id = app.packageName;
-    if (!meta.has(id)) {
-      order.push(id);
-      meta.set(id, app);
-      files.set(id, []);
-    }
-    files.get(id)!.push(...entries);
-  }
-
-  const packages: ShelfPackage[] = order.map((id) => {
-    // Newest first, which is the order a client shows and the order it picks
-    // a suggestion from. A version code repeated across two listings would be
-    // one entry too many, so the first one to claim it wins — but the key is
-    // the code *and* the ABIs, because per-ABI builds of one release commonly
-    // share a version code, and dropping one of those would leave half the
-    // phones that asked with nothing to install.
-    const byBuild = new Map<string, PackageEntry>();
-    for (const entry of files.get(id)!) {
-      const key = `${entry.versionCode}|${entry.nativecode.join(",")}`;
-      if (!byBuild.has(key)) byBuild.set(key, entry);
-    }
     // A stable sort, so builds of one version keep the order they went in.
-    return {
+    packages.push({
       id,
-      app: meta.get(id)!,
-      entries: [...byBuild.values()].sort(
-        (a, b) => b.versionCode - a.versionCode
-      ),
-    };
-  });
+      app: chosen,
+      entries: entries.sort((a, b) => b.versionCode - a.versionCode),
+    });
+  }
 
   return { packages, skipped, seen };
 }
