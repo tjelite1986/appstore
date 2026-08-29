@@ -13,10 +13,11 @@
  * caches on (path, size, mtime). Both documents are built in the same job, so
  * the second one costs a stat per file.
  */
+import path from "node:path";
 import { apkFacts, apkFactsKey } from "./apk-facts";
 import { apkFileName } from "./fdroid-index";
 import { resolveInStore } from "./serve";
-import { STORE_DIRS } from "./storage";
+import { STORE_DIRS, STORE_ROOT } from "./storage";
 import { compareVersions } from "./store";
 import type { AppVersion, AppVersionFile, StoreApp } from "./store";
 
@@ -250,6 +251,21 @@ export async function collectShelf(apps: StoreApp[]): Promise<Shelf> {
   const seen = new Set<string>();
   const { listings, skipped } = repoListings(apps);
   const packages: ShelfPackage[] = [];
+
+  // Every file on the shelf, published or not. `seen` is what the prune
+  // keeps, and "gone" has to mean gone from disk: a listing that lost its
+  // package id to another still owns files that exist, and marking only the
+  // published ones dropped six cache rows every build — which the next
+  // catalog read then hashed back.
+  for (const app of apps) {
+    for (const v of app.versions) {
+      for (const f of v.files) {
+        seen.add(
+          apkFactsKey(path.join(STORE_ROOT, STORE_DIRS.apks, app.slug, v.version, f.file))
+        );
+      }
+    }
+  }
 
   for (const chosen of listings) {
     const id = chosen.packageName!;
