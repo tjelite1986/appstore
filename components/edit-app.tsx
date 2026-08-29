@@ -61,6 +61,7 @@ export type EditText = {
   category: string;
   tagline: string;
   description: string;
+  family: string;
 };
 
 const TEXT_FIELDS = [
@@ -69,6 +70,7 @@ const TEXT_FIELDS = [
   "category",
   "tagline",
   "description",
+  "family",
 ] as const;
 
 export type EditableApp = {
@@ -83,6 +85,11 @@ export type EditableApp = {
   stored: EditText;
   /** What the store shows in their place, offered as placeholder text. */
   fallback: { name: string; developer: string; category: string };
+  /**
+   * The other listings this one could be filed under, for the family select.
+   * Slug and name, because the file holds the slug and a person reads names.
+   */
+  relatives: { slug: string; name: string }[];
   icon?: string;
   /** Empty for "no plate chosen" — the fallback gradient, keyed on `seed`. */
   iconBackground?: string;
@@ -297,6 +304,35 @@ export default function EditApp({ app }: { app: EditableApp }) {
             {CATEGORIES.map((c) => (
               <option key={c} value={c}>
                 {c}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {/* Several listings can be one app in different wrappers — five
+            Instagram mods, five cards on a shelf that holds one app. Filing
+            them under one listing collapses the cards into it; the members
+            keep their own pages, downloads and index entries. */}
+        <label className="block">
+          <span className={cn("mb-1 block text-[11px]", MUTED)}>
+            Family — shown on the shelf as
+          </span>
+          <select
+            className={FIELD}
+            value={form.family}
+            onChange={(e) => setForm((f) => ({ ...f, family: e.target.value }))}
+          >
+            <option value="">Its own card</option>
+            {/* A stored value naming a listing that is not on the list would
+                render as an empty box that still submits its old value, so it
+                is offered explicitly instead. */}
+            {form.family &&
+              !app.relatives.some((r) => r.slug === form.family) && (
+                <option value={form.family}>{form.family} (missing)</option>
+              )}
+            {app.relatives.map((r) => (
+              <option key={r.slug} value={r.slug}>
+                {r.name} ({r.slug})
               </option>
             ))}
           </select>

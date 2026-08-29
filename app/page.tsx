@@ -9,7 +9,7 @@ import { MUTED } from "@/components/primitives";
 import { cn } from "@/lib/utils";
 import { changelog, recentlyAdded } from "@/lib/store";
 import { currentUserId } from "@/lib/current-user";
-import { adultsAllowed, catalogFor } from "@/lib/user-state";
+import { adultsAllowed, shelfFor } from "@/lib/user-state";
 
 // The catalog is a directory on disk, not a build-time constant: an app
 // imported after the last deploy has to show up without one.
@@ -30,7 +30,7 @@ export default async function HomePage() {
   // of them to be right.
   const adults = adultsAllowed(userId);
   const [apps, recent, entries] = await Promise.all([
-    catalogFor(userId),
+    shelfFor(userId),
     recentlyAdded(6, { adults }),
     changelog(3, { adults }),
   ]);

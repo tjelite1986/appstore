@@ -3,7 +3,7 @@ import { Screen, ScreenTitle } from "@/components/screen";
 import AppGrid from "@/components/app-grid";
 import { categoryTiles } from "@/lib/store";
 import { currentUserId } from "@/lib/current-user";
-import { adultsAllowed, catalogFor } from "@/lib/user-state";
+import { adultsAllowed, shelfFor } from "@/lib/user-state";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +20,7 @@ export default async function CategoryPage({
   );
   if (!match) notFound();
 
-  const apps = (await catalogFor(userId)).filter(
+  const apps = (await shelfFor(userId)).filter(
     (a) => a.category === match.label
   );
 

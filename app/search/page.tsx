@@ -21,6 +21,8 @@ export default async function SearchPage({
 }) {
   const { q } = await searchParams;
   const query = (q ?? "").trim();
+  // Every listing, members of a family included: the shelf shows a family as
+  // one card, but someone typing "Elitogram" means that build and no other.
   const apps = await catalogFor(await currentUserId());
 
   const needle = query.toLowerCase();

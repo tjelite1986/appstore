@@ -16,10 +16,12 @@ import SaveButton from "@/components/save-button";
 import InstalledControl from "@/components/installed-control";
 import EditApp from "@/components/edit-app";
 import MergeApp from "@/components/merge-app";
+import AppFamily from "@/components/app-family";
 import ShareApp from "@/components/share-app";
 import { storedText } from "@/lib/edit";
 import { abiShortLabel } from "@/lib/apk-abi";
 import { appFor, catalogFor } from "@/lib/user-state";
+import { familyMembers } from "@/lib/store";
 import type { StoreApp } from "@/lib/store";
 import { withBasePath } from "@/lib/base-path";
 import { requestOrigin } from "@/lib/origin";
@@ -153,6 +155,35 @@ export default async function AppDetailPage({
           versions: a.versions.length,
         }))
     : [];
+
+  // The family, if this listing is in one: every member including this page's
+  // own listing, head first. `visible` is already gated, so a member behind
+  // the 18+ gate is not named to someone who may not see it.
+  const relatives = familyMembers(visible, app);
+  const familyName = relatives[0]?.name ?? app.name;
+  const family = relatives.map((m) => ({
+    slug: m.slug,
+    name: m.name,
+    version: m.version,
+    packageName: m.packageName,
+    icon: m.icon,
+    iconBackground: m.iconBackground,
+    iconFit: m.iconFit,
+    seed: m.seed,
+    href: m.versions[0]?.href ?? m.source?.assetUrl,
+    // Same package id means Android sees one app: installing this one is
+    // uninstalling that one. Read off the ids rather than off the names,
+    // because the names are whoever repacked it being creative.
+    replaces: relatives
+      .filter(
+        (o) =>
+          o.slug !== m.slug &&
+          o.packageName &&
+          m.packageName &&
+          o.packageName === m.packageName
+      )
+      .map((o) => o.name),
+  }));
 
   const latest = app.versions[0];
   const older = app.versions.slice(1);
@@ -296,6 +327,13 @@ export default async function AppDetailPage({
               developer: app.developer,
               category: app.category,
             },
+            // Every other listing, so the family select can name one. A
+            // listing cannot be filed under itself, and the catalog here is
+            // already gated — an admin browsing without the gate open is not
+            // offered an app they cannot see.
+            relatives: visible
+              .filter((a) => a.slug !== app.slug)
+              .map((a) => ({ slug: a.slug, name: a.name })),
             icon: app.icon,
             iconBackground: app.iconBackground,
             iconFit: app.iconFit,
@@ -311,6 +349,10 @@ export default async function AppDetailPage({
       {viewer?.role === "admin" && (
         <MergeApp app={{ slug: app.slug, name: app.name }} siblings={siblings} />
       )}
+
+      {/* Every build of this app the shelf holds, this one marked. Renders
+          nothing at all for a listing in no family. */}
+      <AppFamily members={family} current={app.slug} familyName={familyName} />
 
       {/* The three facts a store page is expected to answer above the fold. */}
       <div className="px-[var(--pad)]">

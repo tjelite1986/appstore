@@ -19,6 +19,7 @@ import {
   findApp,
   getApps,
   getCatalog,
+  onlyHeads,
   installed as placeholderInstalled,
   saved as placeholderSaved,
   updates as placeholderUpdates,
@@ -195,6 +196,18 @@ export async function catalogFor(userId: number | null): Promise<StoreApp[]> {
   const apps = adultsAllowed(userId) ? all : withoutAdults(all);
   if (userId === null) return apps;
   return decorate(apps, readState(userId));
+}
+
+/**
+ * The catalog as the *browse* screens should see it: one card per family.
+ *
+ * Saved, installed and updates deliberately do not read through here. A person
+ * who saved one variant saved that one — showing them the family's head
+ * instead would answer a question they did not ask, and an update waiting on a
+ * member is news about the member.
+ */
+export async function shelfFor(userId: number | null): Promise<StoreApp[]> {
+  return onlyHeads(await catalogFor(userId));
 }
 
 /* ------------------------------------------------------- the screens' lists */

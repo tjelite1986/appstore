@@ -173,6 +173,21 @@ export type StoreApp = {
   iconFit?: IconFit;
   banner?: string;
   screenshots: string[];
+  /**
+   * The family this listing belongs to, named by the slug of its head — the
+   * one listing that stands for the whole family on the shelf.
+   *
+   * Several listings can be the same app in a different wrapper: five
+   * Instagram mods, each a real app with its own package id, its own signer
+   * and its own reasons to prefer it. Five cards say the shelf holds five
+   * apps, which is not what a person browsing it is looking at. One card and
+   * a picker inside says what is actually true.
+   *
+   * Set on every member including the head, whose family is its own slug — so
+   * `app.family === app.slug` is the test for "this is the card the shelf
+   * shows". Absent for a listing in no family, which is nearly all of them.
+   */
+  family?: string;
   /** Newest first. Empty when the app has meta but no APK yet. */
   versions: AppVersion[];
   /** ISO date the app was first seen. Empty for placeholder rows. */
@@ -243,6 +258,11 @@ type MetaFile = {
   iconBackground?: string;
   /** Set by hand: "contain" to fit the whole icon instead of filling the box. */
   iconFit?: string;
+  /**
+   * Set by hand: the slug of the listing that stands for this app's family on
+   * the shelf. See `family` on StoreApp.
+   */
+  family?: string;
 };
 
 /* ------------------------------------------------------------------ utils */
@@ -540,6 +560,9 @@ async function readFromDisk(): Promise<StoreApp[]> {
         tagline: meta?.tagline?.trim() || "",
         description: meta?.description?.trim() || undefined,
         packageName: meta?.packageName,
+        // Unresolved: a slug that names nothing, or points through another
+        // member, is settled once for the whole catalog in `resolveFamilies`.
+        family: meta?.family?.trim() || undefined,
         source,
         signingCert: meta?.signingCert,
         // A linked app holds no file, so the newest version and its size are
@@ -571,9 +594,100 @@ async function readFromDisk(): Promise<StoreApp[]> {
     })
   );
 
-  return apps
-    .filter((a): a is StoreApp => a !== null)
-    .sort((a, b) => a.name.localeCompare(b.name));
+  return resolveFamilies(
+    apps.filter((a): a is StoreApp => a !== null)
+  ).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Settle what each meta file's `family` was pointing at.
+ *
+ * The field is written by hand, so it can name a slug that is not there, and
+ * it can point at another member rather than at the head — someone tagging a
+ * new mod naturally points it at the one they were looking at. Following the
+ * chain is what they meant; a slug that leads nowhere is dropped, because the
+ * alternative is a listing that vanishes off the shelf into a family that does
+ * not exist.
+ *
+ * The head is the end of the chain and is given the family too, so that every
+ * member answers the same question the same way and `app.family === app.slug`
+ * identifies the card.
+ */
+function resolveFamilies(apps: StoreApp[]): StoreApp[] {
+  const bySlug = new Map(apps.map((a) => [a.slug, a]));
+  const heads = new Set<string>();
+
+  for (const app of apps) {
+    if (!app.family) continue;
+    // A head may say so itself. That claim is not what makes it one — being
+    // pointed at is — so it is cleared here and given back below if any member
+    // actually arrived. A family of one is not a family.
+    if (app.family === app.slug) {
+      app.family = undefined;
+      continue;
+    }
+    // Four hops is more chain than anyone will write by hand, and it is also
+    // the loop guard: a cycle runs out of hops and is dropped as unresolvable
+    // rather than hanging the catalog read.
+    const seen = new Set<string>([app.slug]);
+    let at: string | undefined = app.family;
+    let head: string | undefined;
+    for (let hop = 0; at && hop < 4; hop++) {
+      const next: StoreApp | undefined = bySlug.get(at);
+      if (!next || seen.has(at)) break;
+      seen.add(at);
+      if (!next.family || next.family === next.slug) {
+        head = next.slug;
+        break;
+      }
+      at = next.family;
+    }
+    if (head && head !== app.slug) {
+      app.family = head;
+      heads.add(head);
+    } else {
+      // Includes a listing whose family names itself while nothing points at
+      // it: a family of one is not a family, and the card is its own.
+      console.error(
+        `[store] ${app.slug}.json: family "${app.family}" names no listing`
+      );
+      app.family = undefined;
+    }
+  }
+
+  for (const head of heads) bySlug.get(head)!.family = head;
+  return apps;
+}
+
+/**
+ * One card per family: the members that are not the head are left out.
+ *
+ * The browse screens read through here — home, search, the category pages —
+ * and nothing else does. A member is still a listing with a page, a download
+ * and an index entry; it is only the shelf that shows the family instead.
+ */
+export function onlyHeads<T extends { slug: string; family?: string }>(
+  apps: T[]
+): T[] {
+  return apps.filter((a) => !a.family || a.family === a.slug);
+}
+
+/**
+ * A family, head first, then by name — the order the picker lists them in.
+ *
+ * Empty for an app in no family, and for a head whose members have all gone,
+ * so a caller can render the section on "not empty" alone.
+ */
+export function familyMembers<T extends { slug: string; family?: string; name: string }>(
+  apps: T[],
+  app: T
+): T[] {
+  if (!app.family) return [];
+  const members = apps.filter((a) => a.family === app.family);
+  if (members.length < 2) return [];
+  return members.sort((a, b) =>
+    a.slug === app.family ? -1 : b.slug === app.family ? 1 : a.name.localeCompare(b.name)
+  );
 }
 
 /* ------------------------------------------------------------------ cache */
@@ -662,7 +776,9 @@ export async function recentlyAdded(
   const { apps: all, placeholder } = await getCatalog();
   // Gated by default: a caller that forgets to ask is a caller that should not
   // be showing the shelf.
-  const apps = opts.adults ? all : withoutAdults(all);
+  // A browse row like every other: the family shows as its head. What arrived
+  // was a member's file, and the head is where a person is sent to choose.
+  const apps = onlyHeads(opts.adults ? all : withoutAdults(all));
   if (placeholder) return apps.slice(0, limit);
   return [...apps]
     .sort((a, b) => (b.added ?? "").localeCompare(a.added ?? ""))

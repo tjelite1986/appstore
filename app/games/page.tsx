@@ -3,13 +3,13 @@ import ChipRow from "@/components/chip-row";
 import CoverShelf from "@/components/cover-shelf";
 import AppGrid from "@/components/app-grid";
 import { currentUserId } from "@/lib/current-user";
-import { catalogFor } from "@/lib/user-state";
+import { shelfFor } from "@/lib/user-state";
 
 export const dynamic = "force-dynamic";
 
 /** Games. The chip row is the sketch's; the rest follows Home's language. */
 export default async function GamesPage() {
-  const games = (await catalogFor(await currentUserId())).filter(
+  const games = (await shelfFor(await currentUserId())).filter(
     (a) => a.category === "Games"
   );
 

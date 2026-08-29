@@ -34,6 +34,7 @@ export const EDITABLE_FIELDS = [
   "description",
   "iconBackground",
   "iconFit",
+  "family",
 ] as const;
 
 export type EditableField = (typeof EDITABLE_FIELDS)[number];
@@ -66,15 +67,25 @@ const MAX_LENGTHS: Record<EditableField, number> = {
   description: 20_000,
   iconBackground: 9,
   iconFit: 8,
+  family: 120,
 };
 
-/** The five text fields, as a form deals with them. */
+/**
+ * The fields a form deals with as text it holds and saves in one go, as
+ * opposed to the artwork controls, which write the moment they are touched.
+ *
+ * `family` is a slug rather than prose, but it belongs here for the same
+ * reason `category` does: it is a decision about the listing that a person
+ * makes while looking at the rest of the form, and it should be saved with
+ * them rather than the instant a select changes.
+ */
 export const TEXT_FIELDS = [
   "name",
   "developer",
   "category",
   "tagline",
   "description",
+  "family",
 ] as const;
 
 export type TextField = (typeof TEXT_FIELDS)[number];
@@ -166,6 +177,23 @@ export async function editApp(slug: string, patch: unknown): Promise<void> {
         throw new EditError(`${trimmed} is not "cover" or "contain"`);
       }
       write.iconFit = normaliseIconFit(trimmed);
+      continue;
+    }
+    // The slug of the listing that stands for this app's family on the shelf.
+    // Checked against the catalog, because the cost of a typo is a listing
+    // that disappears off the shelf into a family nobody can reach — and the
+    // person who made it would have no reason to look here for the cause.
+    // Pointing at another member is fine and expected: the catalog follows the
+    // chain to the head (see `resolveFamilies`).
+    if (field === "family" && trimmed) {
+      if (trimmed === slug) {
+        throw new EditError(
+          "A listing cannot be its own family — leave this empty on the one the shelf should show"
+        );
+      }
+      const head = await findApp(trimmed);
+      if (!head) throw new EditError(`${trimmed} is not a listing on this shelf`);
+      write.family = head.slug;
       continue;
     }
     if (field === "category" && trimmed) {

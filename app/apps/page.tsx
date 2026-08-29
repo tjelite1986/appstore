@@ -3,7 +3,7 @@ import ChipRow from "@/components/chip-row";
 import AppGrid from "@/components/app-grid";
 import QuickLinks from "@/components/quick-links";
 import { currentUserId } from "@/lib/current-user";
-import { catalogFor } from "@/lib/user-state";
+import { shelfFor } from "@/lib/user-state";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
  */
 export default async function AppsPage() {
   // The catalog as this account sees it, so a tile can say "installed".
-  const apps = (await catalogFor(await currentUserId())).filter(
+  const apps = (await shelfFor(await currentUserId())).filter(
     (a) => a.category !== "Games"
   );
 
