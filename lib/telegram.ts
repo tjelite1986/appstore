@@ -27,7 +27,7 @@ import { createHash } from "node:crypto";
 import { STORE_DIRS, STORE_ROOT } from "./storage";
 import { runImportScan, type ImportSummary } from "./import";
 import { readApkInfo } from "./apk-manifest";
-import { BROWSER_USER_AGENT } from "./sources/net";
+import { BROWSER_USER_AGENT, openGuarded } from "./sources/net";
 import { detectSource } from "./sources/detect";
 import { apkmbUrl } from "./sources/apkmb";
 
@@ -52,6 +52,12 @@ const TELEGRAM_HOST = /(^|\.)(t\.me|telegram\.(me|org|dog))$/i;
 const MAX_LINKS = 3;
 /** A transfer that has not moved a byte for this long is abandoned. */
 const LINK_IDLE_MS = 60_000;
+/**
+ * And a ceiling on top of the idle timer: a mirror that trickles bytes just
+ * often enough never trips idle, and one link must not eat the whole run —
+ * the timer gives up on the run itself at forty minutes.
+ */
+const LINK_DEADLINE_MS = 15 * 60_000;
 
 /** Cross-run download tries per message before it is left alone. */
 const MAX_ATTEMPTS = 3;
@@ -693,6 +699,11 @@ async function run(): Promise<void> {
    * and a login wall or a "click here to download" page answers 200 with HTML,
    * so the bytes are handed to the same manifest reader the importer uses. No
    * package name, no file.
+   *
+   * The address was written in a channel post, not handed over by an upstream
+   * listing, so it goes through `openGuarded`: every hop is refused if it
+   * resolves onto this machine's own network, and no fetcher follows a
+   * redirect before that check has run.
    */
   async function downloadLink(
     url: string,
@@ -700,26 +711,18 @@ async function run(): Promise<void> {
   ): Promise<{ name: string; size: number }> {
     await fs.mkdir(DROP_DIR, { recursive: true });
     const tmp = path.join(DROP_DIR, `.link-${messageId}-${linkSeq++}.part`);
+    const deadlineAt = Date.now() + LINK_DEADLINE_MS;
 
-    // An idle timer rather than a deadline: a 200 MB file over a slow mirror is
-    // not a hung transfer, but one that has stopped sending is.
-    const ctl = new AbortController();
-    let idle = setTimeout(() => ctl.abort(), LINK_IDLE_MS);
-    const bump = () => {
-      clearTimeout(idle);
-      idle = setTimeout(() => ctl.abort(), LINK_IDLE_MS);
-    };
+    // The idle timer lives on the socket (see `requestOnce`): a 200 MB file
+    // over a slow mirror is not a hung transfer, but one that has stopped
+    // sending is. The deadline is checked as bytes arrive.
+    const { res, url: finalUrl } = await openGuarded(url, {
+      idleMs: LINK_IDLE_MS,
+      headers: { "user-agent": BROWSER_USER_AGENT },
+    });
 
     try {
-      const res = await fetch(url, {
-        redirect: "follow",
-        headers: { "user-agent": BROWSER_USER_AGENT, accept: "*/*" },
-        signal: ctl.signal,
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`.trim());
-      if (!res.body) throw new NotAnApk("empty response");
-
-      const declared = Number(res.headers.get("content-length"));
+      const declared = Number(res.headers["content-length"]);
       if (Number.isFinite(declared) && declared > cfg.maxBytes) {
         throw new NotAnApk(`over size cap (${mb(declared)} MB)`);
       }
@@ -727,8 +730,10 @@ async function run(): Promise<void> {
       let written = 0;
       const handle = await fs.open(tmp, "w");
       try {
-        for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
-          bump();
+        for await (const chunk of res as AsyncIterable<Buffer>) {
+          if (Date.now() > deadlineAt) {
+            throw new Error(`still downloading after ${LINK_DEADLINE_MS / 60_000} min — gave up`);
+          }
           written += chunk.byteLength;
           // The cap again, on the bytes: a server may declare no length at all.
           if (written > cfg.maxBytes) {
@@ -742,21 +747,22 @@ async function run(): Promise<void> {
 
       const info = await readApkInfo(tmp);
       if (!info.packageName) {
-        const type = res.headers.get("content-type") || "no content-type";
+        const type = res.headers["content-type"] || "no content-type";
         throw new NotAnApk(`not an APK (${written} bytes, ${type})`);
       }
 
+      const disposition = res.headers["content-disposition"] ?? "";
       const fileName = await claimName(
-        linkFileName(url, res.url, res.headers.get("content-disposition") ?? "", info),
+        linkFileName(url, finalUrl, disposition, info),
         messageId
       );
       await fs.rename(tmp, path.join(DROP_DIR, fileName));
       return { name: fileName, size: written };
     } catch (err) {
+      // A throw mid-body leaves the socket open until it is destroyed.
+      res.destroy();
       await fs.rm(tmp, { force: true }).catch(() => {});
       throw err;
-    } finally {
-      clearTimeout(idle);
     }
   }
 

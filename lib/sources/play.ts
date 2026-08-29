@@ -28,6 +28,8 @@ import {
 import { saveImage } from "@/lib/sources/net";
 
 const SEARCH_LIMIT = 12;
+/** Play answers in a second or two; a request still open after this is stuck. */
+const PLAY_TIMEOUT_MS = 20_000;
 const MAX_SCREENSHOTS = 8;
 
 export type PlayHit = {
@@ -139,7 +141,11 @@ export async function searchPlay(term: string): Promise<PlayHit[]> {
   if (!query) return [];
 
   const gp = await gplay();
-  const results: any[] = await gp.search({ term: query, num: SEARCH_LIMIT });
+  const results: any[] = await gp.search({
+    term: query,
+    num: SEARCH_LIMIT,
+    requestOptions: { timeout: PLAY_TIMEOUT_MS },
+  });
 
   const byPackage = new Map<string, string>();
   for (const app of await getApps()) {
@@ -190,6 +196,15 @@ export type PlayListing = {
   screenshotUrls: string[];
 };
 
+/**
+ * Play answered, and the answer is that there is no such app.
+ *
+ * Thrown apart from every other failure so a route can say 404 for this and
+ * 502 for the rest: a package Play does not carry is a fact about the package,
+ * a timeout or a blocked request is a fact about the moment.
+ */
+export class PlayNoListing extends Error {}
+
 export async function fetchPlayListing(packageId: string): Promise<PlayListing> {
   const pkg = packageId.trim();
   if (!/^[a-zA-Z0-9._]+$/.test(pkg)) {
@@ -199,9 +214,15 @@ export async function fetchPlayListing(packageId: string): Promise<PlayListing> 
   const gp = await gplay();
   let app: any;
   try {
-    app = await gp.app({ appId: pkg });
-  } catch {
-    throw new Error("Play has no listing for that package id");
+    app = await gp.app({ appId: pkg, requestOptions: { timeout: PLAY_TIMEOUT_MS } });
+  } catch (err) {
+    // The scraper folds every failure into one error and keeps the HTTP
+    // status on it; 404 is the one that means "no listing".
+    if ((err as { status?: number })?.status === 404) {
+      throw new PlayNoListing("Play has no listing for that package id");
+    }
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new Error(`Play did not answer: ${detail}`);
   }
 
   const str = (v: unknown): string | null =>

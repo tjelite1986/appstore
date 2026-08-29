@@ -21,7 +21,7 @@
  * edit belongs in the meta file.
  */
 import { requireAdmin } from "@/lib/admin";
-import { fetchPlayListing, fillFromPlay } from "@/lib/sources/play";
+import { fetchPlayListing, fillFromPlay, PlayNoListing } from "@/lib/sources/play";
 import { getApps } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
@@ -62,6 +62,7 @@ export async function POST(req: Request): Promise<Response> {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[play] fill of ${slug} failed:`, message);
-    return Response.json({ error: message }, { status: 400 });
+    const status = err instanceof PlayNoListing ? 404 : 502;
+    return Response.json({ error: message }, { status });
   }
 }

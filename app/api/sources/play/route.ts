@@ -9,7 +9,7 @@
  */
 import { requireAdmin } from "@/lib/admin";
 import { fetchImageDataUrl } from "@/lib/sources/net";
-import { addFromPlay, fetchPlayListing, searchPlay } from "@/lib/sources/play";
+import { addFromPlay, fetchPlayListing, PlayNoListing, searchPlay } from "@/lib/sources/play";
 
 export const dynamic = "force-dynamic";
 
@@ -37,9 +37,11 @@ export async function GET(req: Request): Promise<Response> {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error("[play] lookup failed:", message);
-      // Not a fault of the request: "Play has no listing for that" is the
-      // answer, and the panel shows it as one.
-      return Response.json({ error: message, listing: null }, { status: 404 });
+      // "Play has no listing for that" is an answer, not a fault, and the
+      // panel shows it as one. Anything else — Play timing out, refusing the
+      // request — is not the same sentence, and must not be shown as one.
+      const status = err instanceof PlayNoListing ? 404 : 502;
+      return Response.json({ error: message, listing: null }, { status });
     }
   }
 

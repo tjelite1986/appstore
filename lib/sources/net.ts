@@ -136,10 +136,11 @@ export async function fetchImageDataUrl(
  * True when an address is on a network this machine can reach but the
  * internet cannot.
  *
- * `fetchImageBytes` is the one function here whose URL comes from a form, so
- * it is the one that can be pointed at the docker network, at the host, or at
- * a cloud metadata service. Every other fetch in this module reads a URL that
- * an upstream listing just handed us.
+ * Two fetches take a URL somebody wrote rather than one an upstream listing
+ * just handed us — `fetchImageBytes` from a form, and the Telegram feed's link
+ * download from a channel post — and those are the ones that can be pointed
+ * at the docker network, at the host, or at a cloud metadata service. Both go
+ * through `openGuarded`.
  */
 function isInternalAddress(ip: string): boolean {
   // An IPv4-mapped IPv6 address is the same address wearing a hat.
@@ -212,57 +213,55 @@ function refuseInternalLiteral(target: URL): void {
   }
 }
 
-/** One request, connected only to an address `guardedLookup` allowed. */
+/**
+ * One request, connected only to an address `guardedLookup` allowed.
+ *
+ * The timeout is the socket's idle timeout, and it stays armed while the body
+ * streams: a transfer that has stopped sending is cut off, one that is merely
+ * slow is not.
+ */
 function requestOnce(
   target: URL,
-  timeoutMs: number
+  idleMs: number,
+  headers: Record<string, string>
 ): Promise<http.IncomingMessage> {
   return new Promise((resolve, reject) => {
     const mod = target.protocol === "https:" ? https : http;
-    const req = mod.get(
-      target,
-      {
-        headers: { "user-agent": USER_AGENT, accept: "image/*,*/*" },
-        lookup: guardedLookup,
-        timeout: timeoutMs,
-      },
-      resolve
-    );
+    const req = mod.get(target, { headers, lookup: guardedLookup, timeout: idleMs }, resolve);
     req.on("timeout", () =>
-      req.destroy(new Error("that address did not answer in time"))
+      req.destroy(new Error(`that address stopped answering (${idleMs / 1000}s idle)`))
     );
     req.on("error", reject);
   });
 }
 
 /**
- * A remote image as bytes, for a URL that came from a request.
+ * A 200 from a URL somebody wrote, with every hop checked before its socket
+ * opens, as a stream.
  *
- * Unlike `fetchImage` this throws rather than swallowing: the person typing
- * the address is waiting to hear whether it worked, and a silent null would
- * read as "saved". It also asks nothing of `content-type` — the caller hands
- * the bytes to `saveUpload`, which decides what they are by reading them.
- *
- * Redirects are followed by hand rather than by the fetcher, because a
- * followed redirect is a request that already happened: by the time a
- * response object can be examined, the hop into the docker network has been
- * made and answered. Here every hop is a fresh `requestOnce`, so each one is
- * gated by the lookup before a socket opens.
+ * Redirects are followed by hand rather than by a fetcher, because a followed
+ * redirect is a request that already happened: by the time a response object
+ * can be examined, the hop into the docker network has been made and
+ * answered. Here every hop is a fresh `requestOnce`, so each one is gated by
+ * the lookup before a socket opens. The caller owns the stream and must
+ * consume or destroy it.
  */
-export async function fetchImageBytes(
+export async function openGuarded(
   raw: string,
-  opts: { tag: string; maxBytes?: number }
-): Promise<Buffer> {
-  const max = opts.maxBytes ?? MAX_IMAGE_BYTES;
-
+  opts: { idleMs: number; headers?: Record<string, string> }
+): Promise<{ res: http.IncomingMessage; url: string }> {
   let target: URL;
   try {
     target = new URL(raw);
   } catch {
     throw new Error("that is not a URL");
   }
+  const headers = {
+    "user-agent": USER_AGENT,
+    accept: "*/*",
+    ...opts.headers,
+  };
 
-  let res: http.IncomingMessage;
   let hops = 0;
   for (;;) {
     if (target.protocol !== "https:" && target.protocol !== "http:") {
@@ -271,7 +270,7 @@ export async function fetchImageBytes(
       );
     }
     refuseInternalLiteral(target);
-    res = await requestOnce(target, IMAGE_TIMEOUT_MS);
+    const res = await requestOnce(target, opts.idleMs, headers);
     const status = res.statusCode ?? 0;
     const location = res.headers.location;
     if (status >= 300 && status < 400 && location) {
@@ -286,8 +285,27 @@ export async function fetchImageBytes(
       res.resume();
       throw new Error(`that address answered HTTP ${status}`);
     }
-    break;
+    return { res, url: target.href };
   }
+}
+
+/**
+ * A remote image as bytes, for a URL that came from a request.
+ *
+ * Unlike `fetchImage` this throws rather than swallowing: the person typing
+ * the address is waiting to hear whether it worked, and a silent null would
+ * read as "saved". It also asks nothing of `content-type` — the caller hands
+ * the bytes to `saveUpload`, which decides what they are by reading them.
+ */
+export async function fetchImageBytes(
+  raw: string,
+  opts: { tag: string; maxBytes?: number }
+): Promise<Buffer> {
+  const max = opts.maxBytes ?? MAX_IMAGE_BYTES;
+  const { res, url } = await openGuarded(raw, {
+    idleMs: IMAGE_TIMEOUT_MS,
+    headers: { accept: "image/*,*/*" },
+  });
 
   const announced = Number(res.headers["content-length"] ?? 0);
   if (announced > max) {
@@ -307,7 +325,7 @@ export async function fetchImageBytes(
     }
     chunks.push(chunk);
   }
-  console.log(`[${opts.tag}] ${bytes} bytes from ${target.href}`);
+  console.log(`[${opts.tag}] ${bytes} bytes from ${url}`);
   return Buffer.concat(chunks);
 }
 

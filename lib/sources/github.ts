@@ -127,13 +127,22 @@ function plainest(assets: GithubAsset[]): GithubAsset {
   )[0];
 }
 
-/** The newest release carrying an APK, looking past ones that carry none. */
+/**
+ * The newest stable release carrying an APK, looking past ones that carry
+ * none.
+ *
+ * A prerelease is the maintainer saying "not yet": it is passed over while
+ * the page holds a stable release with an APK, and taken only when it does
+ * not — some repositories publish nothing else, and for those a prerelease is
+ * the release.
+ */
 export async function latestRelease(ref: RepoRef): Promise<GithubRelease | null> {
   const list = await api(
     `/repos/${ref.owner}/${ref.repo}/releases?per_page=${RELEASE_PAGE}`
   );
   if (!Array.isArray(list)) return null;
 
+  let newestPrerelease: GithubRelease | null = null;
   for (const release of list) {
     if (release?.draft) continue;
     const assets: GithubAsset[] = (release?.assets ?? []).map((a: any) => ({
@@ -143,14 +152,16 @@ export async function latestRelease(ref: RepoRef): Promise<GithubRelease | null>
     }));
     const asset = pickAsset(assets.filter((a) => a.url));
     if (!asset) continue;
-    return {
+    const found: GithubRelease = {
       tag: String(release?.tag_name ?? ""),
       prerelease: Boolean(release?.prerelease),
       publishedAt: release?.published_at ? String(release.published_at) : null,
       asset,
     };
+    if (!found.prerelease) return found;
+    newestPrerelease ??= found;
   }
-  return null;
+  return newestPrerelease;
 }
 
 export type RepoFile = {
