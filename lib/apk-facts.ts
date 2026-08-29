@@ -92,6 +92,16 @@ export async function apkFacts(abs: string): Promise<ApkFacts | null> {
   const { versionCode } = await readApkInfo(abs);
   const signer = extractSignerSha256(abs);
 
+  // Both readers answer null for "could not read" and for "not there", and
+  // only the second is a fact about the file. Rows are keyed on size and
+  // mtime, which a served file never changes, so a null cached during an
+  // I/O hiccup would keep this APK out of the index for good. An incomplete
+  // answer is returned for this build and asked again next time; the price
+  // is re-hashing the rare file that really is unsigned or has no version.
+  if (versionCode === null || signer === null) {
+    return { sha256, versionCode, signer };
+  }
+
   conn
     .prepare(
       `INSERT INTO apk_facts (path, size, mtime, sha256, version_code, signer, read_at)

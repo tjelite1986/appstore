@@ -22,7 +22,7 @@ import { requireAdmin } from "@/lib/admin";
 import { forgetApkFacts } from "@/lib/apk-facts";
 import { forgetApkAbis } from "@/lib/apk-abi";
 import { buildIndexV1 } from "@/lib/fdroid-index-v1";
-import { getApps, withoutAdults } from "@/lib/store";
+import { getCatalog, withoutAdults } from "@/lib/store";
 import { repoBaseUrl } from "@/lib/fdroid-url";
 
 export const dynamic = "force-dynamic";
@@ -43,7 +43,19 @@ export async function GET(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const adults = url.searchParams.get("adults") === "1";
 
-  const all = await getApps();
+  // The placeholder catalog is what stands in when nothing could be read
+  // from disk — an unmounted library, most likely. Signing an index built
+  // from it would publish an empty repository that every subscribed phone
+  // then takes as the truth: not "come back later" but "everything is gone".
+  // 503 leaves the last good index in place; fdroid-sign.sh dies on it.
+  const catalog = await getCatalog();
+  if (catalog.placeholder) {
+    return new Response("the library could not be read — nothing to sign", {
+      status: 503,
+      headers: { "Cache-Control": "no-store" },
+    });
+  }
+  const all = catalog.apps;
   const apps = adults ? all : withoutAdults(all);
 
   const result = await buildIndexV1(apps, {

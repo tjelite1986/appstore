@@ -20,7 +20,7 @@
  */
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { readApkAbis } from "./apk-manifest";
+import { probeApkAbis, readApkAbis } from "./apk-manifest";
 import { db } from "./db";
 import { STORE_ROOT } from "./storage";
 
@@ -66,7 +66,12 @@ export async function apkAbis(abs: string): Promise<string[]> {
       return row.abis ? row.abis.split(",") : [];
     }
 
-    const abis = readApkAbis(abs);
+    const abis = probeApkAbis(abs);
+    // Could not read the file: answer "any phone" for this build, remember
+    // nothing. A row written now would outlive the outage — the key is size
+    // and mtime, and a served file never changes either — so one bad read
+    // would describe this APK as universal until someone replaced it.
+    if (abis === null) return [];
     conn
       .prepare(
         `INSERT INTO apk_abis (path, size, mtime, abis, read_at)

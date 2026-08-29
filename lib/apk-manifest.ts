@@ -337,13 +337,23 @@ function abisFromEntries(entries: ZipEntry[]): string[] {
  * catalog can afford to ask this per file.
  */
 export function readApkAbis(filePath: string): string[] {
+  return probeApkAbis(filePath) ?? [];
+}
+
+/**
+ * The same read, but honest about *why* there is nothing: `null` when the
+ * file could not be opened or read (an fs error, which carries a `code`), an
+ * empty list when it was read and holds no native code. A cache must not
+ * remember the first as the second — see lib/apk-abi.ts.
+ */
+export function probeApkAbis(filePath: string): string[] | null {
   let fd: number | null = null;
   try {
     const fileSize = fs.statSync(filePath).size;
     fd = fs.openSync(filePath, "r");
     return abisFromEntries(listEntries(fd, fileSize));
-  } catch {
-    return [];
+  } catch (err) {
+    return typeof (err as NodeJS.ErrnoException).code === "string" ? null : [];
   } finally {
     if (fd !== null) {
       try {
