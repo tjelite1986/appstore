@@ -29,31 +29,52 @@ export function contentTypeFor(file: string): string {
   return CONTENT_TYPES[path.extname(file).toLowerCase()] ?? "application/octet-stream";
 }
 
+/** True for one file or directory name: no separators, not `.` or `..`. */
+function isName(segment: string): boolean {
+  return (
+    segment.length > 0 &&
+    segment !== "." &&
+    segment !== ".." &&
+    !/[\0/\\]/.test(segment)
+  );
+}
+
 /**
- * An absolute path inside the library, or null.
+ * An absolute path inside one directory of the library, or null.
  *
- * Null for anything that escapes STORE_ROOT — `..`, an absolute segment, a
- * symlink pointing out of the tree. The check is on the *resolved* path, so it
- * holds however the caller spelled the request.
+ * `dir` is the directory the caller means to serve from — a constant from
+ * `STORE_DIRS`, or a value it has already checked against one. Every `name`
+ * after it must be a single path component: a file or directory name, never a
+ * path. That is checked on the segment itself and not on the joined result,
+ * because a router hands a request for `..%2Fmeta%2Fx.json` over as one
+ * segment containing slashes, and `path.resolve` would happily read it as a
+ * step up and out of `icons/`. Staying inside STORE_ROOT was never the whole
+ * promise: the signing key and the review queue are inside STORE_ROOT too.
+ *
+ * Null for anything that escapes `dir` — including a symlink pointing out of
+ * it, since the check is on the *resolved* path.
  */
 export async function resolveInStore(
-  ...segments: string[]
+  dir: string,
+  ...names: string[]
 ): Promise<string | null> {
-  if (segments.some((s) => !s || s.includes("\0"))) return null;
+  if (!dir || dir.includes("\0") || !dir.split("/").every(isName)) return null;
+  if (!names.every(isName)) return null;
 
   const root = path.resolve(STORE_ROOT);
-  const abs = path.resolve(root, ...segments);
-  if (abs !== root && !abs.startsWith(root + path.sep)) return null;
+  const base = path.resolve(root, dir);
+  if (base !== root && !base.startsWith(root + path.sep)) return null;
+  const abs = path.resolve(base, ...names);
 
-  // A symlink inside the library could still point outside it.
   let real: string;
+  let realBase: string;
   try {
     real = await fs.realpath(abs);
+    realBase = await fs.realpath(base);
   } catch {
     return null;
   }
-  const realRoot = await fs.realpath(root).catch(() => root);
-  if (real !== realRoot && !real.startsWith(realRoot + path.sep)) return null;
+  if (real !== realBase && !real.startsWith(realBase + path.sep)) return null;
 
   return real;
 }

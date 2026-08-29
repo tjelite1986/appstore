@@ -29,7 +29,7 @@ export async function GET(
     return new NextResponse("Not found", { status: 404 });
   }
 
-  const abs = await resolveInStore(...segments);
+  const abs = await resolveInStore(segments[0], ...segments.slice(1));
   if (!abs) return new NextResponse("Not found", { status: 404 });
 
   let stat;
