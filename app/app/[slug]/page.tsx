@@ -16,6 +16,7 @@ import SaveButton from "@/components/save-button";
 import InstalledControl from "@/components/installed-control";
 import EditApp from "@/components/edit-app";
 import MergeApp from "@/components/merge-app";
+import PruneVersions from "@/components/prune-versions";
 import AppFamily from "@/components/app-family";
 import AppCompanions from "@/components/app-companions";
 import ShareApp from "@/components/share-app";
@@ -375,6 +376,15 @@ export default async function AppDetailPage({
           renders nothing at all. See components/merge-app.tsx. */}
       {viewer?.role === "admin" && (
         <MergeApp app={{ slug: app.slug, name: app.name }} siblings={siblings} />
+      )}
+
+      {/* Only where there is an older version to lose. The files are deleted,
+          not archived — see components/prune-versions.tsx. */}
+      {viewer?.role === "admin" && older.length > 0 && (
+        <PruneVersions
+          slug={app.slug}
+          summary={`Remove ${older.length === 1 ? "the older version" : `${older.length} older versions`}`}
+        />
       )}
 
       {/* Every build of this app the shelf holds, this one marked. Renders

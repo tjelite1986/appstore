@@ -5,9 +5,11 @@ import { CARD, MUTED, SectionTitle } from "@/components/primitives";
 import AddApp from "@/components/add-app";
 import SourcesPanel from "@/components/sources-panel";
 import ImportPanel from "@/components/import-panel";
+import PruneVersions from "@/components/prune-versions";
 import { STORE_DIRS, STORE_HOST_ROOT } from "@/lib/storage";
 import { getCatalog, pendingImports, withoutAdults } from "@/lib/store";
 import { duplicatePackages } from "@/lib/merge";
+import { planPrune } from "@/lib/prune";
 import { currentUserId } from "@/lib/current-user";
 import { adultsAllowed } from "@/lib/user-state";
 import { cn } from "@/lib/utils";
@@ -39,6 +41,9 @@ export default async function ManagePage() {
   // alphabetically adjacent only by luck, and the merge control lives on the
   // app page, where you have to already suspect it to go looking.
   const duplicates = placeholder ? [] : duplicatePackages(apps);
+  // Counted off the same gated list, so the number on the button and the list
+  // behind it — read through the route with the same gate — agree.
+  const stale = placeholder ? null : planPrune(apps);
 
   return (
     <Screen>
@@ -117,6 +122,20 @@ export default async function ManagePage() {
             each pair at a time. Where that is the same app twice, open either
             listing to fold them together — the merge panel is on the app page,
             under the edit form.
+          </p>
+        </section>
+      )}
+
+      {stale && stale.versions > 0 && (
+        <section className="px-[var(--pad)]">
+          <SectionTitle title="Older versions" />
+          <PruneVersions
+            summary={`${stale.versions} older ${stale.versions === 1 ? "version" : "versions"} across ${stale.apps.length} ${stale.apps.length === 1 ? "app" : "apps"} · ${stale.size}`}
+          />
+          <p className={cn("mt-2 text-[11px] leading-relaxed", MUTED)}>
+            Every app keeps its newest version; the ones behind it are deleted
+            from the disk, not moved to <code>_import/_discarded/</code>. The
+            list is shown before anything goes.
           </p>
         </section>
       )}
