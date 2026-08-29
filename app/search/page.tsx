@@ -1,3 +1,4 @@
+import Form from "next/form";
 import { Search } from "lucide-react";
 import { Screen } from "@/components/screen";
 import ChipRow from "@/components/chip-row";
@@ -37,7 +38,7 @@ export default async function SearchPage({
 
   return (
     <Screen>
-      <form action="/search" className="px-[var(--pad)]">
+      <Form action="/search" className="px-[var(--pad)]">
         <div
           className={cn(
             "flex items-center gap-2.5 rounded-full border border-[color:var(--border)] bg-[var(--card)] px-4 py-2.5 text-sm",
@@ -55,7 +56,7 @@ export default async function SearchPage({
             className="w-full bg-transparent text-[color:var(--fg)] outline-none placeholder:text-[color:var(--muted)]"
           />
         </div>
-      </form>
+      </Form>
       <ChipRow
         items={["All", "Apps", "Games", "Editor", "Media", "Communication"]}
       />

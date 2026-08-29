@@ -44,6 +44,7 @@ import {
   PUBLISHED_FILES,
   type IndexVariant,
 } from "@/lib/fdroid-published";
+import { repoListings } from "@/lib/fdroid-shelf";
 import { userForRepoToken } from "@/lib/repo-token";
 import { contentTypeFor, fileResponse, resolveInStore } from "@/lib/serve";
 import { STORE_DIRS } from "@/lib/storage";
@@ -183,13 +184,18 @@ export async function GET(
   }
 
   const apps = await catalogFor(target.userId);
+  // What the unsigned documents describe: one listing per package id, the
+  // same one the signed index chose — see repoListings. The APK route below
+  // stays on the whole catalog, because a listing that lost its id still owns
+  // its files and the index that offered one of them was built to name it.
+  const listings = repoListings(apps).listings;
   const url = new URL(req.url);
   const dir = url.pathname.slice(0, url.pathname.lastIndexOf("/"));
   const repoUrl = `${repoBaseUrl(publicOrigin(req, url))}${dir}`;
 
   // Every app at once, which the index cannot do — see buildObtainiumImport.
   if (file === IMPORT_FILE) {
-    return new NextResponse(buildObtainiumImport(apps, repoUrl), {
+    return new NextResponse(buildObtainiumImport(listings, repoUrl), {
       status: 200,
       headers: {
         "Content-Type": "application/json; charset=utf-8",
@@ -202,14 +208,14 @@ export async function GET(
   }
 
   if (file === INDEX_FILE) {
-    const xml = buildIndexXml(apps, {
+    const xml = buildIndexXml(listings, {
       repoUrl,
       repoName: "App Store",
       description:
         "A self-hosted shelf. Add this URL to Obtainium as a third-party F-Droid repository.",
       // The newest file on the shelf, so an index that has not changed does
       // not claim it has. Empty shelf, no claim: zero.
-      timestamp: apps.reduce(
+      timestamp: listings.reduce(
         (newest, app) =>
           app.versions.reduce(
             (acc, v) => Math.max(acc, Date.parse(v.added) || 0),

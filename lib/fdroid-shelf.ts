@@ -174,6 +174,55 @@ function byRepoClaim(a: StoreApp, b: StoreApp): number {
 }
 
 /**
+ * The listings a repository publishes: one per package id, chosen by
+ * {@link byRepoClaim}, in the order the catalog ranked them. Every listing
+ * that does not win its id is named in `skipped`, with the winner.
+ *
+ * Pure — no file is opened — so the unsigned documents (`index.xml`, the
+ * Obtainium import) can make the same choice per request as the signed index
+ * makes per build. Two documents that disagreed about which listing speaks
+ * for an id would hand a client an "update" that is only a different listing.
+ */
+export function repoListings(apps: StoreApp[]): {
+  listings: StoreApp[];
+  skipped: { slug: string; reason: string }[];
+} {
+  const skipped: { slug: string; reason: string }[] = [];
+  const order: string[] = [];
+  const claimants = new Map<string, StoreApp[]>();
+
+  for (const app of apps) {
+    if (!app.packageName) {
+      skipped.push({ slug: app.slug, reason: "no package id" });
+      continue;
+    }
+    if (!app.versions.length) {
+      skipped.push({ slug: app.slug, reason: "nothing on the shelf" });
+      continue;
+    }
+    const id = app.packageName;
+    if (!claimants.has(id)) {
+      order.push(id);
+      claimants.set(id, []);
+    }
+    claimants.get(id)!.push(app);
+  }
+
+  const listings: StoreApp[] = [];
+  for (const id of order) {
+    const [chosen, ...rest] = [...claimants.get(id)!].sort(byRepoClaim);
+    for (const other of rest) {
+      skipped.push({
+        slug: other.slug,
+        reason: `${id} is published as ${chosen.slug} (repoHead overrules)`,
+      });
+    }
+    listings.push(chosen);
+  }
+  return { listings, skipped };
+}
+
+/**
  * Read the shelf.
  *
  * Both index formats key on the package id, and nothing in this store promises
@@ -198,39 +247,12 @@ function byRepoClaim(a: StoreApp, b: StoreApp): number {
  * claimant again.
  */
 export async function collectShelf(apps: StoreApp[]): Promise<Shelf> {
-  const skipped: { slug: string; reason: string }[] = [];
   const seen = new Set<string>();
-
-  const order: string[] = [];
-  const claimants = new Map<string, StoreApp[]>();
-
-  for (const app of apps) {
-    if (!app.packageName) {
-      skipped.push({ slug: app.slug, reason: "no package id" });
-      continue;
-    }
-    if (!app.versions.length) {
-      skipped.push({ slug: app.slug, reason: "nothing on the shelf" });
-      continue;
-    }
-    const id = app.packageName;
-    if (!claimants.has(id)) {
-      order.push(id);
-      claimants.set(id, []);
-    }
-    claimants.get(id)!.push(app);
-  }
-
+  const { listings, skipped } = repoListings(apps);
   const packages: ShelfPackage[] = [];
 
-  for (const id of order) {
-    const [chosen, ...rest] = [...claimants.get(id)!].sort(byRepoClaim);
-    for (const other of rest) {
-      skipped.push({
-        slug: other.slug,
-        reason: `${id} is published as ${chosen.slug} (repoHead overrules)`,
-      });
-    }
+  for (const chosen of listings) {
+    const id = chosen.packageName!;
 
     // Newest first, which is the order a client shows and the order it picks a
     // suggestion from. One listing can still repeat a version code across two

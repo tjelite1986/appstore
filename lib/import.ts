@@ -410,6 +410,13 @@ export async function attachApk(
   if (verify.status === "signer_mismatch") {
     return { ok: false, status: "signer_mismatch", slug, appName: app?.name };
   }
+  // A file whose signer cannot be read is not a file that matched the pin.
+  // Letting it through would make "strip the v2 signature" the way past the
+  // check above, so against a pinned app it is refused the same way — and
+  // only `force`, a person's decision, attaches it.
+  if (verify.status === "unverifiable" && pinned && !opts.force) {
+    return { ok: false, status: "unverifiable", slug, appName: app?.name };
+  }
 
   const version = sanitizeSegment(info.version);
   const fileName = sanitizeSegment(path.basename(info.fileName));
@@ -729,6 +736,14 @@ export async function decideImport(
         error: `Signed with a different key than the one pinned for ${attach.appName}`,
       };
     }
+    if (attach.status === "unverifiable") {
+      return {
+        ok: false,
+        signerMismatch: true,
+        appName: attach.appName,
+        error: `No readable signature to check against the key pinned for ${attach.appName}`,
+      };
+    }
     return { ok: false, error: `Attach failed (${attach.status})` };
   }
   await dropSidecar();
@@ -875,7 +890,9 @@ async function scan(): Promise<ImportSummary> {
         reason:
           attach.status === "signer_mismatch"
             ? `signer mismatch against ${app.name} — held for review`
-            : `could not attach to ${app.name} (${attach.status})`,
+            : attach.status === "unverifiable"
+              ? `no readable signature to check against ${app.name}'s pin — held for review`
+              : `could not attach to ${app.name} (${attach.status})`,
       });
       continue;
     }

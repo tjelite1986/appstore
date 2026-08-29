@@ -180,7 +180,7 @@ export default function RepoUrl({
         )}
 
         <a
-          href={`${current}/obtainium.json`}
+          href={withBasePath(`${current}/obtainium.json`)}
           className={cn(ROW, "border-t border-[color:var(--border)]")}
         >
           <Download size={17} className="shrink-0 text-[color:var(--muted-2)]" />

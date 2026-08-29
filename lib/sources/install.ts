@@ -103,15 +103,17 @@ export async function installFromUrl(
       // over an app someone already installed, so a source may not talk its
       // way past it — the review queue is where a person decides. So the
       // file goes there, out of staging before the cleanup below reaches it.
-      if (attached.status === "signer_mismatch") {
+      if (attached.status === "signer_mismatch" || attached.status === "unverifiable") {
         const id = await parkRefused(staged, {
           originalName: path.basename(opts.fileName),
           slug,
           appName: attached.appName ?? slug,
-          reason: "signer_mismatch",
+          reason: attached.status,
         });
         throw new RefusedRelease(
-          `signed with a different key than the version already here — held in the review queue as ${id}`,
+          attached.status === "signer_mismatch"
+            ? `signed with a different key than the version already here — held in the review queue as ${id}`
+            : `no readable signature to check against the pinned key — held in the review queue as ${id}`,
           id
         );
       }
@@ -183,6 +185,12 @@ export async function installLinked(
       // app that is served by link, which is a different decision.
       throw new RefusedRelease(
         "signed with a different key than the one this app is pinned to — re-add the app from the new release if that is expected",
+        null
+      );
+    }
+    if (verify.status === "unverifiable" && opts.pinnedSigner) {
+      throw new RefusedRelease(
+        "no readable signature to check against the key this app is pinned to — re-add the app from the new release if that is expected",
         null
       );
     }

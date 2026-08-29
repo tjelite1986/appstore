@@ -592,6 +592,7 @@ const REASONS: Record<string, string> = {
   ambiguous: "More than one app could be the target",
   duplicate: "That version exists already, with different content",
   signer_mismatch: "Signed with a different key than the one pinned",
+  unverifiable: "No readable signature to check against the pinned key",
   // Recomputed at read time: nothing fitted when it landed, something does
   // now — usually because the app was added to the catalog since.
   now_matches: "Matches an app that has been added since",
@@ -988,7 +989,9 @@ function ReviewCard({
         {/* Only offered where it is the actual obstacle: re-pinning the signer
             is how a repackaged APK would take over an app, so it must be a
             deliberate answer to a refusal, never a general "force" button. */}
-        {(item.reason === "signer_mismatch" || item.reason === "duplicate") && (
+        {(item.reason === "signer_mismatch" ||
+          item.reason === "unverifiable" ||
+          item.reason === "duplicate") && (
           <ActionButton
             size="sm"
             variant="secondary"
