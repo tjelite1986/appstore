@@ -11,7 +11,8 @@ import {
 } from "@/components/primitives";
 import type { ImportSummary, ReviewItem } from "@/lib/import";
 import type { PlayListing } from "@/lib/sources/play";
-import type { TelegramRun } from "@/lib/telegram";
+import type { ApkmbListing } from "@/lib/sources/apkmb";
+import type { TelegramCandidate, TelegramRun } from "@/lib/telegram";
 import { ADMIN_TOKEN_KEY, adminHeaders } from "@/lib/admin-token";
 import { withBasePath } from "@/lib/base-path";
 
@@ -89,6 +90,12 @@ function ActionButton({
  */
 type Candidate = {
   listing: PlayListing;
+  iconDataUrl: string | null;
+};
+
+/** The same thing for a page the feed could not download. Inlined icon, same reason. */
+type LinkListing = {
+  listing: ApkmbListing;
   iconDataUrl: string | null;
 };
 
@@ -242,6 +249,70 @@ export default function ImportPanel({ storePath, waiting, apps }: Props) {
     [call]
   );
 
+  /**
+   * Ask apkmb what one of its product pages says, without writing anything.
+   *
+   * Deliberately on click and not on render: this is an outbound request to
+   * another site, and a panel that made one per candidate every time Manage
+   * loaded would be hammering apkmb to draw a card nobody asked for.
+   */
+  const lookupLink = useCallback(
+    async (url: string): Promise<LinkListing> => {
+      const data = await call(`/api/sources/apkmb?url=${encodeURIComponent(url)}`);
+      if (!data.listing) throw new Error(data.error ?? "apkmb returned nothing");
+      return {
+        listing: data.listing as ApkmbListing,
+        iconDataUrl: typeof data.iconDataUrl === "string" ? data.iconDataUrl : null,
+      };
+    },
+    [call]
+  );
+
+  /** Stop the feed offering a page — the same call for a fill and for a refusal. */
+  const answerCandidate = useCallback(
+    async (url: string) => {
+      await call("/api/telegram/candidate", {
+        method: "POST",
+        body: JSON.stringify({ url }),
+      });
+    },
+    [call]
+  );
+
+  async function fillFromLink(url: string, slug: string) {
+    setBusy(url);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await call("/api/sources/apkmb/fill", {
+        method: "POST",
+        body: JSON.stringify({ slug, url }),
+      });
+      // Cleared only once the fill has answered: a page that failed to write
+      // is still a page worth offering.
+      await answerCandidate(url);
+      setNotice(describeLinkFill(result));
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function dismissLink(url: string) {
+    setBusy(url);
+    setError(null);
+    try {
+      await answerCandidate(url);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function decide(
     id: string,
     action: string,
@@ -321,7 +392,18 @@ export default function ImportPanel({ storePath, waiting, apps }: Props) {
 
   return (
     <div className="flex flex-col gap-3">
-      {telegram && <TelegramCard status={telegram} busy={busy === "telegram"} onSync={syncTelegram} />}
+      {telegram && (
+        <TelegramCard
+          status={telegram}
+          busy={busy === "telegram"}
+          busyUrl={busy}
+          apps={apps}
+          onSync={syncTelegram}
+          onLookup={lookupLink}
+          onFill={fillFromLink}
+          onDismiss={dismissLink}
+        />
+      )}
 
       <div className={cn(CARD_CLS, "flex flex-col gap-2 p-3.5")}>
         <p className="text-sm">
@@ -401,6 +483,8 @@ type TelegramStatus = {
   running: boolean;
   channels: { name: string; cursor: number; lastSyncedAt?: string; lastStatus?: string }[];
   run: TelegramRun;
+  /** Links the run rejected that apkmb has a page for. Older states have none. */
+  candidates?: TelegramCandidate[];
 };
 
 /**
@@ -414,11 +498,22 @@ type TelegramStatus = {
 function TelegramCard({
   status,
   busy,
+  busyUrl,
+  apps,
   onSync,
+  onLookup,
+  onFill,
+  onDismiss,
 }: {
   status: TelegramStatus;
   busy: boolean;
+  /** Which row is mid-request, keyed by the candidate's URL. */
+  busyUrl: string | null;
+  apps: { slug: string; name: string }[];
   onSync: () => void;
+  onLookup: (url: string) => Promise<LinkListing>;
+  onFill: (url: string, slug: string) => void;
+  onDismiss: (url: string) => void;
 }) {
   const when = status.run.finishedAt ?? status.run.startedAt;
   return (
@@ -464,6 +559,29 @@ function TelegramCard({
             </li>
           ))}
         </ul>
+      )}
+      {/* Pages the feed could not download but apkmb can describe. They sit
+          inside this card rather than beside it because they are the same
+          run's leftovers, and a card of their own would read as a warning. */}
+      {(status.candidates?.length ?? 0) > 0 && (
+        <div className="mt-1 flex flex-col gap-2">
+          <p className={cn("text-xs", MUTED_CLS)}>
+            {status.candidates!.length === 1
+              ? "One link was not an APK, but apkmb has a page for it"
+              : `${status.candidates!.length} links were not APKs, but apkmb has pages for them`}
+          </p>
+          {status.candidates!.map((c) => (
+            <LinkCandidateRow
+              key={c.url}
+              candidate={c}
+              apps={apps}
+              busy={busyUrl === c.url}
+              onLookup={onLookup}
+              onFill={onFill}
+              onDismiss={onDismiss}
+            />
+          ))}
+        </div>
       )}
     </div>
   );
@@ -558,6 +676,199 @@ function PlayCandidate({
         </ActionButton>
         <ActionButton size="sm" variant="secondary" disabled={busy} onClick={onDismiss}>
           Not this app
+        </ActionButton>
+      </div>
+    </div>
+  );
+}
+
+/** "Filled Xnxx — wrote 3 fields and 5 screenshots from apkmb. It kept name, category." */
+function describeLinkFill(result: {
+  name?: string;
+  written?: string[];
+  kept?: string[];
+  images?: { icon?: boolean; screenshots?: number };
+}): string {
+  const parts: string[] = [];
+  if (result.written?.length) parts.push(`${result.written.length} fields`);
+  if (result.images?.icon) parts.push("an icon");
+  if (result.images?.screenshots) parts.push(`${result.images.screenshots} screenshots`);
+  const wrote = parts.length ? `wrote ${parts.join(", ")}` : "found nothing to add";
+  const kept = result.kept?.length ? ` It kept ${result.kept.join(", ")}.` : "";
+  return `Filled ${result.name ?? "the app"} — ${wrote} from apkmb.${kept}`;
+}
+
+/**
+ * One rejected link, offered as a description for an app already in the store.
+ *
+ * Two states, and the first one is deliberately just an address: looking the
+ * page up is a visit to apkmb, so it waits for a click — the same shape the
+ * review queue's Play lookup has, for the same reason.
+ *
+ * It can only ever fill an app that exists. A page in a channel is not
+ * evidence enough to create a listing: apkmb files adult apps under
+ * Entertainment, so a listing conjured from one would land outside the 18+
+ * gate. Filling an app whose shelf somebody already chose cannot do that.
+ */
+function LinkCandidateRow({
+  candidate,
+  apps,
+  busy,
+  onLookup,
+  onFill,
+  onDismiss,
+}: {
+  candidate: TelegramCandidate;
+  apps: { slug: string; name: string }[];
+  busy: boolean;
+  onLookup: (url: string) => Promise<LinkListing>;
+  onFill: (url: string, slug: string) => void;
+  onDismiss: (url: string) => void;
+}) {
+  const [found, setFound] = useState<LinkListing | null>(null);
+  const [looking, setLooking] = useState(false);
+  const [lookupError, setLookupError] = useState<string | null>(null);
+  const [target, setTarget] = useState("");
+
+  async function lookUp() {
+    setLooking(true);
+    setLookupError(null);
+    try {
+      const result = await onLookup(candidate.url);
+      setFound(result);
+      // Preselected only when it is a row somebody can actually see. The list
+      // this panel holds is the gated one, and a `<select>` whose value has no
+      // option renders blank while still submitting — which would fill a
+      // listing the person was never shown. This card approves what it draws.
+      const matched = result.listing.existingSlug ?? "";
+      setTarget(apps.some((a) => a.slug === matched) ? matched : "");
+    } catch (err) {
+      setLookupError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLooking(false);
+    }
+  }
+
+  const listing = found?.listing;
+  const matchedIsListed =
+    !!listing?.existingSlug && apps.some((a) => a.slug === listing.existingSlug);
+
+  return (
+    <div
+      className={cn(
+        "flex flex-col gap-2 rounded-[var(--radius)] border border-[color:var(--border)] bg-[var(--card-2)] p-3"
+      )}
+    >
+      <div className="flex items-start gap-3">
+        {listing && found?.iconDataUrl && (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
+            src={found.iconDataUrl}
+            alt=""
+            className="h-11 w-11 shrink-0 rounded-[12px] object-cover"
+          />
+        )}
+        <div className="min-w-0">
+          <p className="break-all text-sm">{listing?.name ?? candidate.url}</p>
+          <p className={cn("truncate text-xs", MUTED_CLS)}>
+            {[
+              listing?.developer,
+              listing?.category,
+              `@${candidate.channel}`,
+              `post ${candidate.messageId}`,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </p>
+          {listing?.tagline && (
+            <p className={cn("mt-1 line-clamp-2 text-xs", MUTED_CLS)}>
+              {listing.tagline}
+            </p>
+          )}
+          <p className={cn("mt-1 break-all text-xs", MUTED_CLS)}>
+            {listing
+              ? [
+                  listing.description ? "a description" : null,
+                  listing.iconUrl ? "an icon" : null,
+                  listing.screenshotUrls.length
+                    ? `${listing.screenshotUrls.length} screenshots`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(", ") || "nothing but a name"
+              : candidate.note}
+          </p>
+        </div>
+      </div>
+
+      {listing && (
+        <>
+
+          {/* The shelf apkmb names is apkmb's, and it files adult apps under
+              Entertainment. A fill writes gaps only, so an app that already
+              has a category keeps it — but one that has none would take this. */}
+          {listing.category && (
+            <p className={cn("text-xs", MUTED_CLS)}>
+              apkmb shelves this under {listing.category}. A fill only writes
+              that where the app has no category of its own.
+            </p>
+          )}
+
+          <select
+            className={INPUT_CLS}
+            value={target}
+            onChange={(e) => setTarget(e.target.value)}
+            disabled={busy}
+          >
+            <option value="">Describes…</option>
+            {apps.map((a) => (
+              <option key={a.slug} value={a.slug}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+          <p className={cn("text-xs", MUTED_CLS)}>
+            {!listing.existingSlug
+              ? "Nothing in the catalog matched. Pick the app these words describe."
+              : matchedIsListed
+                ? "Matched an app in the catalog — check it is the same build."
+                : // The list this panel was given is the gated one, so an
+                  // Adults app is matched and unpickable at once — which is
+                  // the common case here, Play having no listing for those.
+                  "Matched an app on the Adults shelf, which this list does not show. Open the 18+ gate in Settings to fill it."}
+          </p>
+        </>
+      )}
+
+      {lookupError && <p className={cn("text-xs", MUTED_CLS)}>{lookupError}</p>}
+
+      <div className="flex flex-wrap items-center gap-2">
+        {!listing && (
+          <ActionButton
+            size="sm"
+            variant="secondary"
+            disabled={busy || looking}
+            onClick={() => void lookUp()}
+          >
+            <Search size={13} /> {looking ? "Asking apkmb…" : "Look up"}
+          </ActionButton>
+        )}
+        {listing && (
+          <ActionButton
+            size="sm"
+            disabled={busy || !target}
+            onClick={() => onFill(candidate.url, target)}
+          >
+            {busy ? "Filling…" : "Fill this app"}
+          </ActionButton>
+        )}
+        <ActionButton
+          size="sm"
+          variant="secondary"
+          disabled={busy}
+          onClick={() => onDismiss(candidate.url)}
+        >
+          {listing ? "Not this app" : "Not an app page"}
         </ActionButton>
       </div>
     </div>

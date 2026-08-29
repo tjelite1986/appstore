@@ -283,6 +283,10 @@ export function apkmbUrl(input: string): string {
   url.search = "";
   url.hash = "";
   url.protocol = "https:";
+  // Same page, same reason: a channel posts the slug with and without its
+  // trailing slash, and both arrive here as separate addresses. apkmb serves
+  // the directory form, which is what a stamped `apkmbMeta.url` already holds.
+  if (!url.pathname.endsWith("/")) url.pathname += "/";
   return url.href;
 }
 

@@ -28,6 +28,8 @@ import { STORE_DIRS, STORE_ROOT } from "./storage";
 import { runImportScan, type ImportSummary } from "./import";
 import { readApkInfo } from "./apk-manifest";
 import { BROWSER_USER_AGENT } from "./sources/net";
+import { detectSource } from "./sources/detect";
+import { apkmbUrl } from "./sources/apkmb";
 
 const DROP_DIR = path.join(STORE_ROOT, STORE_DIRS.import);
 const STATE_FILE = path.join(STORE_ROOT, STORE_DIRS.state, "telegram.json");
@@ -143,6 +145,16 @@ type LedgerEntry = {
   note?: string | null;
   attempts: number;
   at: string;
+  /**
+   * When somebody answered this row's offered page — filled from it, or said
+   * it describes nothing here.
+   *
+   * Only the answer is stored. Whether a rejected link is worth offering at
+   * all is decided by reading it (see `listCandidates`), which means the rows
+   * already in the ledger when this arrived are offered too, and a change to
+   * what counts as a readable page needs no migration.
+   */
+  candidateAnsweredAt?: string;
 };
 
 export type TelegramRun = {
@@ -232,6 +244,108 @@ function writeState(state: TelegramState): Promise<void> {
     () => writeOnce(state)
   );
   return writeQueue;
+}
+
+/* -------------------------------------------------------------- candidates */
+
+/** One offered page, as the panel deals with it. */
+export type TelegramCandidate = {
+  kind: "apkmb";
+  url: string;
+  channel: string;
+  messageId: number;
+  /** Why the download stopped — "not an APK (4213 bytes, text/html)". */
+  note: string | null;
+  at: string;
+};
+
+/**
+ * The address of the page a refused link points at, or null for a link that
+ * describes nothing.
+ *
+ * Only an apkmb product page qualifies. `detectSource` names that kind from an
+ * explicit pattern and falls through to a guess of "play" for anything it does
+ * not recognise, so asking for `apkmb` by name is what keeps a CDN link, a
+ * t.me address and apkmb's own front page out.
+ *
+ * The answer is canonical, because the ledger is not: one channel posted the
+ * same page twice, once with its trailing slash and once without, and two rows
+ * for one page would be offered twice and dismissed one at a time.
+ */
+function listingUrl(url: string): string | null {
+  if (detectSource(url).kind !== "apkmb") return null;
+  try {
+    return apkmbUrl(url);
+  } catch {
+    return null;
+  }
+}
+
+function readableAsListing(url: string): boolean {
+  return listingUrl(url) !== null;
+}
+
+/**
+ * The pages waiting to be looked at, worked out from the ledger.
+ *
+ * Derived rather than stored, so that the links already written off before
+ * this existed are offered too — a `skipped` verdict is permanent by design,
+ * and those rows would otherwise never come back. Only `skipped` counts: a
+ * `failed` row still has tries left, and a `downloaded` one was an APK.
+ *
+ * Keyed by URL rather than by ledger row: the same mirror posted in two
+ * channels is two rows and one page, and offering it twice would mean
+ * dismissing it twice. Newest first, because an old link is one already
+ * passed over.
+ */
+export async function listCandidates(): Promise<TelegramCandidate[]> {
+  const { ledger } = await readState();
+  const byUrl = new Map<string, TelegramCandidate>();
+
+  for (const entry of Object.values(ledger)) {
+    if (entry.status !== "skipped" || entry.candidateAnsweredAt) continue;
+    const url = listingUrl(entry.documentId);
+    if (!url) continue;
+
+    const seen = byUrl.get(url);
+    if (seen && seen.at >= entry.at) continue;
+    byUrl.set(url, {
+      kind: "apkmb",
+      url,
+      channel: entry.channel,
+      messageId: entry.messageId,
+      note: entry.note ?? null,
+      at: entry.at,
+    });
+  }
+
+  return [...byUrl.values()].sort((a, b) => b.at.localeCompare(a.at));
+}
+
+/**
+ * Answer a candidate — filled, or refused — so it stops being offered.
+ *
+ * Every row pointing at that page is answered, not just the one the panel
+ * rendered — matched on the canonical address, so the same slug posted with
+ * and without its trailing slash is one answer. A "no" that let the twin come
+ * back on the next sync would be no answer at all. The ledger entry itself stays, so the link is not fetched
+ * again either.
+ */
+export async function clearCandidate(url: string): Promise<boolean> {
+  const state = await readState();
+  const at = new Date().toISOString();
+  const target = listingUrl(url) ?? url;
+  let hit = false;
+
+  for (const entry of Object.values(state.ledger)) {
+    const entryUrl = listingUrl(entry.documentId) ?? entry.documentId;
+    if (entryUrl === target && !entry.candidateAnsweredAt) {
+      entry.candidateAnsweredAt = at;
+      hit = true;
+    }
+  }
+  if (hit) await writeState(state);
+  return hit;
 }
 
 /* --------------------------------------------------------------------- run */
@@ -782,9 +896,13 @@ async function run(): Promise<void> {
       } catch (err) {
         entry.status = err instanceof NotAnApk ? "skipped" : "failed";
         entry.note = msgOf(err).slice(0, 300);
+        // Not an APK, but possibly an address a source can read. Nothing is
+        // recorded for that here: the ledger already holds the URL, and the
+        // offer is worked out from it on read.
+        const offered = entry.status === "skipped" && readableAsListing(url);
         say(
           entry.status === "skipped"
-            ? `${key}: ${url} — ${entry.note}, skipped`
+            ? `${key}: ${url} — ${entry.note}, skipped${offered ? " (offered as a listing)" : ""}`
             : `${key}: ${url} FAILED (try ${entry.attempts}/${MAX_ATTEMPTS}) — ${entry.note}`
         );
       }

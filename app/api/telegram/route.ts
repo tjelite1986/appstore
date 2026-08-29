@@ -1,7 +1,8 @@
 /**
  * The Telegram feed.
  *
- *   GET   what the last run did, and where each channel's cursor stands
+ *   GET   what the last run did, where each channel's cursor stands, and the
+ *         links it rejected that a source could still describe an app from
  *   POST  start a run, if one is not already going
  *
  * POST returns immediately rather than waiting: a run downloads up to five
@@ -11,6 +12,7 @@
  */
 import { requireAdmin } from "@/lib/admin";
 import {
+  listCandidates,
   readRun,
   readState,
   startTelegramSync,
@@ -22,7 +24,11 @@ import {
 export const dynamic = "force-dynamic";
 
 async function status() {
-  const [state, run] = await Promise.all([readState(), readRun()]);
+  const [state, run, candidates] = await Promise.all([
+    readState(),
+    readRun(),
+    listCandidates(),
+  ]);
   const cfg = telegramConfig();
   return {
     configured: telegramConfigured(),
@@ -32,6 +38,10 @@ async function status() {
       ...(state.channels[name] ?? { cursor: 0 }),
     })),
     run,
+    // Addresses the feed could not download but a source can read. The URL is
+    // all that travels: what the page says is fetched when someone asks for it,
+    // not on every poll of this route.
+    candidates,
   };
 }
 
