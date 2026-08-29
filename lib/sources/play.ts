@@ -77,7 +77,12 @@ const CATEGORY_BY_GENRE: Record<string, Category> = {
   BUSINESS: "Editor",
 };
 
-function categoryFor(genreId: unknown): Category | null {
+/**
+ * Exported because Play's genre vocabulary turns up off Play: apkmb publishes
+ * the same `applicationCategory` strings in its JSON-LD, and reading them
+ * against a second copy of this table is how the two sources would drift.
+ */
+export function categoryForGenre(genreId: unknown): Category | null {
   if (typeof genreId !== "string") return null;
   // Every game genre is GAME_SOMETHING, and there are dozens of them.
   if (genreId.startsWith("GAME")) return "Games";
@@ -206,7 +211,7 @@ export async function fetchPlayListing(packageId: string): Promise<PlayListing> 
     packageId: pkg,
     name: decodeEntities(String(app.title ?? pkg)),
     developer: str(app.developer),
-    category: categoryFor(app.genreId),
+    category: categoryForGenre(app.genreId),
     tagline: str(app.summary),
     description: str(app.description),
     rating: typeof app.score === "number" ? Number(app.score.toFixed(2)) : null,

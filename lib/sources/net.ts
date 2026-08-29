@@ -22,6 +22,18 @@ import path from "node:path";
 export const USER_AGENT =
   "astore/1.0 (+https://github.com/tjelite1986/appstore)";
 
+/**
+ * The other one, for hosts that answer a named client with a 403.
+ *
+ * GitHub and F-Droid are APIs and are happy to be told who is calling. A mod
+ * mirror behind Cloudflare is not: it serves a challenge page to anything that
+ * does not look like a browser, and a challenge page is a 200 with HTML in it.
+ * Used only where the alternative is not being able to read the page at all.
+ */
+export const BROWSER_USER_AGENT =
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) " +
+  "Chrome/126.0.0.0 Safari/537.36";
+
 const IMAGE_TIMEOUT_MS = 15_000;
 // A store listing image is a few hundred KB. Anything past this is not one,
 // and the library is not the place to find out what it is instead.

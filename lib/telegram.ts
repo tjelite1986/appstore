@@ -27,6 +27,7 @@ import { createHash } from "node:crypto";
 import { STORE_DIRS, STORE_ROOT } from "./storage";
 import { runImportScan, type ImportSummary } from "./import";
 import { readApkInfo } from "./apk-manifest";
+import { BROWSER_USER_AGENT } from "./sources/net";
 
 const DROP_DIR = path.join(STORE_ROOT, STORE_DIRS.import);
 const STATE_FILE = path.join(STORE_ROOT, STORE_DIRS.state, "telegram.json");
@@ -43,10 +44,6 @@ const UNSAFE_NAME = new RegExp("[/\\\\]|[\\u0000-\\u001f]", "g");
  * download, and it has to prove what it is, because a landing page behind a
  * download button answers 200 just as happily as the file does.
  */
-/** A bare Node fetch is the first thing a WAF turns away. */
-const LINK_UA =
-  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) " +
-  "Chrome/126.0.0.0 Safari/537.36";
 /** Telegram's own domains are navigation, never a download. */
 const TELEGRAM_HOST = /(^|\.)(t\.me|telegram\.(me|org|dog))$/i;
 /** Links followed per message. A channel post is not a link farm. */
@@ -598,7 +595,7 @@ async function run(): Promise<void> {
     try {
       const res = await fetch(url, {
         redirect: "follow",
-        headers: { "user-agent": LINK_UA, accept: "*/*" },
+        headers: { "user-agent": BROWSER_USER_AGENT, accept: "*/*" },
         signal: ctl.signal,
       });
       if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`.trim());
