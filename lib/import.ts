@@ -26,9 +26,11 @@ import { promises as fs, type Dirent } from "node:fs";
 import path from "node:path";
 import { STORE_DIRS, STORE_ROOT } from "./storage";
 import {
+  ADULT_CATEGORY,
   compareVersions,
   getCatalog,
   invalidateCatalog,
+  type Category,
   type StoreApp,
 } from "./store";
 import { readApkInfo } from "./apk-manifest";
@@ -59,6 +61,31 @@ const APK_EXT = /\.(apk|xapk|apks|apkm)$/i;
 async function realApps(): Promise<StoreApp[]> {
   const { apps, placeholder } = await getCatalog();
   return placeholder ? [] : apps;
+}
+
+/**
+ * The category a new listing for an already-known package should start in.
+ *
+ * A second signer of the same app is a second listing, not a second app: the
+ * store cannot offer it as an update, so `create-new` gives it its own slug.
+ * Seeding that slug with only a name left it in "Other" — which for an adult
+ * app means outside the gate, since `withoutAdults` filters on the category
+ * alone. The shelf is an opinion the sibling already carries, so inherit it.
+ *
+ * Where siblings disagree, Adults wins. Being wrong towards the gate costs a
+ * listing that needs re-filing by hand; being wrong away from it publishes an
+ * adult app to a signed-out visitor.
+ */
+async function categoryForNewSibling(
+  packageName: string | null | undefined
+): Promise<Category | null> {
+  if (!packageName) return null;
+  const siblings = (await realApps()).filter(
+    (a) => a.packageName === packageName
+  );
+  if (!siblings.length) return null;
+  if (siblings.some((a) => a.category === ADULT_CATEGORY)) return ADULT_CATEGORY;
+  return siblings[0].category;
 }
 
 /* --------------------------------------------------------- filename parsing */
@@ -585,9 +612,11 @@ export async function decideImport(
   if (action === "create-new") {
     const name = (item.parsedName || item.originalName.replace(APK_EXT, "")).trim();
     slug = await uniqueSlug(name);
+    const category = await categoryForNewSibling(item.packageName);
     await writeMeta(slug, {
       name,
       ...(item.packageName ? { packageName: item.packageName } : {}),
+      ...(category ? { category } : {}),
     });
     invalidateCatalog();
   }
