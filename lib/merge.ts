@@ -120,6 +120,8 @@ export type MergeResult = MergePlan & {
   archived: string[];
   /** Where the source's leftovers went, relative to the store root. */
   archive: string;
+  /** Listings whose `family` or `requires` named the source and now name the target. */
+  repointed: string[];
 };
 
 /* ------------------------------------------------------------------- disk */
@@ -473,11 +475,48 @@ export async function mergeApps(
     await move(metaFile, await freePath(path.join(archiveDir, "meta.json"), ".json"));
   }
 
+  const repointed = await repointSlug(from, into);
+
   followFacts(facts);
   moveUserRows(from, into);
   invalidateCatalog();
 
-  return { ...plan, moved, archived, archive: archiveRel };
+  return { ...plan, moved, archived, archive: archiveRel, repointed };
+}
+
+/**
+ * Every other listing that named the source by slug now names the target.
+ *
+ * `family` and `requires` are written by hand and point at slugs. Archiving
+ * the source's meta file leaves those pointers dangling, and the catalog's
+ * answer to a dangling one is to drop it: a family whose head was merged
+ * away explodes into one card per member, and a companion whose host was
+ * merged away walks back onto the shelf as an ordinary app. So they follow
+ * the merge — including the target's own file, which can end up naming
+ * itself (a head merged into one of its members makes that member the head,
+ * which is what `family === slug` means) or requiring itself (dropped).
+ */
+async function repointSlug(from: string, into: string): Promise<string[]> {
+  const dir = path.join(STORE_ROOT, STORE_DIRS.meta);
+  const names = await fs.readdir(dir).catch(() => [] as string[]);
+  const touched: string[] = [];
+  for (const name of names) {
+    if (!name.endsWith(".json")) continue;
+    const slug = path.basename(name, ".json");
+    if (slug === from) continue;
+    const meta = await readMetaRaw(slug);
+    const patch: Record<string, unknown> = {};
+    if (meta.family === from) patch.family = into;
+    if (Array.isArray(meta.requires) && meta.requires.includes(from)) {
+      const requires = [...new Set(meta.requires.map((h) => (h === from ? into : h)))]
+        .filter((h) => h !== slug);
+      patch.requires = requires;
+    }
+    if (!Object.keys(patch).length) continue;
+    await writeMeta(slug, patch);
+    touched.push(slug);
+  }
+  return touched;
 }
 
 /**

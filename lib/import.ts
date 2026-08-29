@@ -22,6 +22,7 @@
  * signing certificate as a tiebreak. Anything that does not resolve to exactly
  * one app is parked rather than guessed at.
  */
+import { randomBytes } from "node:crypto";
 import { promises as fs, type Dirent } from "node:fs";
 import path from "node:path";
 import { STORE_DIRS, STORE_ROOT } from "./storage";
@@ -324,18 +325,69 @@ export async function readMetaRaw(slug: string): Promise<Record<string, unknown>
   }
 }
 
+// One writer per listing at a time. writeMeta is read-merge-write, and it has
+// a dozen callers including the timers, so two patches landing together used
+// to be a lost update — the second read the file before the first had written
+// it. A chain per slug serialises them inside this process; a failed write
+// does not block the next one.
+const metaWrites = new Map<string, Promise<void>>();
+
 export async function writeMeta(
+  slug: string,
+  patch: Record<string, unknown>
+): Promise<void> {
+  const previous = metaWrites.get(slug) ?? Promise.resolve();
+  const run = previous.catch(() => undefined).then(() => writeMetaNow(slug, patch));
+  metaWrites.set(slug, run);
+  try {
+    await run;
+  } finally {
+    if (metaWrites.get(slug) === run) metaWrites.delete(slug);
+  }
+}
+
+async function writeMetaNow(
   slug: string,
   patch: Record<string, unknown>
 ): Promise<void> {
   const dir = path.join(STORE_ROOT, STORE_DIRS.meta);
   await ensureDir(dir);
-  const merged = { ...(await readMetaRaw(slug)), ...patch };
-  await fs.writeFile(
-    path.join(dir, `${slug}.json`),
-    JSON.stringify(merged, null, 2) + "\n",
-    "utf8"
-  );
+  const file = path.join(dir, `${slug}.json`);
+
+  // Not readMetaRaw: that one answers {} for a file it cannot parse, which is
+  // the right thing for a reader and the wrong thing here — merging a patch
+  // into {} and writing it back turns one corrupt file into a listing with
+  // three fields and no history. A missing file is an empty listing; a broken
+  // one is an error for a person.
+  let current: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(await fs.readFile(file, "utf8"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error(`${slug}.json is not a JSON object`);
+    }
+    current = parsed as Record<string, unknown>;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw new Error(
+        `${slug}.json could not be read, refusing to overwrite it: ${(err as Error).message}`
+      );
+    }
+  }
+
+  // Temp file beside the target, then rename: a reader — the catalog, the
+  // hourly backup, a build — sees the old file whole or the new one whole,
+  // never a truncated one that parses as "Other" category. The name carries
+  // the pid and a nonce so two processes writing the same slug do not share a
+  // temp file and ENOENT each other.
+  const tmp = `${file}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+  const merged = { ...current, ...patch };
+  await fs.writeFile(tmp, JSON.stringify(merged, null, 2) + "\n", "utf8");
+  try {
+    await fs.rename(tmp, file);
+  } catch (err) {
+    await fs.unlink(tmp).catch(() => undefined);
+    throw err;
+  }
 }
 
 /** "CCleaner Pro" -> "ccleaner-pro". */
@@ -464,7 +516,7 @@ export async function attachApk(
   // "Newest" is a question about the folder, not about a row: compare the new
   // version against the ones already on disk.
   const previous = app?.versions.map((v) => v.version) ?? [];
-  const promoted = previous.every((v) => compareVersions(info.version, v) <= 0);
+  const promoted = previous.every((v) => compareVersions(version, v) <= 0);
 
   return {
     ok: true,
@@ -806,7 +858,13 @@ async function scan(): Promise<ImportSummary> {
       continue;
     }
 
-    const { fields, version, packageName } = await describeApk(abs, entry.name);
+    const { fields, version: rawVersion, packageName } = await describeApk(abs, entry.name);
+    // The shelf's name for a version is the directory attachApk writes, and
+    // that is the sanitised string — so the duplicate check below has to ask
+    // for that name too. Asking for the raw one let "1.2 (beta)" miss the
+    // "1.2_beta_" already served, attach as new, and displace the served
+    // file as if it were a re-upload of a different build.
+    const version = sanitizeSegment(rawVersion);
     const match = matchApps(fields.parsedName ?? "", packageName, fields.signer, apps);
 
     if (!match.auto) {
