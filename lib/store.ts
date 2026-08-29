@@ -388,7 +388,14 @@ async function readVersions(slug: string): Promise<AppVersion[]> {
         bytes: st.size,
         size: formatBytes(st.size),
         added: new Date(st.mtimeMs).toISOString(),
-        href: `/api/download/${encodeURIComponent(slug)}?v=${encodeURIComponent(version)}`,
+        // Through withBasePath, because this ends up in a plain `<a href>`.
+        // Next rewrites `<Link>` and `next/image` for a mount prefix and
+        // nothing else, so an app-absolute path written here lands on the
+        // host's root — which, where the store is mounted as a section of a
+        // larger site, is a different application entirely.
+        href: withBasePath(
+          `/api/download/${encodeURIComponent(slug)}?v=${encodeURIComponent(version)}`
+        ),
       });
     } catch {
       /* vanished */
