@@ -24,7 +24,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { GitMerge, X } from "lucide-react";
-import { adminHeaders, readAdminToken } from "@/lib/admin-token";
+import { adminCall } from "@/lib/admin-call";
+import { readAdminToken } from "@/lib/admin-token";
 import { buttonClass, CARD, MUTED } from "@/components/primitives";
 import { cn } from "@/lib/utils";
 import { withBasePath } from "@/lib/base-path";
@@ -72,23 +73,13 @@ export default function MergeApp({
   }, [from, into]);
 
   const call = useCallback(
-    async (body: unknown) => {
-      const res = await fetch(withBasePath("/api/apps/merge"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...adminHeaders(token) },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.status === 401 || res.status === 403) {
-        throw new Error(
-          data.error === "This account is not a store admin"
-            ? data.error
-            : "Sign in to elite-v2 as an admin, or unlock Manage"
-        );
-      }
-      if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
-      return data;
-    },
+    (body: unknown) =>
+      adminCall(
+        "/api/apps/merge",
+        { method: "POST", body: JSON.stringify(body) },
+        token,
+        { hint: "Sign in to elite-v2 as an admin, or unlock Manage" }
+      ),
     [token]
   );
 

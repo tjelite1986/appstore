@@ -8,9 +8,6 @@ export type Row = {
   value?: string;
   Icon?: LucideIcon;
   href?: string;
-  /** Renders a switch instead of a chevron. Cosmetic in this build. */
-  toggle?: boolean;
-  on?: boolean;
 };
 
 /** A settings-style card of labelled rows. */
@@ -42,21 +39,7 @@ export default function RowCard({
                   {row.value}
                 </span>
               ) : null}
-              {row.toggle ? (
-                <span
-                  className={cn(
-                    "flex h-5 w-9 shrink-0 items-center rounded-full px-0.5",
-                    row.on ? "bg-[var(--accent)]" : "bg-[var(--card-2)]"
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "h-4 w-4 rounded-full bg-white transition",
-                      row.on && "translate-x-4"
-                    )}
-                  />
-                </span>
-              ) : row.href ? (
+              {row.href ? (
                 <ChevronRight size={15} className="shrink-0 opacity-40" />
               ) : null}
             </>

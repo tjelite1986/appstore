@@ -15,7 +15,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Link2, Pencil, Plus, Sparkles, Trash2, X } from "lucide-react";
-import { adminHeaders, readAdminToken } from "@/lib/admin-token";
+import { adminCall } from "@/lib/admin-call";
+import { readAdminToken } from "@/lib/admin-token";
 import {
   buttonClass,
   CARD,
@@ -23,7 +24,6 @@ import {
   thumbBackground,
 } from "@/components/primitives";
 import { cn } from "@/lib/utils";
-import { withBasePath } from "@/lib/base-path";
 
 const CATEGORIES = [
   "Editor",
@@ -130,26 +130,10 @@ export default function EditApp({ app }: { app: EditableApp }) {
   // the file — reseeding from it stops the form from showing a value the
   // library does not hold.
   const call = useCallback(
-    async (path: string, init?: RequestInit) => {
-      const json = init?.body && typeof init.body === "string";
-      const res = await fetch(withBasePath(path), {
-        ...init,
-        headers: {
-          ...(json ? { "Content-Type": "application/json" } : {}),
-          ...adminHeaders(token),
-        },
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.status === 401 || res.status === 403) {
-        throw new Error(
-          data.error === "This account is not a store admin"
-            ? data.error
-            : "Sign in to elite-v2 as an admin, or unlock Manage"
-        );
-      }
-      if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
-      return data;
-    },
+    (path: string, init?: RequestInit) =>
+      adminCall(path, init, token, {
+        hint: "Sign in to elite-v2 as an admin, or unlock Manage",
+      }),
     [token]
   );
 

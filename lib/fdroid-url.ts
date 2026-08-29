@@ -19,3 +19,16 @@ export function repoBaseUrl(derivedOrigin: string): string {
   if (pinned) return pinned.replace(/\/+$/, "");
   return `${derivedOrigin}${BASE_PATH}`;
 }
+
+/**
+ * The origin a request arrived on, as the client saw it.
+ *
+ * Behind Traefik the URL Next parsed names the container; the forwarded
+ * headers name the host the phone actually asked. The first value of each is
+ * the edge's — a proxy appends, it does not prepend.
+ */
+export function publicOrigin(req: Request, url: URL): string {
+  const proto = req.headers.get("x-forwarded-proto")?.split(",")[0].trim();
+  const host = req.headers.get("x-forwarded-host")?.split(",")[0].trim();
+  return `${proto || url.protocol.replace(":", "")}://${host || url.host}`;
+}

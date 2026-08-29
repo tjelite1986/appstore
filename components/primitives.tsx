@@ -101,17 +101,6 @@ export function SectionTitle({
   );
 }
 
-/** Horizontal padding matching the theme density. */
-export function Pad({
-  children,
-  className,
-}: {
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return <div className={cn("px-[var(--pad)]", className)}>{children}</div>;
-}
-
 export type ButtonVariant = "primary" | "secondary" | "ghost";
 export type ButtonSize = "sm" | "md";
 

@@ -1,5 +1,4 @@
 import { Screen, ScreenTitle } from "@/components/screen";
-import ChipRow from "@/components/chip-row";
 import CoverShelf from "@/components/cover-shelf";
 import AppGrid from "@/components/app-grid";
 import { currentUserId } from "@/lib/current-user";
@@ -16,9 +15,6 @@ export default async function GamesPage() {
   return (
     <Screen>
       <ScreenTitle title="Games" />
-      <ChipRow
-        items={["For you", "Top", "Other", "Kids", "Premium", "Categories"]}
-      />
       {games.length > 0 && (
         <CoverShelf
           title="Popular this week"

@@ -1,7 +1,6 @@
 import Form from "next/form";
 import { Search } from "lucide-react";
 import { Screen } from "@/components/screen";
-import ChipRow from "@/components/chip-row";
 import AppGrid from "@/components/app-grid";
 import { MUTED } from "@/components/primitives";
 import { cn } from "@/lib/utils";
@@ -57,9 +56,6 @@ export default async function SearchPage({
           />
         </div>
       </Form>
-      <ChipRow
-        items={["All", "Apps", "Games", "Editor", "Media", "Communication"]}
-      />
       {query ? (
         <AppGrid
           title={`${results.length} ${results.length === 1 ? "result" : "results"} for "${query}"`}

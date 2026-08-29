@@ -6,7 +6,8 @@ import Link from "next/link";
 import { Check, Download, Plus, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { buttonClass } from "@/components/primitives";
-import { adminHeaders, readAdminToken } from "@/lib/admin-token";
+import { adminCall } from "@/lib/admin-call";
+import { readAdminToken } from "@/lib/admin-token";
 import { detectSource } from "@/lib/sources/detect";
 import type { PlayAddResult, PlayHit } from "@/lib/sources/play";
 import type { GithubAddResult } from "@/lib/sources/github";
@@ -90,25 +91,10 @@ export default function AddApp() {
   useEffect(() => setToken(readAdminToken()), []);
 
   const call = useCallback(
-    async (path: string, init?: RequestInit) => {
-      const res = await fetch(withBasePath(path), {
-        ...init,
-        headers: {
-          ...(init?.body ? { "Content-Type": "application/json" } : {}),
-          ...adminHeaders(token),
-        },
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.status === 401 || res.status === 403) {
-        throw new Error(
-          data.error === "This account is not a store admin"
-            ? data.error
-            : "Sign in to elite-v2 as an admin, or unlock the panel below"
-        );
-      }
-      if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
-      return data;
-    },
+    (path: string, init?: RequestInit) =>
+      adminCall(path, init, token, {
+        hint: "Sign in to elite-v2 as an admin, or unlock the panel below",
+      }),
     [token]
   );
 

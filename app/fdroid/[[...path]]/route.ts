@@ -49,7 +49,7 @@ import { userForRepoToken } from "@/lib/repo-token";
 import { contentTypeFor, fileResponse, resolveInStore } from "@/lib/serve";
 import { STORE_DIRS } from "@/lib/storage";
 import { adultsAllowed, catalogFor } from "@/lib/user-state";
-import { repoBaseUrl } from "@/lib/fdroid-url";
+import { publicOrigin, repoBaseUrl } from "@/lib/fdroid-url";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -61,20 +61,6 @@ function notFound(): NextResponse {
   return new NextResponse("Not found", { status: 404 });
 }
 
-/**
- * The origin a client outside the container sees.
- *
- * Next reconstructs `req.url` from the Host header, which behind the proxy is
- * right about the host and wrong about the scheme. Only the `<repo url>`
- * attribute is written from this — Obtainium builds its own URLs off the one
- * it fetched — so a proxy that sets no forwarded headers still gets a working
- * index, just one that names itself over http.
- */
-function publicOrigin(req: Request, url: URL): string {
-  const proto = req.headers.get("x-forwarded-proto")?.split(",")[0].trim();
-  const host = req.headers.get("x-forwarded-host")?.split(",")[0].trim();
-  return `${proto || url.protocol.replace(":", "")}://${host || url.host}`;
-}
 
 /**
  * The request split into "who" and "what".

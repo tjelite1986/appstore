@@ -13,8 +13,8 @@ import type { ImportSummary, ReviewItem } from "@/lib/import";
 import type { PlayListing } from "@/lib/sources/play";
 import type { ApkmbListing } from "@/lib/sources/apkmb";
 import type { TelegramCandidate, TelegramRun } from "@/lib/telegram";
-import { ADMIN_TOKEN_KEY, adminHeaders } from "@/lib/admin-token";
-import { withBasePath } from "@/lib/base-path";
+import { adminCall } from "@/lib/admin-call";
+import { ADMIN_TOKEN_KEY } from "@/lib/admin-token";
 
 /**
  * Everything on Manage that writes to the library: the Telegram feed, the
@@ -138,37 +138,30 @@ export default function ImportPanel({ storePath, waiting, apps }: Props) {
 
   /** One place to turn a response into either data or a readable message. */
   const call = useCallback(
-    async (path: string, init?: RequestInit) => {
-      const res = await fetch(withBasePath(path), {
-        ...init,
-        headers: {
-          ...(init?.body ? { "Content-Type": "application/json" } : {}),
-          // Omitted when there is none: the session cookie the browser sends
-          // on its own is the normal way in, and an empty header would only
-          // ever be a failed guess at the shared token.
-          ...adminHeaders(token),
+    (path: string, init?: RequestInit) =>
+      adminCall(path, init, token, {
+        // A refused signer is an offer to attach anyway, not a failure.
+        accept: [409],
+        hint: token
+          ? "That token was not accepted"
+          : "Sign in to elite-v2 as an admin, or use a token",
+        onRefused: (status) => {
+          // A 401 means the token, if any, is wrong: forget it. A 403 is a
+          // session the store knows but will not let in — not an admin, or a
+          // cross-origin write — and no retry as this account changes that.
+          // Either way the panel locks and says why, rather than waiting for
+          // a load that is never going to succeed.
+          if (status === 401) {
+            setToken("");
+            try {
+              window.localStorage.removeItem(ADMIN_TOKEN_KEY);
+            } catch {
+              /* ignore */
+            }
+          }
+          setLocked(true);
         },
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.status === 401) {
-        setToken("");
-        setLocked(true);
-        try {
-          window.localStorage.removeItem(ADMIN_TOKEN_KEY);
-        } catch {
-          /* ignore */
-        }
-        throw new Error(
-          token
-            ? "That token was not accepted"
-            : "Sign in to elite-v2 as an admin, or use a token"
-        );
-      }
-      if (!res.ok && res.status !== 409) {
-        throw new Error(data.error || `Request failed (${res.status})`);
-      }
-      return data;
-    },
+      }),
     [token]
   );
 
@@ -343,9 +336,16 @@ export default function ImportPanel({ storePath, waiting, apps }: Props) {
   }
 
   if (locked === null) {
+    // The first load has not answered — or answered with something other
+    // than a verdict on access (the app down, no admin credential configured),
+    // which is worth reading rather than waiting behind.
     return (
       <div className={cn(CARD_CLS, "p-3.5")}>
-        <p className={cn("text-sm", MUTED_CLS)}>Checking your access…</p>
+        {error ? (
+          <p className="text-xs text-[color:var(--danger,#f87171)]">{error}</p>
+        ) : (
+          <p className={cn("text-sm", MUTED_CLS)}>Checking your access…</p>
+        )}
       </div>
     );
   }
@@ -549,7 +549,10 @@ function TelegramCard({
             Last run {new Date(when).toLocaleString("sv-SE")} —{" "}
             {status.run.downloaded} file(s)
             {status.run.error && (
-              <span className="text-red-400"> — failed: {status.run.error}</span>
+              <span className="text-[color:var(--danger,#f87171)]">
+                {" "}
+                — failed: {status.run.error}
+              </span>
             )}
           </span>
         )}
@@ -896,8 +899,17 @@ function ReviewCard({
   ) => void;
   onLookup: (packageId: string) => Promise<Candidate>;
 }) {
+  // The scan matched against the whole catalog; this card draws the gated
+  // list (Manage hides the 18+ shelf until the gate is opened). A suggestion
+  // the person cannot see is not offered, and the preselection is made from
+  // what is offered — a `<select>` whose value has no option renders blank
+  // while still submitting, and would attach the file to an app the person
+  // was never shown. This card approves what it draws.
+  const offered = (slug: string | null | undefined) =>
+    !!slug && apps.some((a) => a.slug === slug);
+  const suggestions = item.suggestions.filter((s) => offered(s.slug));
   const [target, setTarget] = useState(
-    item.matchedSlug ?? item.suggestions[0]?.slug ?? ""
+    offered(item.matchedSlug) ? item.matchedSlug! : (suggestions[0]?.slug ?? "")
   );
   const [candidate, setCandidate] = useState<Candidate | null>(null);
   const [looking, setLooking] = useState(false);
@@ -944,13 +956,13 @@ function ReviewCard({
         <option value="">Attach to…</option>
         {/* Suggestions first and named as such — the scan's own ranking is
             worth more than alphabetical order when the list is long. */}
-        {item.suggestions.map((s) => (
+        {suggestions.map((s) => (
           <option key={`s-${s.slug}`} value={s.slug}>
             {s.name} — {s.why}
           </option>
         ))}
         {apps
-          .filter((a) => !item.suggestions.some((s) => s.slug === a.slug))
+          .filter((a) => !suggestions.some((s) => s.slug === a.slug))
           .map((a) => (
             <option key={a.slug} value={a.slug}>
               {a.name}

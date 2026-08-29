@@ -900,10 +900,6 @@ export async function findApp(slug: string): Promise<StoreApp | undefined> {
   return (await getApps()).find((a) => a.slug === slug);
 }
 
-export async function byCategory(category: Category): Promise<StoreApp[]> {
-  return (await getApps()).filter((a) => a.category === category);
-}
-
 /**
  * The five tiles the sketch draws, plus "Other" only when something is in it —
  * an imported APK with no category lands there and needs somewhere to be found.

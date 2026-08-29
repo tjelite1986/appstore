@@ -6,7 +6,7 @@
  * button on the opposite of what it shows.
  */
 import { requireUser } from "@/lib/admin";
-import { isKnownSlug, setSaved } from "@/lib/user-state";
+import { appFor, setSaved } from "@/lib/user-state";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +28,10 @@ export async function POST(req: Request): Promise<Response> {
 
   // Unsaving is allowed for any slug — an app removed from the library leaves
   // rows behind, and refusing to delete them would strand them forever.
-  if (body.saved && !(await isKnownSlug(body.slug))) {
+  // Saving goes through `appFor`, the same gate as installing and
+  // downloading: an app behind the 18+ gate is "no such app" to an account
+  // that has not opened it, and must not be keepable by slug alone.
+  if (body.saved && !(await appFor(gate.user.id, body.slug))) {
     return Response.json({ error: "No such app" }, { status: 404 });
   }
 

@@ -23,18 +23,12 @@ import { forgetApkFacts } from "@/lib/apk-facts";
 import { forgetApkAbis } from "@/lib/apk-abi";
 import { buildIndexV1 } from "@/lib/fdroid-index-v1";
 import { getCatalog, withoutAdults } from "@/lib/store";
-import { repoBaseUrl } from "@/lib/fdroid-url";
+import { publicOrigin, repoBaseUrl } from "@/lib/fdroid-url";
 
 export const dynamic = "force-dynamic";
 // A first build hashes the whole shelf; after that it is a stat per file.
 export const maxDuration = 3600;
 
-/** Same reasoning as the repository route: the proxy knows the real scheme. */
-function publicOrigin(req: Request, url: URL): string {
-  const proto = req.headers.get("x-forwarded-proto")?.split(",")[0].trim();
-  const host = req.headers.get("x-forwarded-host")?.split(",")[0].trim();
-  return `${proto || url.protocol.replace(":", "")}://${host || url.host}`;
-}
 
 export async function GET(req: Request): Promise<Response> {
   const refusal = await requireAdmin(req);

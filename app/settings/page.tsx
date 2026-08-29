@@ -1,13 +1,10 @@
 import {
-  Bell,
   Bookmark,
-  Download,
   HardDrive,
   Info,
   Palette,
   PackageCheck,
   UserRound,
-  Wifi,
 } from "lucide-react";
 import { Screen, ScreenTitle } from "@/components/screen";
 import RowCard from "@/components/rows";
@@ -79,15 +76,6 @@ export default async function SettingsPage() {
           { label: "Theme", value: "Dark", Icon: Palette, href: "/settings" },
           { label: "Accent", value: "Blue", Icon: Palette, href: "/settings" },
           { label: "Background", value: "Plum", Icon: Palette, href: "/settings" },
-        ]}
-      />
-
-      <RowCard
-        title="Downloads"
-        rows={[
-          { label: "Auto-update apps", Icon: Download, toggle: true, on: true },
-          { label: "Wi-Fi only", Icon: Wifi, toggle: true, on: true },
-          { label: "Notify about updates", Icon: Bell, toggle: true, on: false },
         ]}
       />
 

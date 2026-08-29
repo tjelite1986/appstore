@@ -18,7 +18,6 @@ import {
   compareVersions,
   findApp,
   getApps,
-  getCatalog,
   onlyHeads,
   withoutCompanions,
   installed as placeholderInstalled,
@@ -247,15 +246,3 @@ export function stateFor(
     .get(userId, slug) as { version: string } | undefined;
   return { saved: !!saved, installedVersion: row?.version ?? null };
 }
-
-/**
- * Whether a slug is a real app. The routes take a slug from the browser and
- * write it into a primary key; without this, a typo becomes a permanent row
- * for an app that does not exist and every later read has to skip it.
- */
-export async function isKnownSlug(slug: string): Promise<boolean> {
-  const { apps, placeholder } = await getCatalog();
-  return !placeholder && apps.some((a) => a.slug === slug);
-}
-
-export { EMPTY as EMPTY_STATE };

@@ -1,5 +1,4 @@
 import { Screen } from "@/components/screen";
-import ChipRow from "@/components/chip-row";
 import CoverShelf from "@/components/cover-shelf";
 import Carousel from "@/components/carousel";
 import AppRows from "@/components/app-rows";
@@ -43,8 +42,6 @@ export default async function HomePage() {
 
   return (
     <Screen>
-      <ChipRow items={["For you", "New", "Kids", "Top"]} />
-
       {apps.length === 0 && (
         <p className={cn("px-[var(--pad)] py-10 text-center text-sm", MUTED)}>
           The library is empty.
