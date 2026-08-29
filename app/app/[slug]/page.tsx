@@ -15,6 +15,7 @@ import {
 import SaveButton from "@/components/save-button";
 import InstalledControl from "@/components/installed-control";
 import EditApp from "@/components/edit-app";
+import MergeApp from "@/components/merge-app";
 import ShareApp from "@/components/share-app";
 import { storedText } from "@/lib/edit";
 import { appFor, catalogFor } from "@/lib/user-state";
@@ -132,9 +133,25 @@ export default async function AppDetailPage({
   const app = await appFor(userId, slug);
   if (!app) notFound();
 
-  const related = (await catalogFor(userId))
+  const visible = await catalogFor(userId);
+  const related = visible
     .filter((a) => a.category === app.category && a.slug !== app.slug)
     .slice(0, 6);
+
+  // The same app on the shelf twice — a second signer of one package id gets
+  // its own slug, so the pair is only ever discoverable through the id they
+  // share. Read off the gated catalog like everything else here: a picker that
+  // offered a listing the person may not open would be a hole in the gate.
+  const siblings = app.packageName
+    ? visible
+        .filter((a) => a.packageName === app.packageName && a.slug !== app.slug)
+        .map((a) => ({
+          slug: a.slug,
+          name: a.name,
+          version: a.version,
+          versions: a.versions.length,
+        }))
+    : [];
 
   const latest = app.versions[0];
   const older = app.versions.slice(1);
@@ -266,6 +283,12 @@ export default async function AppDetailPage({
             screenshots: app.screenshots,
           }}
         />
+      )}
+
+      {/* Only where there is a duplicate to fold in — with no sibling this
+          renders nothing at all. See components/merge-app.tsx. */}
+      {viewer?.role === "admin" && (
+        <MergeApp app={{ slug: app.slug, name: app.name }} siblings={siblings} />
       )}
 
       {/* The three facts a store page is expected to answer above the fold. */}

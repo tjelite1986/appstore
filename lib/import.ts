@@ -38,8 +38,14 @@ import { computeSha256, extractSignerSha256, verifyApk } from "./apk-verify";
 
 const IMPORT_DIR = path.join(STORE_ROOT, STORE_DIRS.import);
 const REVIEW_DIR = path.join(STORE_ROOT, STORE_DIRS.review);
-/** Discarded and displaced files land here rather than being unlinked. */
-const DISCARD_DIR = path.join(STORE_ROOT, STORE_DIRS.import, "_discarded");
+/**
+ * Discarded and displaced files land here rather than being unlinked.
+ *
+ * Exported because a merge displaces the same way an import does — the losing
+ * half of a decision keeps existing — and two answers to "where does it go"
+ * would be two folders to remember.
+ */
+export const DISCARD_DIR = path.join(STORE_ROOT, STORE_DIRS.import, "_discarded");
 
 /**
  * A file touched this recently may still be uploading. A Samba or SFTP drop
