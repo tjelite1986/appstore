@@ -52,7 +52,10 @@ call() {
            -w $'\n%{http_code}' --max-time "$timeout" "$BASE$path") || die "$method $path: curl failed"
   code=${body##*$'\n'}
   body=${body%$'\n'*}
-  [ "$code" = "200" ] || die "$method $path: HTTP $code — $(printf '%s' "$body" | head -c 300)"
+  # A substring, not `printf | head -c`: systemd runs this with SIGPIPE
+  # ignored, so on a body larger than the pipe buffer head closing early makes
+  # printf log "write error: Broken pipe" on top of the real message.
+  [ "$code" = "200" ] || die "$method $path: HTTP $code — ${body:0:300}"
   printf '%s' "$body"
 }
 
