@@ -13,7 +13,7 @@
  */
 import { getApps, invalidateCatalog, type StoreApp } from "@/lib/store";
 import { writeMeta } from "@/lib/import";
-import { alreadyHeld, installFromUrl } from "@/lib/sources/install";
+import { RefusedRelease, alreadyHeld, installFromUrl } from "@/lib/sources/install";
 import { checkGitHub, isLinked, relinkGitHub } from "@/lib/sources/github";
 import { apkUrl, buildToInstall, checkFdroid } from "@/lib/sources/fdroid";
 
@@ -145,6 +145,9 @@ async function checkOne(app: StoreApp, install: boolean): Promise<SourceCheck> {
     if (known) {
       return { ...base, kind: "github", upstream: release.tag, status: "current" };
     }
+    if (release.tag === app.source.refusedTag) {
+      return { ...base, kind: "github", upstream: release.tag, status: "available", detail: REFUSED };
+    }
     if (!install) {
       return { ...base, kind: "github", upstream: release.tag, status: "available" };
     }
@@ -154,7 +157,7 @@ async function checkOne(app: StoreApp, install: boolean): Promise<SourceCheck> {
     // someone who installed from it is not an update — while a linked app is
     // repointed at the new asset.
     if (isLinked(app)) {
-      const linked = await relinkGitHub(app, release);
+      const linked = await refusable(app, release.tag, () => relinkGitHub(app, release));
       return {
         ...base,
         kind: "github",
@@ -164,11 +167,13 @@ async function checkOne(app: StoreApp, install: boolean): Promise<SourceCheck> {
       };
     }
 
-    const installed = await installFromUrl(app.slug, release.asset.url, {
-      fileName: release.asset.name,
-      tag: "github",
-      fallbackVersion: release.tag.replace(/^v/i, ""),
-    });
+    const installed = await refusable(app, release.tag, () =>
+      installFromUrl(app.slug, release.asset.url, {
+        fileName: release.asset.name,
+        tag: "github",
+        fallbackVersion: release.tag.replace(/^v/i, ""),
+      })
+    );
     await rememberRelease(app, { releaseTag: release.tag });
     return {
       ...base,
@@ -195,6 +200,15 @@ async function checkOne(app: StoreApp, install: boolean): Promise<SourceCheck> {
       status: "current",
     };
   }
+  if (String(build.versionCode) === app.source?.refusedTag) {
+    return {
+      ...base,
+      kind: "fdroid",
+      upstream: build.versionName || String(build.versionCode),
+      status: "available",
+      detail: REFUSED,
+    };
+  }
   if (!install) {
     return {
       ...base,
@@ -204,14 +218,12 @@ async function checkOne(app: StoreApp, install: boolean): Promise<SourceCheck> {
     };
   }
 
-  const installed = await installFromUrl(
-    app.slug,
-    apkUrl(fdroid.packageId, build.versionCode),
-    {
+  const installed = await refusable(app, String(build.versionCode), () =>
+    installFromUrl(app.slug, apkUrl(fdroid.packageId, build.versionCode), {
       fileName: `${fdroid.packageId}_${build.versionCode}.apk`,
       tag: "fdroid",
       fallbackVersion: build.versionName || null,
-    }
+    })
   );
   await rememberRelease(app, { releaseTag: String(build.versionCode) });
   return {
@@ -223,6 +235,32 @@ async function checkOne(app: StoreApp, install: boolean): Promise<SourceCheck> {
   };
 }
 
+/** What the check says about a release it will not fetch again. */
+const REFUSED =
+  "signed with a different key than the pin — decide in the review queue; not fetched again until upstream moves on";
+
+/**
+ * Run a fetch, and if the importer refuses the release, remember which one.
+ *
+ * The refusal is rethrown so this run reports it — a person has something to
+ * decide — but the next run finds the tag in `refusedTag` and leaves the
+ * release alone instead of downloading it again to be refused again.
+ */
+async function refusable<T>(
+  app: StoreApp,
+  tag: string,
+  work: () => Promise<T>
+): Promise<T> {
+  try {
+    return await work();
+  } catch (err) {
+    if (err instanceof RefusedRelease) {
+      await rememberRelease(app, { refusedTag: tag });
+    }
+    throw err;
+  }
+}
+
 /**
  * Write back which upstream release this app now holds.
  *
@@ -231,7 +269,7 @@ async function checkOne(app: StoreApp, install: boolean): Promise<SourceCheck> {
  */
 async function rememberRelease(
   app: StoreApp,
-  patch: { releaseTag: string }
+  patch: { releaseTag?: string; refusedTag?: string }
 ): Promise<void> {
   if (!app.source) return;
   await writeMeta(app.slug, { source: { ...app.source, ...patch } });

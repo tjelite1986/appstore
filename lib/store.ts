@@ -107,6 +107,14 @@ export type AppSource = {
   assetName?: string;
   assetBytes?: number;
   assetVersion?: string;
+  /**
+   * The upstream release a check fetched and the importer refused: signed
+   * with a key other than the one this app is pinned to. The file waits in
+   * the review queue, and the check leaves this release alone until upstream
+   * moves past it — without the note it would fetch the same file again on
+   * every run.
+   */
+  refusedTag?: string;
   /** F-Droid: the package id the repository is addressed by. */
   package?: string;
   addedFrom?: string;

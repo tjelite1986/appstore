@@ -494,10 +494,11 @@ export type ReviewItem = {
 
 type ReviewFields = Omit<ReviewItem, "id" | "parkedAt">;
 
+/** Moves the file into the queue and returns its review id. */
 async function parkForReview(
   absPath: string,
   fields: ReviewFields
-): Promise<void> {
+): Promise<string> {
   await ensureDir(REVIEW_DIR);
   const dest = await freeName(REVIEW_DIR, path.basename(absPath));
   await moveFile(absPath, dest);
@@ -507,6 +508,72 @@ async function parkForReview(
     parkedAt: new Date().toISOString(),
   };
   await fs.writeFile(`${dest}.json`, JSON.stringify(item, null, 2) + "\n", "utf8");
+  return item.id;
+}
+
+/**
+ * What the queue records about a file, read off the file itself.
+ *
+ * Shared by the scan and by a source handing over a download it could not
+ * attach: the sidecar has to say the same things about a file whichever way
+ * it arrived, or the queue would show two kinds of entry for one kind of
+ * decision.
+ */
+async function describeApk(
+  abs: string,
+  originalName: string
+): Promise<{ fields: ReviewFields; version: string; packageName: string | null }> {
+  const stat = await fs.stat(abs);
+  const manifest = await readApkInfo(abs);
+  const parsed = parseApkFilename(originalName);
+  const signer = extractSignerSha256(abs);
+  const packageName = manifest.packageName || parsed.packageName;
+  const version =
+    (isPlaceholderVersion(manifest.versionName) ? parsed.version : null) ||
+    manifest.versionName ||
+    parsed.version ||
+    (manifest.versionCode ? `vc${manifest.versionCode}` : null) ||
+    `import-${new Date().toISOString().slice(0, 10)}`;
+  return {
+    version,
+    packageName,
+    fields: {
+      originalName,
+      parsedName: parsed.name || null,
+      parsedVersion: version,
+      packageName,
+      versionCode: manifest.versionCode,
+      signer,
+      fileSize: stat.size,
+      reason: "no_match",
+      matchedSlug: null,
+      suggestions: [],
+    },
+  };
+}
+
+/**
+ * Hand the queue a file the importer refused on an app's behalf.
+ *
+ * A source that downloads a release and gets `signer_mismatch` back has the
+ * same situation a scan has with a drop: the file is real, the app is known,
+ * and only a person can say whether the new key is expected. Deleting the
+ * download and telling the journal to "use the review queue" left the queue
+ * with nothing in it. Returns the review id.
+ */
+export async function parkRefused(
+  absPath: string,
+  opts: { originalName: string; slug: string; appName: string; reason: string }
+): Promise<string> {
+  const { fields } = await describeApk(absPath, opts.originalName);
+  return parkForReview(absPath, {
+    ...fields,
+    reason: opts.reason,
+    matchedSlug: opts.slug,
+    suggestions: [
+      { slug: opts.slug, name: opts.appName, score: 1, why: "the app this source belongs to" },
+    ],
+  });
 }
 
 /**
@@ -724,31 +791,8 @@ async function scan(): Promise<ImportSummary> {
       continue;
     }
 
-    const manifest = await readApkInfo(abs);
-    const parsed = parseApkFilename(entry.name);
-    const signer = extractSignerSha256(abs);
-    const packageName = manifest.packageName || parsed.packageName;
-    const version =
-      (isPlaceholderVersion(manifest.versionName) ? parsed.version : null) ||
-      manifest.versionName ||
-      parsed.version ||
-      (manifest.versionCode ? `vc${manifest.versionCode}` : null) ||
-      `import-${new Date().toISOString().slice(0, 10)}`;
-
-    const fields: ReviewFields = {
-      originalName: entry.name,
-      parsedName: parsed.name || null,
-      parsedVersion: version,
-      packageName,
-      versionCode: manifest.versionCode,
-      signer,
-      fileSize: stat.size,
-      reason: "no_match",
-      matchedSlug: null,
-      suggestions: [],
-    };
-
-    const match = matchApps(parsed.name, packageName, signer, apps);
+    const { fields, version, packageName } = await describeApk(abs, entry.name);
+    const match = matchApps(fields.parsedName ?? "", packageName, fields.signer, apps);
 
     if (!match.auto) {
       await parkForReview(abs, {

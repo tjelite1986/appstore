@@ -16,12 +16,36 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { STORE_DIRS, STORE_ROOT } from "@/lib/storage";
-import { attachApk, isPlaceholderVersion, parseApkFilename } from "@/lib/import";
+import {
+  attachApk,
+  isPlaceholderVersion,
+  parkRefused,
+  parseApkFilename,
+} from "@/lib/import";
 import { readApkInfo } from "@/lib/apk-manifest";
 import { verifyApk } from "@/lib/apk-verify";
 import { downloadFile, looksLikeApk } from "@/lib/sources/net";
 
 const STAGING_DIR = path.join(STORE_ROOT, STORE_DIRS.import, "_sources");
+
+/**
+ * The release is signed with a key other than the one the app is pinned to.
+ *
+ * Its own class so the check can tell "upstream refused" from "the network
+ * failed": the second is worth trying again next run, the first is not until
+ * a person has decided, and fetching 200 MB every six hours to be refused
+ * again is neither.
+ */
+export class RefusedRelease extends Error {
+  constructor(
+    message: string,
+    /** The review id when the file was kept for a decision; null when not. */
+    readonly reviewId: string | null
+  ) {
+    super(message);
+    this.name = "RefusedRelease";
+  }
+}
 
 export type InstalledVersion = {
   version: string;
@@ -77,12 +101,21 @@ export async function installFromUrl(
       // The importer refuses a file signed by a key this app has not seen
       // before. That is the check that stops a repackaged build from taking
       // over an app someone already installed, so a source may not talk its
-      // way past it — the review queue is where a person decides.
-      throw new Error(
-        attached.status === "signer_mismatch"
-          ? "the release is signed with a different key than the version already here — attach it from the review queue if that is expected"
-          : `the importer refused the file (${attached.status})`
-      );
+      // way past it — the review queue is where a person decides. So the
+      // file goes there, out of staging before the cleanup below reaches it.
+      if (attached.status === "signer_mismatch") {
+        const id = await parkRefused(staged, {
+          originalName: path.basename(opts.fileName),
+          slug,
+          appName: attached.appName ?? slug,
+          reason: "signer_mismatch",
+        });
+        throw new RefusedRelease(
+          `signed with a different key than the version already here — held in the review queue as ${id}`,
+          id
+        );
+      }
+      throw new Error(`the importer refused the file (${attached.status})`);
     }
 
     return {
@@ -145,8 +178,12 @@ export async function installLinked(
       pinnedSigner: opts.pinnedSigner ?? null,
     });
     if (verify.status === "signer_mismatch") {
-      throw new Error(
-        "the release is signed with a different key than the one this app is pinned to — add it from the review queue if that is expected"
+      // Nothing to park: a linked app keeps no shelf for the file to wait
+      // on. Dropping it into the queue would offer to mirror a build for an
+      // app that is served by link, which is a different decision.
+      throw new RefusedRelease(
+        "signed with a different key than the one this app is pinned to — re-add the app from the new release if that is expected",
+        null
       );
     }
 
