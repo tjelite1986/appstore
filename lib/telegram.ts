@@ -23,8 +23,10 @@
 import { promises as fs, statfsSync } from "node:fs";
 import path from "node:path";
 import { setMaxListeners } from "node:events";
+import { createHash } from "node:crypto";
 import { STORE_DIRS, STORE_ROOT } from "./storage";
 import { runImportScan, type ImportSummary } from "./import";
+import { readApkInfo } from "./apk-manifest";
 
 const DROP_DIR = path.join(STORE_ROOT, STORE_DIRS.import);
 const STATE_FILE = path.join(STORE_ROOT, STORE_DIRS.state, "telegram.json");
@@ -32,6 +34,25 @@ const STATE_FILE = path.join(STORE_ROOT, STORE_DIRS.state, "telegram.json");
 const APK_EXT = /\.(apk|xapk|apks|apkm)$/i;
 /** Path separators and control characters — nothing else is touched. */
 const UNSAFE_NAME = new RegExp("[/\\\\]|[\\u0000-\\u001f]", "g");
+
+/**
+ * The link path.
+ *
+ * The channel posts APKs two ways: as an attached document, and as a link to a
+ * mirror. Only the first is a Telegram file — the second is an ordinary HTTP
+ * download, and it has to prove what it is, because a landing page behind a
+ * download button answers 200 just as happily as the file does.
+ */
+/** A bare Node fetch is the first thing a WAF turns away. */
+const LINK_UA =
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) " +
+  "Chrome/126.0.0.0 Safari/537.36";
+/** Telegram's own domains are navigation, never a download. */
+const TELEGRAM_HOST = /(^|\.)(t\.me|telegram\.(me|org|dog))$/i;
+/** Links followed per message. A channel post is not a link farm. */
+const MAX_LINKS = 3;
+/** A transfer that has not moved a byte for this long is abandoned. */
+const LINK_IDLE_MS = 60_000;
 
 /** Cross-run download tries per message before it is left alone. */
 const MAX_ATTEMPTS = 3;
@@ -242,6 +263,89 @@ function msgOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/** A verdict, not a failure: these bytes are not an APK, so retrying is pointless. */
+class NotAnApk extends Error {}
+
+/**
+ * Every URL a message offers, in the order Telegram gives them.
+ *
+ * The link is usually not in the visible text: `MessageEntityTextUrl` hides it
+ * behind a clickable label, and a message can carry it only in the web-page
+ * preview. Entity offsets are UTF-16 code units, which is what a JavaScript
+ * string index already is, so they index the text directly.
+ */
+/* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+function messageUrls(message: any): string[] {
+  const text: string = typeof message?.message === "string" ? message.message : "";
+  const found: string[] = [];
+
+  for (const e of message?.entities ?? []) {
+    if (e?.className === "MessageEntityTextUrl" && e.url) found.push(String(e.url));
+    else if (e?.className === "MessageEntityUrl") {
+      found.push(text.slice(e.offset, e.offset + e.length));
+    }
+  }
+  // Forwards and edits reach us with the entities stripped; the text survives.
+  if (!found.length) {
+    for (const m of text.matchAll(/https?:\/\/[^\s<>"']+/gi)) found.push(m[0]);
+  }
+  const preview = message?.media?.webpage?.url;
+  if (preview) found.push(String(preview));
+
+  const out: string[] = [];
+  for (const raw of found) {
+    // Prose punctuation clings to the end of a bare URL.
+    const trimmed = raw.trim().replace(/[)\].,;:!?]+$/, "");
+    let url: URL;
+    try {
+      url = new URL(trimmed);
+    } catch {
+      continue;
+    }
+    if (url.protocol !== "http:" && url.protocol !== "https:") continue;
+    if (TELEGRAM_HOST.test(url.hostname)) continue;
+    if (!out.includes(url.href)) out.push(url.href);
+  }
+  return out;
+}
+
+/**
+ * What to call a fetched file.
+ *
+ * The import parser reads the name for the app's name and version, so the
+ * server's own name is kept whenever it gives one. A name is invented only
+ * when there is nothing to keep — and it must carry an APK extension, because
+ * the importer skips every file that does not.
+ */
+function linkFileName(
+  requested: string,
+  finalUrl: string,
+  disposition: string,
+  info: { packageName: string | null; versionName: string | null }
+): string {
+  const star = /filename\*=\s*(?:UTF-8'')?([^;]+)/i.exec(disposition);
+  const plain = /filename=\s*"?([^";]+)"?/i.exec(disposition);
+  const fallback = (plain?.[1] ?? "").trim().replace(/^"|"$/g, "");
+  let name = fallback;
+  if (star) {
+    try {
+      name = decodeURIComponent(star[1].trim().replace(/^"|"$/g, ""));
+    } catch {
+      name = fallback;
+    }
+  }
+  if (!name) {
+    try {
+      name = decodeURIComponent(path.basename(new URL(finalUrl || requested).pathname));
+    } catch {
+      name = "";
+    }
+  }
+  if (APK_EXT.test(name)) return name;
+  const stem = name.replace(/\.[a-z0-9]{1,5}$/i, "").trim() || info.packageName || "telegram-link";
+  return `${stem}${info.versionName ? `_v${info.versionName}` : ""}.apk`;
+}
+
 // A run outlives the request that started it, so the promise is the lock: a
 // second trigger returns the run in flight instead of racing it.
 let inFlight: Promise<void> | null = null;
@@ -362,6 +466,7 @@ async function run(): Promise<void> {
   );
 
   let downloaded = 0;
+  let linkSeq = 0;
 
   /** The real upload filename, off the document's attributes. */
   /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -453,6 +558,93 @@ async function run(): Promise<void> {
     return dc;
   }
 
+  /** A free name in the drop folder — a repost must not overwrite the first copy. */
+  async function claimName(raw: string, messageId: number): Promise<string> {
+    const fileName = safeName(raw);
+    const taken = await fs
+      .stat(path.join(DROP_DIR, fileName))
+      .then(() => true, () => false);
+    if (!taken) return fileName;
+    const ext = path.extname(fileName);
+    return `${path.basename(fileName, ext)}-tg${messageId}${ext}`;
+  }
+
+  /**
+   * Fetch an APK that was posted as a link.
+   *
+   * None of the MTProto machinery applies here — no data centre, no chunking,
+   * no file reference — but one thing has to replace all of it: the response
+   * must prove it is an APK. `content-type` is the server's claim about itself,
+   * and a login wall or a "click here to download" page answers 200 with HTML,
+   * so the bytes are handed to the same manifest reader the importer uses. No
+   * package name, no file.
+   */
+  async function downloadLink(
+    url: string,
+    messageId: number
+  ): Promise<{ name: string; size: number }> {
+    await fs.mkdir(DROP_DIR, { recursive: true });
+    const tmp = path.join(DROP_DIR, `.link-${messageId}-${linkSeq++}.part`);
+
+    // An idle timer rather than a deadline: a 200 MB file over a slow mirror is
+    // not a hung transfer, but one that has stopped sending is.
+    const ctl = new AbortController();
+    let idle = setTimeout(() => ctl.abort(), LINK_IDLE_MS);
+    const bump = () => {
+      clearTimeout(idle);
+      idle = setTimeout(() => ctl.abort(), LINK_IDLE_MS);
+    };
+
+    try {
+      const res = await fetch(url, {
+        redirect: "follow",
+        headers: { "user-agent": LINK_UA, accept: "*/*" },
+        signal: ctl.signal,
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`.trim());
+      if (!res.body) throw new NotAnApk("empty response");
+
+      const declared = Number(res.headers.get("content-length"));
+      if (Number.isFinite(declared) && declared > cfg.maxBytes) {
+        throw new NotAnApk(`over size cap (${mb(declared)} MB)`);
+      }
+
+      let written = 0;
+      const handle = await fs.open(tmp, "w");
+      try {
+        for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+          bump();
+          written += chunk.byteLength;
+          // The cap again, on the bytes: a server may declare no length at all.
+          if (written > cfg.maxBytes) {
+            throw new NotAnApk(`over size cap (>${mb(cfg.maxBytes)} MB)`);
+          }
+          await handle.write(chunk);
+        }
+      } finally {
+        await handle.close();
+      }
+
+      const info = await readApkInfo(tmp);
+      if (!info.packageName) {
+        const type = res.headers.get("content-type") || "no content-type";
+        throw new NotAnApk(`not an APK (${written} bytes, ${type})`);
+      }
+
+      const fileName = await claimName(
+        linkFileName(url, res.url, res.headers.get("content-disposition") ?? "", info),
+        messageId
+      );
+      await fs.rename(tmp, path.join(DROP_DIR, fileName));
+      return { name: fileName, size: written };
+    } catch (err) {
+      await fs.rm(tmp, { force: true }).catch(() => {});
+      throw err;
+    } finally {
+      clearTimeout(idle);
+    }
+  }
+
   /**
    * Download to a hidden `.part` file, then rename into place.
    *
@@ -465,14 +657,7 @@ async function run(): Promise<void> {
     info: { doc: any; documentId: string; homeDc: number; fileName: string; fileSize: number }
   ): Promise<string> {
     await fs.mkdir(DROP_DIR, { recursive: true });
-    let fileName = safeName(info.fileName);
-    const taken = await fs
-      .stat(path.join(DROP_DIR, fileName))
-      .then(() => true, () => false);
-    if (taken) {
-      const ext = path.extname(fileName);
-      fileName = `${path.basename(fileName, ext)}-tg${message.id}${ext}`;
-    }
+    const fileName = await claimName(info.fileName, message.id);
     const partPath = path.join(DROP_DIR, `.${fileName}.part`);
 
     // Pinned for the whole transfer: every chunk starts at the right data
@@ -534,10 +719,92 @@ async function run(): Promise<void> {
     throw lastError;
   }
 
+  /**
+   * The links in one message, tried in order.
+   *
+   * The ledger dedups on `documentId`, and a link has none — so the URL takes
+   * that slot and becomes the identity. The same mirror posted twice, in one
+   * channel or in two, is fetched once.
+   */
+  async function processLinks(channel: string, message: any): Promise<string> {
+    const urls = messageUrls(message).slice(0, MAX_LINKS);
+    if (!urls.length) return "ignored";
+
+    let handled = false;
+    for (const url of urls) {
+      if (downloaded >= cfg.maxFiles) break;
+
+      const key = `${channel}#${message.id}#${createHash("sha1").update(url).digest("hex").slice(0, 8)}`;
+      const previous = state.ledger[key];
+      // Anything but a failure is a verdict already reached, and a failure that
+      // has spent its tries is one too.
+      if (previous && (previous.status !== "failed" || previous.attempts >= MAX_ATTEMPTS)) {
+        handled = true;
+        continue;
+      }
+
+      const entry: LedgerEntry = {
+        channel,
+        messageId: message.id,
+        documentId: url,
+        fileName: url,
+        fileSize: 0,
+        status: "skipped",
+        note: null,
+        attempts: previous?.attempts ?? 0,
+        at: new Date().toISOString(),
+      };
+
+      const already = Object.values(state.ledger).some(
+        (e) => e.documentId === url && e.status === "downloaded"
+      );
+      if (already) {
+        entry.note = "duplicate link";
+        state.ledger[key] = entry;
+        say(`${key}: ${url} — already downloaded, skipped`);
+        handled = true;
+        continue;
+      }
+
+      // The size is unknown until the response arrives, so this only asks
+      // whether there is room to start at all.
+      if (freeBytes(DROP_DIR) < cfg.minFreeBytes) {
+        say(`${channel}: not enough free disk space — stopping`);
+        return "nospace";
+      }
+
+      entry.attempts += 1;
+      try {
+        const got = await downloadLink(url, message.id);
+        entry.status = "downloaded";
+        entry.fileName = got.name;
+        entry.fileSize = got.size;
+        entry.note = got.name;
+        downloaded += 1;
+        say(`${key}: ${got.name} (${mb(got.size)} MB) from ${url} -> import folder`);
+      } catch (err) {
+        entry.status = err instanceof NotAnApk ? "skipped" : "failed";
+        entry.note = msgOf(err).slice(0, 300);
+        say(
+          entry.status === "skipped"
+            ? `${key}: ${url} — ${entry.note}, skipped`
+            : `${key}: ${url} FAILED (try ${entry.attempts}/${MAX_ATTEMPTS}) — ${entry.note}`
+        );
+      }
+      state.ledger[key] = entry;
+      state.run.downloaded = downloaded;
+      await writeState(state);
+      handled = true;
+    }
+    return handled ? "handled" : "ignored";
+  }
+
   /** "handled" | "ignored" | "nospace" */
   async function processMessage(channel: string, message: any): Promise<string> {
     const info = documentInfo(message);
-    if (!info || !APK_EXT.test(info.fileName)) return "ignored";
+    // No attached APK is not the end of it: the same channels post mirrors as
+    // links, and those messages carry no document at all.
+    if (!info || !APK_EXT.test(info.fileName)) return processLinks(channel, message);
 
     const key = `${channel}#${message.id}`;
     const previous = state.ledger[key];
@@ -604,14 +871,19 @@ async function run(): Promise<void> {
 
     // Earlier failures first: the cursor has already moved past them, so
     // nothing but this list would ever pick them up again.
-    const retryIds = Object.values(state.ledger)
-      .filter(
-        (e) =>
-          e.channel === channel && e.status === "failed" && e.attempts < MAX_ATTEMPTS
-      )
-      .sort((a, b) => a.messageId - b.messageId)
-      .slice(0, 20)
-      .map((e) => e.messageId);
+    // Several links in one message get a ledger row each, but there is only one
+    // message to fetch back — hence the Set.
+    const retryIds = [
+      ...new Set(
+        Object.values(state.ledger)
+          .filter(
+            (e) =>
+              e.channel === channel && e.status === "failed" && e.attempts < MAX_ATTEMPTS
+          )
+          .sort((a, b) => a.messageId - b.messageId)
+          .map((e) => e.messageId)
+      ),
+    ].slice(0, 20);
     if (retryIds.length) {
       say(`${channel}: retrying ${retryIds.length} earlier failure(s)`);
       for (const message of await client.getMessages(entity, { ids: retryIds })) {
