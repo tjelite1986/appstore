@@ -17,11 +17,17 @@ import InstalledControl from "@/components/installed-control";
 import EditApp from "@/components/edit-app";
 import MergeApp from "@/components/merge-app";
 import AppFamily from "@/components/app-family";
+import AppCompanions from "@/components/app-companions";
 import ShareApp from "@/components/share-app";
 import { storedText } from "@/lib/edit";
 import { abiShortLabel } from "@/lib/apk-abi";
 import { appFor, catalogFor } from "@/lib/user-state";
-import { familyMembers } from "@/lib/store";
+import {
+  companionsOf,
+  familyMembers,
+  hostsOf,
+  withoutCompanions,
+} from "@/lib/store";
 import type { StoreApp } from "@/lib/store";
 import { withBasePath } from "@/lib/base-path";
 import { requestOrigin } from "@/lib/origin";
@@ -137,7 +143,11 @@ export default async function AppDetailPage({
   if (!app) notFound();
 
   const visible = await catalogFor(userId);
-  const related = visible
+  // A browse row like any other, so it holds no companions: an add-on shown
+  // under "you might also like" is a suggestion nobody can act on without the
+  // app it is an add-on to. The ones that matter here are named outright
+  // below.
+  const related = withoutCompanions(visible)
     .filter((a) => a.category === app.category && a.slug !== app.slug)
     .slice(0, 6);
 
@@ -184,6 +194,23 @@ export default async function AppDetailPage({
       )
       .map((o) => o.name),
   }));
+
+  // Both directions of the companion relation, off the same gated catalog as
+  // everything else here: a section that named a listing behind the 18+ gate
+  // to someone who may not open it would be a hole in the gate.
+  const asCompanion = (m: StoreApp) => ({
+    slug: m.slug,
+    name: m.name,
+    version: m.version,
+    tagline: m.tagline || undefined,
+    icon: m.icon,
+    iconBackground: m.iconBackground,
+    iconFit: m.iconFit,
+    seed: m.seed,
+    href: m.versions[0]?.href ?? m.source?.assetUrl,
+  });
+  const companions = companionsOf(visible, app).map(asCompanion);
+  const hosts = hostsOf(visible, app).map(asCompanion);
 
   const latest = app.versions[0];
   const older = app.versions.slice(1);
@@ -353,6 +380,20 @@ export default async function AppDetailPage({
       {/* Every build of this app the shelf holds, this one marked. Renders
           nothing at all for a listing in no family. */}
       <AppFamily members={family} current={app.slug} familyName={familyName} />
+
+      {/* The add-ons for this app, and — on an add-on's own page — the apps it
+          is an add-on to. Both render nothing for an app in neither role,
+          which is nearly all of them. */}
+      <AppCompanions
+        items={companions}
+        title="Works with"
+        note={`Installs beside ${app.name} and adds to it. Not needed to use the app itself.`}
+      />
+      <AppCompanions
+        items={hosts}
+        title={hosts.length > 1 ? "Made for these apps" : "Made for"}
+        note={`${app.name} is an add-on: it does nothing on its own, and is installed beside the app below.`}
+      />
 
       {/* The three facts a store page is expected to answer above the fold. */}
       <div className="px-[var(--pad)]">

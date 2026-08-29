@@ -188,6 +188,23 @@ export type StoreApp = {
    * shows". Absent for a listing in no family, which is nearly all of them.
    */
   family?: string;
+  /**
+   * The listings this one is a companion to — the host apps it installs
+   * beside and does nothing without.
+   *
+   * A plugin is a real app: its own package id, its own signer, its own
+   * release cadence, so it is a listing like any other rather than a second
+   * file under the host's version. What it is not is a thing to browse for.
+   * Nobody goes looking for microG; they go looking for the YouTube mod that
+   * needs it, and the companion belongs on that page. So a listing with hosts
+   * is kept off the shelf (see `withoutCompanions`) while staying findable by
+   * name in search, exactly like a family member.
+   *
+   * Several hosts on purpose: one microG serves every YouTube mod here. Empty
+   * — not absent — for the listings that are nobody's companion, which is
+   * nearly all of them. Settled against the catalog in `resolvePlugins`.
+   */
+  requires: string[];
   /** Newest first. Empty when the app has meta but no APK yet. */
   versions: AppVersion[];
   /** ISO date the app was first seen. Empty for placeholder rows. */
@@ -197,7 +214,7 @@ export type StoreApp = {
 /** What `lib/catalog.ts` holds — the same app, minus everything disk-derived. */
 export type PlaceholderApp = Omit<
   StoreApp,
-  "screenshots" | "versions" | "added"
+  "screenshots" | "versions" | "added" | "requires"
 >;
 
 /** The category tiles the sketch draws, in its order. */
@@ -263,6 +280,12 @@ type MetaFile = {
    * the shelf. See `family` on StoreApp.
    */
   family?: string;
+  /**
+   * Set by hand: the slug — or slugs — of the host listings this app is a
+   * companion to. See `requires` on StoreApp. A single string is accepted
+   * because that is what a person writes when there is only one host.
+   */
+  requires?: string | string[];
 };
 
 /* ------------------------------------------------------------------ utils */
@@ -563,6 +586,8 @@ async function readFromDisk(): Promise<StoreApp[]> {
         // Unresolved: a slug that names nothing, or points through another
         // member, is settled once for the whole catalog in `resolveFamilies`.
         family: meta?.family?.trim() || undefined,
+        // Likewise unresolved — `resolvePlugins` drops what names nothing.
+        requires: readSlugList(meta?.requires),
         source,
         signingCert: meta?.signingCert,
         // A linked app holds no file, so the newest version and its size are
@@ -594,9 +619,28 @@ async function readFromDisk(): Promise<StoreApp[]> {
     })
   );
 
-  return resolveFamilies(
-    apps.filter((a): a is StoreApp => a !== null)
+  return resolvePlugins(
+    resolveFamilies(apps.filter((a): a is StoreApp => a !== null))
   ).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * One hand-written field, however it was written: `"microg"`, `"a, b"`,
+ * `["a", "b"]`. Order is kept, blanks and repeats are not.
+ */
+function readSlugList(raw: unknown): string[] {
+  const parts = Array.isArray(raw)
+    ? raw
+    : typeof raw === "string"
+      ? raw.split(/[,\s]+/)
+      : [];
+  const out: string[] = [];
+  for (const part of parts) {
+    if (typeof part !== "string") continue;
+    const slug = part.trim();
+    if (slug && !out.includes(slug)) out.push(slug);
+  }
+  return out;
 }
 
 /**
@@ -660,6 +704,86 @@ function resolveFamilies(apps: StoreApp[]): StoreApp[] {
 }
 
 /**
+ * Settle what each meta file's `requires` was pointing at.
+ *
+ * Written by hand like `family`, so it carries the same failure: a slug that
+ * names nothing. The cost is worse here, though — an unresolvable host would
+ * take the listing off the shelf as a companion to an app that does not
+ * exist, leaving it reachable by search alone and nothing to say why. So a
+ * slug that names no listing is dropped and logged, and a listing whose hosts
+ * all vanish goes back to being an ordinary card.
+ *
+ * No chain to follow, unlike a family: a companion names its hosts outright.
+ * A host that is itself somebody's companion is left alone — a plugin for a
+ * plugin is odd but it is not wrong, and nothing here reads through it.
+ */
+function resolvePlugins(apps: StoreApp[]): StoreApp[] {
+  const slugs = new Set(apps.map((a) => a.slug));
+  for (const app of apps) {
+    if (app.requires.length === 0) continue;
+    app.requires = app.requires.filter((host) => {
+      // Its own companion is a listing that would hide itself from the shelf
+      // and offer itself as the reason.
+      if (host === app.slug) {
+        console.error(`[store] ${app.slug}.json: requires names itself`);
+        return false;
+      }
+      if (!slugs.has(host)) {
+        console.error(
+          `[store] ${app.slug}.json: requires "${host}" names no listing`
+        );
+        return false;
+      }
+      return true;
+    });
+  }
+  return apps;
+}
+
+/**
+ * The companions of an app: every listing that names it as a host.
+ *
+ * Sorted by name, and empty for an app nothing is a companion to — so a caller
+ * can render the section on "not empty" alone.
+ */
+export function companionsOf<T extends { slug: string; name: string; requires: string[] }>(
+  apps: T[],
+  app: T
+): T[] {
+  return apps
+    .filter((a) => a.requires.includes(app.slug))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * The hosts of a companion: the apps it installs beside, in the order its meta
+ * file names them. Empty for everything that is not a companion.
+ */
+export function hostsOf<T extends { slug: string; requires: string[] }>(
+  apps: T[],
+  app: T
+): T[] {
+  return app.requires
+    .map((slug) => apps.find((a) => a.slug === slug))
+    .filter((a): a is T => a !== undefined);
+}
+
+/**
+ * The shelf, minus the companions.
+ *
+ * A companion is a real listing with a page, a download and an index entry —
+ * it is browsing it is kept out of, because a shelf that offers microG next to
+ * a photo editor is describing something that is not an app you go and get.
+ * Search still finds it, and its host's page names it, which is where a person
+ * is when the question comes up.
+ */
+export function withoutCompanions<T extends { requires: string[] }>(
+  apps: T[]
+): T[] {
+  return apps.filter((a) => a.requires.length === 0);
+}
+
+/**
  * One card per family: the members that are not the head are left out.
  *
  * The browse screens read through here — home, search, the category pages —
@@ -702,7 +826,10 @@ const CACHE_MS = Number(process.env.STORE_CACHE_MS ?? 10_000);
 let cache: { at: number; value: Catalog } | null = null;
 
 function fromPlaceholder(p: PlaceholderApp): StoreApp {
-  return { ...p, screenshots: [], versions: [], added: "" };
+  // Nothing hand-written is anybody's companion: the placeholder catalog is
+  // there to show a layout, and a listing it hid from the shelf would show the
+  // wrong one.
+  return { ...p, screenshots: [], versions: [], added: "", requires: [] };
 }
 
 /**
@@ -778,7 +905,10 @@ export async function recentlyAdded(
   // be showing the shelf.
   // A browse row like every other: the family shows as its head. What arrived
   // was a member's file, and the head is where a person is sent to choose.
-  const apps = onlyHeads(opts.adults ? all : withoutAdults(all));
+  // A companion's arrival is news about its host, so it is not a row here.
+  const apps = withoutCompanions(
+    onlyHeads(opts.adults ? all : withoutAdults(all))
+  );
   if (placeholder) return apps.slice(0, limit);
   return [...apps]
     .sort((a, b) => (b.added ?? "").localeCompare(a.added ?? ""))

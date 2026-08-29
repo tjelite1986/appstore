@@ -20,6 +20,7 @@ import {
   getApps,
   getCatalog,
   onlyHeads,
+  withoutCompanions,
   installed as placeholderInstalled,
   saved as placeholderSaved,
   updates as placeholderUpdates,
@@ -199,15 +200,17 @@ export async function catalogFor(userId: number | null): Promise<StoreApp[]> {
 }
 
 /**
- * The catalog as the *browse* screens should see it: one card per family.
+ * The catalog as the *browse* screens should see it: one card per family, and
+ * no companions.
  *
  * Saved, installed and updates deliberately do not read through here. A person
  * who saved one variant saved that one — showing them the family's head
  * instead would answer a question they did not ask, and an update waiting on a
- * member is news about the member.
+ * member is news about the member. The same goes for a companion: someone who
+ * installed microG has microG installed, and its update is theirs to see.
  */
 export async function shelfFor(userId: number | null): Promise<StoreApp[]> {
-  return onlyHeads(await catalogFor(userId));
+  return withoutCompanions(onlyHeads(await catalogFor(userId)));
 }
 
 /* ------------------------------------------------------- the screens' lists */

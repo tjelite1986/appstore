@@ -35,6 +35,7 @@ export const EDITABLE_FIELDS = [
   "iconBackground",
   "iconFit",
   "family",
+  "requires",
 ] as const;
 
 export type EditableField = (typeof EDITABLE_FIELDS)[number];
@@ -68,16 +69,20 @@ const MAX_LENGTHS: Record<EditableField, number> = {
   iconBackground: 9,
   iconFit: 8,
   family: 120,
+  // A few slugs and the separators between them. Long enough for the honest
+  // case — one companion, every YouTube mod on the shelf — without becoming a
+  // place to paste prose.
+  requires: 400,
 };
 
 /**
  * The fields a form deals with as text it holds and saves in one go, as
  * opposed to the artwork controls, which write the moment they are touched.
  *
- * `family` is a slug rather than prose, but it belongs here for the same
- * reason `category` does: it is a decision about the listing that a person
- * makes while looking at the rest of the form, and it should be saved with
- * them rather than the instant a select changes.
+ * `family` and `requires` are slugs rather than prose, but they belong here
+ * for the same reason `category` does: they are decisions about the listing
+ * that a person makes while looking at the rest of the form, and they should
+ * be saved with them rather than the instant a select changes.
  */
 export const TEXT_FIELDS = [
   "name",
@@ -86,6 +91,7 @@ export const TEXT_FIELDS = [
   "tagline",
   "description",
   "family",
+  "requires",
 ] as const;
 
 export type TextField = (typeof TEXT_FIELDS)[number];
@@ -106,7 +112,14 @@ export async function storedText(slug: string): Promise<StoredText> {
   const out = {} as StoredText;
   for (const field of TEXT_FIELDS) {
     const value = meta[field];
-    out[field] = typeof value === "string" ? value.trim() : "";
+    // `requires` is the one field the file may hold as a list. The form deals
+    // in the text a person edits, so it arrives here as the same comma-joined
+    // line it will be sent back as.
+    out[field] = Array.isArray(value)
+      ? value.filter((v) => typeof v === "string").join(", ")
+      : typeof value === "string"
+        ? value.trim()
+        : "";
   }
   return out;
 }
@@ -194,6 +207,27 @@ export async function editApp(slug: string, patch: unknown): Promise<void> {
       const head = await findApp(trimmed);
       if (!head) throw new EditError(`${trimmed} is not a listing on this shelf`);
       write.family = head.slug;
+      continue;
+    }
+    // The host listings this app is a companion to. Checked one by one for
+    // the same reason `family` is — a typo here takes the listing off the
+    // shelf and files it under an app that does not exist — and written as a
+    // list, because one companion can serve several hosts.
+    if (field === "requires") {
+      const hosts: string[] = [];
+      for (const part of trimmed.split(/[,\s]+/)) {
+        const want = part.trim();
+        if (!want || hosts.includes(want)) continue;
+        if (want === slug) {
+          throw new EditError(
+            "A listing cannot be its own companion — leave this empty on an app that stands alone"
+          );
+        }
+        const host = await findApp(want);
+        if (!host) throw new EditError(`${want} is not a listing on this shelf`);
+        hosts.push(host.slug);
+      }
+      write.requires = hosts.length > 0 ? hosts : undefined;
       continue;
     }
     if (field === "category" && trimmed) {

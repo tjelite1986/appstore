@@ -54,7 +54,7 @@ type ArtworkFind = {
   looked: string[];
 };
 
-/** The five fields a person types, exactly as the meta file holds them. */
+/** The fields a person types, exactly as the meta file holds them. */
 export type EditText = {
   name: string;
   developer: string;
@@ -62,6 +62,8 @@ export type EditText = {
   tagline: string;
   description: string;
   family: string;
+  /** Host slugs, comma-joined — the file may hold a list, a form holds text. */
+  requires: string;
 };
 
 const TEXT_FIELDS = [
@@ -71,6 +73,7 @@ const TEXT_FIELDS = [
   "tagline",
   "description",
   "family",
+  "requires",
 ] as const;
 
 export type EditableApp = {
@@ -86,8 +89,9 @@ export type EditableApp = {
   /** What the store shows in their place, offered as placeholder text. */
   fallback: { name: string; developer: string; category: string };
   /**
-   * The other listings this one could be filed under, for the family select.
-   * Slug and name, because the file holds the slug and a person reads names.
+   * The other listings this one could be filed under or installed beside, for
+   * the family and companion controls. Slug and name, because the file holds
+   * the slug and a person reads names.
    */
   relatives: { slug: string; name: string }[];
   icon?: string;
@@ -169,6 +173,11 @@ export default function EditApp({ app }: { app: EditableApp }) {
       setBusy(null);
     }
   }
+
+  // The chips read and write the one text field the save already sends.
+  const hosts = form.requires.split(/[,\s]+/).filter(Boolean);
+  const setHosts = (next: string[]) =>
+    setForm((f) => ({ ...f, requires: next.join(", ") }));
 
   const save = () =>
     run("save", async () => {
@@ -336,6 +345,54 @@ export default function EditApp({ app }: { app: EditableApp }) {
               </option>
             ))}
           </select>
+        </label>
+
+        {/* A companion — microG, an Xposed module — is a real app with its own
+            page and its own updates, and no reason to sit on a shelf a person
+            browses: it is chosen from the page of the app that needs it. Say
+            here which apps those are, and this listing moves off the shelf and
+            onto theirs. Search still finds it. */}
+        <label className="block">
+          <span className={cn("mb-1 block text-[11px]", MUTED)}>
+            Companion to — installs beside
+          </span>
+          <select
+            className={FIELD}
+            value=""
+            onChange={(e) => {
+              const slug = e.target.value;
+              if (slug && !hosts.includes(slug)) setHosts([...hosts, slug]);
+            }}
+          >
+            <option value="">
+              {hosts.length === 0 ? "Stands on its own" : "Add another host…"}
+            </option>
+            {app.relatives
+              .filter((r) => !hosts.includes(r.slug))
+              .map((r) => (
+                <option key={r.slug} value={r.slug}>
+                  {r.name} ({r.slug})
+                </option>
+              ))}
+          </select>
+          {hosts.length > 0 && (
+            <span className="mt-1.5 flex flex-wrap gap-1.5">
+              {hosts.map((slug) => (
+                <button
+                  key={slug}
+                  type="button"
+                  onClick={() => setHosts(hosts.filter((h) => h !== slug))}
+                  className="flex items-center gap-1 rounded-full border border-[color:var(--border)] px-2 py-0.5 text-[11px]"
+                >
+                  {/* The name where the catalog knows it, the slug where it
+                      does not — a host that has since been renamed away is a
+                      value worth seeing rather than a blank chip. */}
+                  {app.relatives.find((r) => r.slug === slug)?.name ?? slug}
+                  <X size={11} />
+                </button>
+              ))}
+            </span>
+          )}
         </label>
 
         <Text
