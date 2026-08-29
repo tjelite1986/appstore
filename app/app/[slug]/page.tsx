@@ -1,6 +1,7 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Download, ExternalLink, Share2, Star } from "lucide-react";
+import { ArrowLeft, Download, ExternalLink, Star } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Screen } from "@/components/screen";
 import CoverShelf from "@/components/cover-shelf";
@@ -14,8 +15,12 @@ import {
 import SaveButton from "@/components/save-button";
 import InstalledControl from "@/components/installed-control";
 import EditApp from "@/components/edit-app";
+import ShareApp from "@/components/share-app";
 import { storedText } from "@/lib/edit";
 import { appFor, catalogFor } from "@/lib/user-state";
+import type { StoreApp } from "@/lib/store";
+import { withBasePath } from "@/lib/base-path";
+import { requestOrigin } from "@/lib/origin";
 import { currentUser } from "@/lib/current-user";
 import { stateFor } from "@/lib/user-state";
 
@@ -26,6 +31,84 @@ const SOURCE_NAME: Record<string, string> = {
   github: "GitHub",
   fdroid: "F-Droid",
 };
+
+/** How much of a listing fits on a link preview card before it is cut off. */
+const PREVIEW_CHARS = 200;
+
+/**
+ * One line about the app, for somewhere it has to stand alone.
+ *
+ * The tagline first — it was written to be exactly this, one line — where the
+ * page below prefers the long text because it has the room. Neither is
+ * guaranteed: an app imported from a dropped APK has whatever the filename
+ * said and nothing else, and for those the developer and version at least say
+ * what the thing is.
+ */
+function summarise(app: StoreApp): string {
+  const text = (app.tagline || app.description || "").replace(/\s+/g, " ").trim();
+  if (!text) return `${app.developer} · ${app.version}`;
+  return text.length <= PREVIEW_CHARS
+    ? text
+    : `${text.slice(0, PREVIEW_CHARS - 1).trimEnd()}\u2026`;
+}
+
+/**
+ * What a chat app draws when this URL is pasted into it.
+ *
+ * This is the whole reason to send the page rather than the file: Telegram and
+ * the rest fetch the address, read these tags and render a card, so a shared
+ * app arrives as its name, its icon and a line about it instead of a bare
+ * link. The APK link installs on tap but previews as nothing, which is why
+ * `components/share-app.tsx` offers both and leads with this one.
+ *
+ * The image has to be absolute, because the machine fetching it is not on this
+ * site and has no page to resolve a relative path against. `metadataBase` is
+ * what Next resolves the app-absolute media URLs against, and it comes from
+ * the request because the store answers on more than one address.
+ *
+ * The 18+ gate holds here too, and falls out of `appFor` rather than being
+ * restated: a crawler arrives with no session, so an Adults listing has no
+ * metadata to give it — the same answer the page itself gives.
+ */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}): Promise<Metadata> {
+  const { slug } = await params;
+  const app = await appFor((await currentUser())?.id ?? null, slug);
+  if (!app) return {};
+
+  const origin = await requestOrigin();
+  const description = summarise(app);
+  // The banner first: a preview card is drawn wide, and an icon stretched to
+  // fill that shape looks worse than the artwork made for it. Both are
+  // optional — an app with neither gets a card with no image, because the
+  // fallback artwork is a CSS gradient with no URL to hand out.
+  const image = app.banner ?? app.icon;
+
+  return {
+    title: app.name,
+    description,
+    ...(origin ? { metadataBase: new URL(origin) } : {}),
+    openGraph: {
+      type: "website",
+      siteName: "App Store",
+      title: app.name,
+      description,
+      url: withBasePath(`/app/${app.slug}`),
+      ...(image ? { images: [{ url: image, alt: app.name }] } : {}),
+    },
+    twitter: {
+      // Only the banner is wide enough to be worth the big card; an icon in
+      // that slot is cropped to a strip of itself.
+      card: app.banner ? "summary_large_image" : "summary",
+      title: app.name,
+      description,
+      ...(image ? { images: [image] } : {}),
+    },
+  };
+}
 
 /**
  * App detail. Not one of the sketch's screens — it only describes what tapping
@@ -141,9 +224,12 @@ export default async function AppDetailPage({
         {userId !== null && (
           <SaveButton slug={app.slug} initialSaved={mine.saved} />
         )}
-        <Button variant="secondary" aria-label="Share">
-          <Share2 size={15} />
-        </Button>
+        <ShareApp
+          slug={app.slug}
+          name={app.name}
+          hasFile={Boolean(latest)}
+          externalUrl={linked?.assetUrl}
+        />
       </div>
 
       {/* Nothing to install — no file here and no link out — means nothing to
