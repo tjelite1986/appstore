@@ -55,6 +55,7 @@ export default async function RootLayout({
         <BottomNav
           pending={pending}
           parentUrl={process.env.ELITE_APP_URL?.trim() || undefined}
+          email={user?.email}
         />
       </body>
     </html>
