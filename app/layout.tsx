@@ -5,14 +5,30 @@ import TopBar from "@/components/top-bar";
 import BottomNav from "@/components/bottom-nav";
 import { currentUser } from "@/lib/current-user";
 import { updatableApps } from "@/lib/user-state";
+import PwaRegister from "@/components/pwa-register";
+import InstallBanner from "@/components/install-banner";
 
 export const metadata: Metadata = {
   title: "App Store",
   description: "An APK archive with its own front door.",
+  manifest: "/manifest.webmanifest",
+  applicationName: "App Store",
+  appleWebApp: {
+    capable: true,
+    title: "App Store",
+    statusBarStyle: "black-translucent",
+  },
+  icons: {
+    icon: "/favicon-32.png?v=1",
+    apple: "/apple-touch-icon.png?v=1",
+  },
 };
 
 export const viewport: Viewport = {
   themeColor: "#100913",
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default async function RootLayout({
@@ -57,6 +73,8 @@ export default async function RootLayout({
           parentUrl={process.env.ELITE_APP_URL?.trim() || undefined}
           email={user?.email}
         />
+        <InstallBanner />
+        <PwaRegister />
       </body>
     </html>
   );

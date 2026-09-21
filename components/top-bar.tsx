@@ -30,7 +30,7 @@ export default function TopBar({ email }: { email?: string }) {
   const pathname = usePathname();
 
   return (
-    <header className="sticky top-0 z-30 border-b border-[color:var(--border)] bg-[var(--bar)] backdrop-blur">
+    <header className="sticky top-0 z-30 pt-[env(safe-area-inset-top)] border-b border-[color:var(--border)] bg-[var(--bar)] backdrop-blur">
       <div className="mx-auto flex max-w-5xl items-center gap-2.5 px-3 py-1.5">
         <Link
           href="/"
