@@ -139,7 +139,9 @@
   `FDROID_PUBLIC_URL`, never the request host (subscribers keep it forever).
 
 ### Telegram feed and jobs
-- The feed reads attachments, not links. FILE_MIGRATE and FLOOD_WAIT are not
+- The feed reads attachments and links; a link must prove it is an APK
+  (`readApkInfo`). apkmb product pages are followed to `<page>/download/`
+  (`apkmbDownloadLinks`). FILE_MIGRATE and FLOOD_WAIT are not
   failures; they get their own budget. Canonicalise URL dedup keys.
 - `scripts/cron.sh` must exit non-zero when every item failed or the session
   is unauthorised; a green timer once hid a dead feed.
