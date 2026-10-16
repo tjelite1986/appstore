@@ -806,7 +806,8 @@ async function run(): Promise<void> {
     pageUrl: string,
     messageId: number
   ): Promise<{ name: string; size: number }> {
-    const links = await apkmbDownloadLinks(pageUrl);
+    // Capped like a message: a page is not a link farm either.
+    const links = (await apkmbDownloadLinks(pageUrl)).slice(0, MAX_LINKS);
     if (!links.length) throw new NotAnApk("no download link on the page");
     let lastError: unknown;
     for (const link of links) {
