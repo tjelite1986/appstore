@@ -13,11 +13,11 @@
  * of a div whose class name will change next time the theme does. The prose
  * and the mod-feature list are scraped; everything else is not.
  *
- * The APK is not fetched. The page links to one, and that link is reported so
- * a person can hand it to the Telegram feed, which already knows how to fetch
- * a link and prove it is an APK before the importer sees it. Filling metadata
- * and taking a binary from a mod mirror are different decisions and only one
- * of them is being made here.
+ * The APK is not fetched here. `apkmbDownloadLinks` reads the addresses off
+ * the page's download step, and only the Telegram feed follows them: a page
+ * posted to the channel is a request for the build, and the feed already knows
+ * how to fetch a link and prove it is an APK before the importer sees it.
+ * Filling metadata and taking a binary from a mod mirror stay two decisions.
  */
 import { promises as fs } from "node:fs";
 import path from "node:path";
@@ -371,6 +371,36 @@ export async function fetchApkmbListing(input: string): Promise<ApkmbListing> {
     screenshotUrls: screenshots,
     downloadPageUrl: dl ? new URL(dl[1], url).href : null,
   };
+}
+
+/**
+ * The APK addresses on an app's download step, in the order the page lists them.
+ *
+ * The product page carries no binary — its "Download" button leads to
+ * `<page>/download/`, and that page lists the files under
+ * `#list-downloadlinks`, pointing straight at apkmb's file host. Nothing here
+ * proves the address serves an APK; the caller fetches it through the same
+ * guard and manifest check as any other link.
+ */
+export async function apkmbDownloadLinks(input: string): Promise<string[]> {
+  const page = apkmbUrl(input);
+  const step = /\/download\/$/.test(page) ? page : `${page}download/`;
+  const html = await readPage(step);
+
+  const list = /<ul\b[^>]*\bid=["']list-downloadlinks["'][^>]*>([\s\S]*?)<\/ul>/i.exec(html);
+  if (!list) return [];
+  const out: string[] = [];
+  for (const m of list[1].matchAll(/<a\b[^>]*\bhref=["']([^"']+)["']/gi)) {
+    let url: URL;
+    try {
+      url = new URL(decodeEntities(m[1]), step);
+    } catch {
+      continue;
+    }
+    if (url.protocol !== "https:" && url.protocol !== "http:") continue;
+    if (!out.includes(url.href)) out.push(url.href);
+  }
+  return out;
 }
 
 /**

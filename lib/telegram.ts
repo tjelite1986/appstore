@@ -29,7 +29,7 @@ import { runImportScan, type ImportSummary } from "./import";
 import { readApkInfo } from "./apk-manifest";
 import { BROWSER_USER_AGENT, openGuarded } from "./sources/net";
 import { detectSource } from "./sources/detect";
-import { apkmbUrl } from "./sources/apkmb";
+import { apkmbDownloadLinks, apkmbUrl } from "./sources/apkmb";
 
 const DROP_DIR = path.join(STORE_ROOT, STORE_DIRS.import);
 const STATE_FILE = path.join(STORE_ROOT, STORE_DIRS.state, "telegram.json");
@@ -296,6 +296,34 @@ function listingUrl(url: string): string | null {
 
 function readableAsListing(url: string): boolean {
   return listingUrl(url) !== null;
+}
+
+/** What two links must share to be one download: the page for apkmb, else the URL. */
+function linkIdentity(url: string): string {
+  return listingUrl(url) ?? url;
+}
+
+/**
+ * Notes written by the apkmb path carry this, so a verdict it reached is told
+ * apart from one reached before it existed.
+ */
+const APKMB_NOTE = "apkmb: ";
+
+/**
+ * An apkmb page written off before the feed knew how to follow one to its APK.
+ *
+ * Every such row says "not an APK (… text/html …)": the page itself was
+ * fetched and read as the file. The cursor is long past those messages, so
+ * they are fetched back once; whatever the apkmb path answers then carries
+ * `APKMB_NOTE` and is final.
+ */
+function staleApkmbSkip(e: LedgerEntry): boolean {
+  return (
+    e.status === "skipped" &&
+    readableAsListing(e.documentId) &&
+    !!e.note?.startsWith("not an APK (") &&
+    e.note.includes("text/html")
+  );
 }
 
 /**
@@ -767,6 +795,32 @@ async function run(): Promise<void> {
   }
 
   /**
+   * Fetch the APK an apkmb product page offers.
+   *
+   * The page is HTML; the build sits one step further, on its download page.
+   * Each address listed there is tried in order until one proves to be an
+   * APK — the list is usually a single file, and a second entry is a variant
+   * of the same app, not a different one.
+   */
+  async function downloadApkmb(
+    pageUrl: string,
+    messageId: number
+  ): Promise<{ name: string; size: number }> {
+    const links = await apkmbDownloadLinks(pageUrl);
+    if (!links.length) throw new NotAnApk("no download link on the page");
+    let lastError: unknown;
+    for (const link of links) {
+      try {
+        return await downloadLink(link, messageId);
+      } catch (err) {
+        lastError = err;
+        say(`  ${link}: ${msgOf(err)}`);
+      }
+    }
+    throw lastError;
+  }
+
+  /**
    * Download to a hidden `.part` file, then rename into place.
    *
    * The importer must never see a half-written APK, and a rename within one
@@ -858,8 +912,12 @@ async function run(): Promise<void> {
       const key = `${channel}#${message.id}#${createHash("sha1").update(url).digest("hex").slice(0, 8)}`;
       const previous = state.ledger[key];
       // Anything but a failure is a verdict already reached, and a failure that
-      // has spent its tries is one too.
-      if (previous && (previous.status !== "failed" || previous.attempts >= MAX_ATTEMPTS)) {
+      // has spent its tries is one too — except an apkmb page read as the file.
+      if (
+        previous &&
+        !staleApkmbSkip(previous) &&
+        (previous.status !== "failed" || previous.attempts >= MAX_ATTEMPTS)
+      ) {
         handled = true;
         continue;
       }
@@ -876,8 +934,10 @@ async function run(): Promise<void> {
         at: new Date().toISOString(),
       };
 
+      // By identity, so the same apkmb page with and without its slash is one.
+      const identity = linkIdentity(url);
       const already = Object.values(state.ledger).some(
-        (e) => e.documentId === url && e.status === "downloaded"
+        (e) => e.status === "downloaded" && linkIdentity(e.documentId) === identity
       );
       if (already) {
         entry.note = "duplicate link";
@@ -895,8 +955,9 @@ async function run(): Promise<void> {
       }
 
       entry.attempts += 1;
+      const apkmb = readableAsListing(url);
       try {
-        const got = await downloadLink(url, message.id);
+        const got = apkmb ? await downloadApkmb(url, message.id) : await downloadLink(url, message.id);
         entry.status = "downloaded";
         entry.fileName = got.name;
         entry.fileSize = got.size;
@@ -905,7 +966,7 @@ async function run(): Promise<void> {
         say(`${key}: ${got.name} (${mb(got.size)} MB) from ${url} -> import folder`);
       } catch (err) {
         entry.status = err instanceof NotAnApk ? "skipped" : "failed";
-        entry.note = msgOf(err).slice(0, 300);
+        entry.note = `${apkmb ? APKMB_NOTE : ""}${msgOf(err)}`.slice(0, 300);
         // Not an APK, but possibly an address a source can read. Nothing is
         // recorded for that here: the ledger already holds the URL, and the
         // offer is worked out from it on read.
@@ -1003,7 +1064,8 @@ async function run(): Promise<void> {
         Object.values(state.ledger)
           .filter(
             (e) =>
-              e.channel === channel && e.status === "failed" && e.attempts < MAX_ATTEMPTS
+              e.channel === channel &&
+              ((e.status === "failed" && e.attempts < MAX_ATTEMPTS) || staleApkmbSkip(e))
           )
           .sort((a, b) => a.messageId - b.messageId)
           .map((e) => e.messageId)
