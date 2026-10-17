@@ -10,7 +10,10 @@ export function safeNext(value: unknown): string {
   try {
     const url = new URL(value, "http://store.invalid");
     if (url.origin !== "http://store.invalid") return "/";
-    return url.pathname + url.search + url.hash;
+    // The output is checked too: `/.//evil.example` resolves on this origin
+    // to the path `//evil.example`, which is another host once it is sent
+    // back as a Location.
+    return "/" + url.pathname.replace(/^\/+/, "") + url.search + url.hash;
   } catch {
     return "/";
   }
