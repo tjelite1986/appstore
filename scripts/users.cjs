@@ -62,6 +62,13 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id);
 `);
 
+function clearUserRows(id) {
+  for (const table of ["user_saved", "user_installed", "user_prefs", "user_repo_token"]) {
+    const exists = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
+    if (exists) db.prepare(`DELETE FROM ${table} WHERE user_id = ?`).run(id);
+  }
+}
+
 function userId(email) {
   const row = db.prepare("SELECT id FROM users WHERE email = ?").get(email);
   if (!row) fail(`No account for ${email}`);
@@ -87,9 +94,16 @@ switch (command) {
     const [email, role = "user"] = args;
     if (!email) fail("Usage: add <email> [admin]");
     if (role !== "user" && role !== "admin") fail("Role must be user or admin");
-    const info = db
-      .prepare("INSERT INTO users (email, password_hash, role, created_at) VALUES (?, ?, ?, ?)")
-      .run(email, hashPassword(password()), role, now);
+    const info = db.transaction(() => {
+      const row = db
+        .prepare("INSERT INTO users (email, password_hash, role, created_at) VALUES (?, ?, ?, ?)")
+        .run(email, hashPassword(password()), role, now);
+      // A new account starts empty. The per-user tables have no foreign key,
+      // so rows left under this id by an account removed some other way would
+      // otherwise become the newcomer's.
+      clearUserRows(row.lastInsertRowid);
+      return row;
+    })();
     console.log(`Created ${email} (${role}) as id ${info.lastInsertRowid}`);
     break;
   }
@@ -119,10 +133,7 @@ switch (command) {
     db.transaction(() => {
       // The per-user tables have no foreign key to cascade through (see
       // lib/db.ts), so they are cleared by name.
-      for (const table of ["user_saved", "user_installed", "user_prefs", "user_repo_token"]) {
-        const exists = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
-        if (exists) db.prepare(`DELETE FROM ${table} WHERE user_id = ?`).run(id);
-      }
+      clearUserRows(id);
       db.prepare("DELETE FROM users WHERE id = ?").run(id);
     })();
     console.log(`Removed ${email} and everything kept for it`);

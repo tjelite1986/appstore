@@ -27,14 +27,15 @@ function live(key: string, now: number): Entry | null {
 }
 
 /**
- * The address the request came from. Cloudflare and Traefik each add their
- * own header in front of this app; the socket address is always the proxy.
+ * The address the request came from. Only headers a proxy overwrites:
+ * Cloudflare sets `cf-connecting-ip`, Traefik sets `x-real-ip`. The leftmost
+ * `x-forwarded-for` hop is whatever the client chose to send, so it is never
+ * read — trusting it would hand every attempt a fresh counter.
  */
 export function clientAddress(req: Request): string {
   return (
     req.headers.get("cf-connecting-ip") ??
     req.headers.get("x-real-ip") ??
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
     "unknown"
   );
 }
