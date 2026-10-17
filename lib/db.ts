@@ -7,7 +7,8 @@
  * an app and marking one installed are per-account facts with no natural file
  * to live in, they are written far more often than the catalog changes, and
  * two tabs can write them at the same moment. That is a database's job, so
- * this is where it lives: the tables keyed on the elite-v2 account id.
+ * this is where it lives — along with the accounts and sessions those rows
+ * are keyed on (see `lib/auth.ts`).
  *
  * Two tables here are neither content nor a person's doing — `apk_facts` and
  * `apk_abis` cache what reading an APK's bytes costs. They are here rather
@@ -33,7 +34,7 @@ let handle: Database.Database | null = null;
  * `next build` renders pages in worker processes, and a module that opened a
  * database as a side effect of being imported would open one in each of them
  * against a path that may not even be mounted. Every caller here is behind a
- * signed-in request, so the build never reaches this.
+ * request carrying a session cookie, so the build never reaches this.
  */
 export function db(): Database.Database {
   if (handle) return handle;
@@ -60,13 +61,34 @@ export function db(): Database.Database {
  * run from two processes at once — which happens, because the app and its
  * timers are separate callers into the same file.
  *
- * `user_id` is elite-v2's account id and there is no users table here to point
- * it at: identity is resolved over HTTP (see `lib/sso.ts`), so a foreign key
- * would be a promise this database cannot keep. An account deleted over there
- * leaves rows here that nothing will ever ask for again.
+ * The per-user tables carry no foreign key to `users`. They predate it — the
+ * ids came from another app's accounts and were imported with them unchanged —
+ * and a constraint added by `CREATE TABLE IF NOT EXISTS` would never reach the
+ * tables that already exist. Removing an account clears them explicitly.
  */
 function migrate(conn: Database.Database): void {
   conn.exec(`
+    -- The accounts. Created by hand (scripts/users.cjs) — there is no sign-up
+    -- page; the store answers on a public hostname.
+    CREATE TABLE IF NOT EXISTS users (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      email         TEXT    NOT NULL UNIQUE COLLATE NOCASE,
+      -- scrypt, "<salt hex>:<key hex>" — see lib/password.ts.
+      password_hash TEXT    NOT NULL,
+      role          TEXT    NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
+      created_at    TEXT    NOT NULL
+    );
+
+    -- One row per signed-in browser. Only the token's SHA-256 is kept, so a
+    -- copy of this file does not sign anybody in.
+    CREATE TABLE IF NOT EXISTS sessions (
+      token_hash TEXT    PRIMARY KEY,
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TEXT    NOT NULL,
+      expires_at TEXT    NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id);
+
     CREATE TABLE IF NOT EXISTS user_saved (
       user_id  INTEGER NOT NULL,
       slug     TEXT    NOT NULL,

@@ -16,7 +16,7 @@ npm run dev      # http://localhost:3030
 ```
 
 Point `STORE_ROOT` at a directory to run against a different library.
-`ELITE_VERIFY_URL` and `STORE_ADMIN_TOKEN` gate the import routes — see below.
+An admin account and `STORE_ADMIN_TOKEN` gate the import routes — see below.
 
 ## The library
 
@@ -326,35 +326,39 @@ The store answers on a public hostname, and the write routes — the import scan
 the review decisions and the Telegram sync — move and discard files. Browsing
 and downloading need nothing; those three need an admin.
 
-**A person signs in to elite-v2.** The store shares that login rather than
-keeping accounts of its own: elite-v2 scopes its session cookie to
-the parent domain both hosts share (`SESSION_COOKIE_DOMAIN` there), so a
-browser logged in at the accounts host sends the same cookie to the store. Verifying it
-locally would take elite-v2's signing secret and would still miss a revoked
-session — that row is in elite-v2's database — so the token goes back to
-`POST /api/auth/verify` (`ELITE_VERIFY_URL`, the container name over the
-traefik network) and comes back as an account. `role === "admin"` opens the
-routes; answers are cached 30 s. Manage tries this first and only shows a
-token form when it comes back 401.
+**A person signs in.** The store keeps its own accounts: `users` and
+`sessions` in `_state/store.db`, beside the per-user tables. `/login` takes an
+email and a password (scrypt, `lib/password.ts`) and sets an HttpOnly session
+cookie scoped to this host alone; only the token's SHA-256 is stored, and
+signing out deletes the row. `role === "admin"` opens the routes. Failed
+attempts are throttled per client address and per email
+(`lib/login-throttle.ts`). There is no sign-up page — accounts are made with
+`scripts/users.cjs`, run inside the container:
+
+```sh
+docker exec -i -e PASSWORD=... <container> node - add someone@example.com admin < scripts/users.cjs
+docker exec -i <container> node - list < scripts/users.cjs
+```
+
+`passwd`, `role`, `remove` and `import` are there too; `import` keeps account
+ids, which is how accounts from the app this store used to borrow its login
+from came across without orphaning anyone's saved apps.
 
 A cookie is the one credential a browser attaches on its own, so writes
 authenticated that way also have to come from this store's own pages: the
 `Origin` on an unsafe method must match the host. `SameSite=lax` is not enough
 on its own here — every host under one parent domain counts as the same site, so a
 sibling service, or a file this store serves back, would otherwise be trusted.
-Reads skip the check; a cross-site navigation cannot read what it gets.
+Reads skip the check; a cross-site navigation cannot read what it gets. Sign-in
+and sign-out are held to the same rule.
 
 **A timer sends a token.** `scripts/cron.sh` has no browser and no session, so
 `STORE_ADMIN_TOKEN` stays as the machine credential in the
 `x-store-admin-token` header.
 
-**The way back.** Borrowing a login makes this a place people arrive *from*,
-so `ELITE_APP_URL` puts a back arrow in the header pointing at that app. It is
-display only — nothing is verified through it — and unset means no arrow.
-
-**Unset means closed**, not open — with neither configured the routes refuse
-everything, because a missing variable must not read as "no gate configured,
-let it through". `lib/admin.ts` and `lib/sso.ts` are the whole of it.
+**Unset means closed**, not open — an unset token matches nothing, and with no
+admin account nobody signs in as one. `lib/admin.ts` and `lib/auth.ts` are the
+whole of it.
 
 ## Serving files
 
@@ -647,8 +651,8 @@ container.
 
 The library is mounted at `/store` (`STORE_ROOT=/store`), writable since the
 importer landed, and the container runs as uid 1000 so imported files keep the
-same ownership as the rest of the tree. A compose change — a volume,
-`ELITE_VERIFY_URL`, or `STORE_ADMIN_TOKEN` in the `.env` beside it — needs
+same ownership as the rest of the tree. A compose change — a volume, or
+`STORE_ADMIN_TOKEN` in the `.env` beside it — needs
 `docker compose up -d` from the compose dir instead of a restart.
 
 ### The scheduled jobs

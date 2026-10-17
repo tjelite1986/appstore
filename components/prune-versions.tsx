@@ -46,7 +46,7 @@ export default function PruneVersions({
         "/api/apps/prune",
         { method: "POST", body: JSON.stringify(body) },
         token,
-        { hint: "Sign in to elite-v2 as an admin, or unlock Manage" }
+        { hint: "Sign in as an admin, or unlock Manage" }
       ),
     [token]
   );

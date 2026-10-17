@@ -89,6 +89,10 @@
   joining, and confine to the specific subdirectory, not `STORE_ROOT`. Why:
   Next decodes `%2F` inside a segment; a root-only check once served a
   secret file publicly.
+- Accounts are local (`users`/`sessions` in `_state/store.db`, `lib/auth.ts`);
+  no sign-up page, accounts via `scripts/users.cjs`. Ids were imported from
+  the old SSO provider unchanged: never renumber them, the per-user tables
+  have no FK and would silently change owner.
 - Cookie-auth writes require `Origin` host == request host (`SameSite=lax`
   spans subdomains). Unset admin token means closed. `requireUser` refuses the
   admin token.

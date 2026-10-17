@@ -1,8 +1,8 @@
 /**
  * The fallback admin token, as the browser keeps it.
  *
- * Normally nothing on Manage needs this: an admin signed in to elite-v2 is
- * signed in here too, and the cookie travels on its own (see `lib/admin.ts`).
+ * Normally nothing on Manage needs this: an admin who has signed in carries a
+ * session cookie, and it travels on its own (see `lib/admin.ts`).
  * The token is what is left when they are not — the same shared secret the
  * host timers use.
  *

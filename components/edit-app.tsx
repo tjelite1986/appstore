@@ -132,7 +132,7 @@ export default function EditApp({ app }: { app: EditableApp }) {
   const call = useCallback(
     (path: string, init?: RequestInit) =>
       adminCall(path, init, token, {
-        hint: "Sign in to elite-v2 as an admin, or unlock Manage",
+        hint: "Sign in as an admin, or unlock Manage",
       }),
     [token]
   );

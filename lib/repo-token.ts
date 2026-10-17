@@ -1,7 +1,7 @@
 /**
  * The per-account secret that an Android client puts in its repository URL.
  *
- * Everything else here identifies people by the elite-v2 cookie, which works
+ * Everything else here identifies people by the session cookie, which works
  * because everything else here is a browser. Obtainium is not: it fetches the
  * index and the APK with a bare GET, sends no cookie, and — the part that
  * decides the design — its F-Droid repository source cannot be given a header
@@ -15,7 +15,7 @@
  *
  * A token is therefore a bearer credential in a URL, which is a real cost: it
  * sits in the client's config, and anyone holding it reads the library as its
- * owner. It buys nothing else — no writes, no account, no elite-v2 session —
+ * owner. It buys nothing else — no writes, no account, no session —
  * and rotating it is one row.
  */
 import { randomBytes } from "node:crypto";

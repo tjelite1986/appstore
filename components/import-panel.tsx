@@ -14,6 +14,7 @@ import type { PlayListing } from "@/lib/sources/play";
 import type { ApkmbListing } from "@/lib/sources/apkmb";
 import type { TelegramCandidate, TelegramRun } from "@/lib/telegram";
 import { adminCall } from "@/lib/admin-call";
+import { withBasePath } from "@/lib/base-path";
 import { ADMIN_TOKEN_KEY } from "@/lib/admin-token";
 
 /**
@@ -26,9 +27,8 @@ import { ADMIN_TOKEN_KEY } from "@/lib/admin-token";
  * on the client and the server components importing it break — silently, in
  * the case of a plain string export.
  *
- * Getting in is normally not this panel's problem: an admin signed in to
- * elite-v2 is signed in here too, because that session cookie is scoped to the
- * parent domain both hosts share. So the panel asks for the queue first and
+ * Getting in is normally not this panel's problem: an admin who has signed in
+ * is let through by their session cookie. So the panel asks for the queue first and
  * only falls back to the token form when the answer is 401 — someone browsing
  * the store logged out, or a second browser.
  *
@@ -111,7 +111,7 @@ export default function ImportPanel({ storePath, waiting, apps }: Props) {
   const [token, setToken] = useState("");
   const [draftToken, setDraftToken] = useState("");
   // null while the first request is still out: the panel cannot tell "signed
-  // in through elite-v2" from "needs a token" until something has answered,
+  // in" from "needs a token" until something has answered,
   // and guessing either way flashes the wrong UI on every load.
   const [locked, setLocked] = useState<boolean | null>(null);
   const [hydrated, setHydrated] = useState(false);
@@ -144,7 +144,7 @@ export default function ImportPanel({ storePath, waiting, apps }: Props) {
         accept: [409],
         hint: token
           ? "That token was not accepted"
-          : "Sign in to elite-v2 as an admin, or use a token",
+          : "Sign in as an admin, or use a token",
         onRefused: (status) => {
           // A 401 means the token, if any, is wrong: forget it. A 403 is a
           // session the store knows but will not let in — not an admin, or a
@@ -355,8 +355,11 @@ export default function ImportPanel({ storePath, waiting, apps }: Props) {
       <div className={cn(CARD_CLS, "flex flex-col gap-2 p-3.5")}>
         <p className="text-sm">Sign in to import</p>
         <p className={cn("text-xs", MUTED_CLS)}>
-          Signing in to elite-v2 as an admin unlocks this panel — the two share
-          one login. Failing that, the shared <code>STORE_ADMIN_TOKEN</code>
+          <a href={withBasePath("/login?next=/manage")} className="underline">
+            Signing in
+          </a>{" "}
+          as an admin unlocks this panel. Failing that, the shared{" "}
+          <code>STORE_ADMIN_TOKEN</code>
           also opens it, and is kept in this browser only.
         </p>
         <form

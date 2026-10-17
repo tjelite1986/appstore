@@ -4,11 +4,11 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  ArrowLeft,
   Bookmark,
   Gamepad2,
   Home,
   LayoutDashboard,
+  LogIn,
   Menu,
   PackageCheck,
   Search,
@@ -37,8 +37,8 @@ const TABS = [
  * The sixth button: this store's own destinations, the ones that do not earn a
  * tab. It used to hand the whole press over to the site the store is mounted
  * in — `?menu=1` opened that app's menu, which meant leaving the store to
- * reach a page inside it. The store now draws its own sheet, and the way back
- * to that site is one row in it rather than the whole button.
+ * reach a page inside it. The store now draws its own sheet, and signing in
+ * is one row in it when nobody is.
  */
 const MENU_LINKS = [
   { href: "/saved", label: "Saved", Icon: Bookmark },
@@ -49,12 +49,9 @@ const MENU_LINKS = [
 /** `pending` is counted in the layout — this bar runs on the client. */
 export default function BottomNav({
   pending = 0,
-  parentUrl,
   email,
 }: {
   pending?: number;
-  /** The site this store is a section of, when it is one. */
-  parentUrl?: string;
   /** Who is signed in, shown at the head of the sheet. */
   email?: string;
 }) {
@@ -155,22 +152,16 @@ export default function BottomNav({
                   {label}
                 </Link>
               ))}
-              {parentUrl && (
+              {!email && (
                 <>
                   <div className="my-1 border-t border-[color:var(--border)]" />
-                  {/* A plain <a>: that address is not one of this app's routes,
-                      so asking the router to resolve it would 404 here before
-                      the browser ever left. */}
-                  <a
-                    href={parentUrl}
+                  <Link
+                    href={`/login?next=${encodeURIComponent(pathname)}`}
                     className="flex items-center gap-3 px-5 py-3 text-sm transition hover:bg-[var(--card-2)]"
                   >
-                    <ArrowLeft
-                      size={18}
-                      className="text-[color:var(--muted-2)]"
-                    />
-                    Back to Elite
-                  </a>
+                    <LogIn size={18} className="text-[color:var(--muted-2)]" />
+                    Sign in
+                  </Link>
                 </>
               )}
             </div>

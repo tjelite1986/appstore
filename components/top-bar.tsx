@@ -70,8 +70,9 @@ export default function TopBar({ email }: { email?: string }) {
           {/* The sketch's avatar slot, now that there is an identity to put in
               it. Signed out it stays a dash rather than someone's initial —
               the store is browsable by anyone, and a letter there would be a
-              claim about who is looking. */}
-          <span
+              claim about who is looking — and leads to the sign-in page. */}
+          <Link
+            href={email ? "/settings" : `/login?next=${encodeURIComponent(pathname)}`}
             title={email ?? "Not signed in"}
             aria-label={email ? `Signed in as ${email}` : "Not signed in"}
             className="ml-0.5 flex h-[18px] w-[18px] items-center justify-center rounded-full text-[9px] font-semibold uppercase text-white/90"
@@ -82,7 +83,7 @@ export default function TopBar({ email }: { email?: string }) {
             }}
           >
             {email ? email[0] : "\u2013"}
-          </span>
+          </Link>
         </span>
       </div>
     </header>

@@ -10,7 +10,7 @@
  * row to be rid of.
  */
 import { requireUser } from "@/lib/admin";
-import { eliteUser } from "@/lib/sso";
+import { sessionUser } from "@/lib/auth";
 import { clearState, readState } from "@/lib/user-state";
 
 export const dynamic = "force-dynamic";
@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request): Promise<Response> {
   // A read, so a signed-out visitor gets an answer rather than a challenge —
   // "nobody is signed in" is the normal case on a store anyone can browse.
-  const user = await eliteUser(req);
+  const user = sessionUser(req);
   if (!user) return Response.json({ signedIn: false });
 
   const state = readState(user.id);

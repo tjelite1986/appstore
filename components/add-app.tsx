@@ -93,7 +93,7 @@ export default function AddApp() {
   const call = useCallback(
     (path: string, init?: RequestInit) =>
       adminCall(path, init, token, {
-        hint: "Sign in to elite-v2 as an admin, or unlock the panel below",
+        hint: "Sign in as an admin, or unlock the panel below",
       }),
     [token]
   );

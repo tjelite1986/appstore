@@ -9,6 +9,7 @@ import {
 import { Screen, ScreenTitle } from "@/components/screen";
 import RowCard from "@/components/rows";
 import ForgetStateButton from "@/components/forget-state-button";
+import SignOutButton from "@/components/sign-out-button";
 import { STORE_ROOT } from "@/lib/storage";
 import { currentUser } from "@/lib/current-user";
 import { adultsAllowed, readState } from "@/lib/user-state";
@@ -58,8 +59,9 @@ export default async function SettingsPage() {
             : [
                 {
                   label: "Not signed in",
-                  value: "Browsing only",
+                  value: "Sign in",
                   Icon: UserRound,
+                  href: "/login?next=/settings",
                 },
               ]
         }
@@ -67,6 +69,7 @@ export default async function SettingsPage() {
       {user && (
         <div className="px-[var(--pad)]">
           <ForgetStateButton count={kept} />
+          <SignOutButton />
         </div>
       )}
 
