@@ -443,12 +443,22 @@ export async function addFromPlay(
     throw new PlayAlreadyHere(clash.slug, clash.name);
   }
 
+  // The gate is decided before anything is written: a second listing of an
+  // adult app must never exist, even between two writes, under the genre Play
+  // files it in. The fill then writes Adults as the listing's own category.
+  const inherited = clash ? await categoryForNewSibling(listing.packageId) : null;
+  const gated =
+    inherited === ADULT_CATEGORY ? { ...listing, category: ADULT_CATEGORY } : listing;
+
   const slug = await uniqueSlug(listing.name);
   // Nothing is on this slug yet, so there is no hand-written value to protect
   // and the package id has to be written even though `fillFromPlay` does not
   // deal in it — that field belongs to the binary everywhere else.
-  await writeMeta(slug, { packageName: listing.packageId });
-  const fill = await fillFromPlay(slug, listing, {
+  await writeMeta(slug, {
+    packageName: listing.packageId,
+    ...(gated.category ? { category: gated.category } : {}),
+  });
+  const fill = await fillFromPlay(slug, gated, {
     overwrite: true,
     source: {
       kind: "play",
@@ -457,13 +467,6 @@ export async function addFromPlay(
       addedFrom: "manage/add",
     },
   });
-  if (clash) {
-    const inherited = await categoryForNewSibling(listing.packageId);
-    if (inherited === ADULT_CATEGORY) {
-      await writeMeta(slug, { category: ADULT_CATEGORY });
-      invalidateCatalog();
-    }
-  }
 
   return {
     slug,

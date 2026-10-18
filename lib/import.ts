@@ -88,8 +88,9 @@ export async function categoryForNewSibling(
   packageName: string | null | undefined
 ): Promise<Category | null> {
   if (!packageName) return null;
+  const pkg = packageName.toLowerCase();
   const siblings = (await realApps()).filter(
-    (a) => a.packageName === packageName
+    (a) => a.packageName?.toLowerCase() === pkg
   );
   if (!siblings.length) return null;
   if (siblings.some((a) => a.category === ADULT_CATEGORY)) return ADULT_CATEGORY;
