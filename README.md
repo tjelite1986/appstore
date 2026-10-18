@@ -293,7 +293,7 @@ Every run, the timer's or the button's, leaves its report in
 `_state/sources.json`. Manage reads it back: the "Behind" tile counts the apps
 whose upstream has a release the library does not hold, plus the checks that
 failed, and the "Behind upstream" card lists them with what is held against
-what upstream offers. Since the timer fetches what it can, what stays on that
+what upstream offers (admins only, like the route that produced it). Since the timer fetches what it can, what stays on that
 card is a release the importer refused over its signer — decided in the
 review queue — or an address that no longer answers. The card is cut to the
 same 18+-gated list as the rest of Manage, so a gated app is never named on it.

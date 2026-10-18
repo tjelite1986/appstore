@@ -33,7 +33,7 @@ import {
 } from "@/lib/store";
 import { duplicatePackages } from "@/lib/merge";
 import { planPrune } from "@/lib/prune";
-import { currentUserId } from "@/lib/current-user";
+import { currentUser } from "@/lib/current-user";
 import { adultsAllowed } from "@/lib/user-state";
 import {
   lastSourceReport,
@@ -70,7 +70,8 @@ export default async function ManagePage() {
   // Manage is reachable by anyone — only its write actions ask who you are —
   // so the 18+ gate applies to the listing here as well. An admin who needs to
   // work on that shelf opens the gate in Settings like everybody else.
-  const apps = adultsAllowed(await currentUserId()) ? all : withoutAdults(all);
+  const user = await currentUser();
+  const apps = adultsAllowed(user?.id ?? null) ? all : withoutAdults(all);
   // Two listings for one package id. Usually it is the same app twice — a
   // second signer arrives, the review queue cannot offer it as an update, and
   // it gets its own slug — but not always: two mods of one program are a pair
@@ -100,8 +101,14 @@ export default async function ManagePage() {
   // other number on this screen. "Behind" is what upstream has and the
   // library does not; a failed check is listed with it, because an app the
   // check could not reach is not known to be current either.
+  //
+  // Admins only, like the check route that produced it: the report carries
+  // error messages from upstream calls, and before it was saved those only
+  // ever reached the admin whose click made them. Everyone else sees the tile
+  // with no number.
+  const admin = user?.role === "admin";
   const report =
-    lastReport && !placeholder
+    admin && lastReport && !placeholder
       ? restrictReport(lastReport, new Set(apps.map((a) => a.slug)))
       : null;
   const behind = report ? report.apps.filter((a) => a.status === "available") : [];
@@ -169,10 +176,12 @@ export default async function ManagePage() {
                 ? failed.length > 0
                   ? `${failed.length} failed · ${checkedAgo}`
                   : `checked ${checkedAgo}`
-                : "no check yet"
+                : admin
+                  ? "no check yet"
+                  : "admins only"
             }
             tone={behind.length > 0 || failed.length > 0 ? "warn" : "neutral"}
-            href={counts.github + counts.fdroid > 0 ? "#behind" : undefined}
+            href={admin && counts.github + counts.fdroid > 0 ? "#behind" : undefined}
             icon={ArrowUpFromLine}
           />
           <Stat
@@ -246,7 +255,7 @@ export default async function ManagePage() {
               <SourcesPanel counts={counts} initialReport={report} />
             </Panel>
 
-            {counts.github + counts.fdroid > 0 && (
+            {admin && counts.github + counts.fdroid > 0 && (
               <Panel
                 id="behind"
                 icon={ArrowUpFromLine}
