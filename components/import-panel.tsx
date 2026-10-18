@@ -2,9 +2,19 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { RefreshCw, Search, Send, Upload } from "lucide-react";
+import {
+  FolderOpen,
+  Inbox,
+  RefreshCw,
+  Search,
+  Send,
+  Upload,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
+  MUTED,
+  NOTE,
+  Pill,
   buttonClass,
   type ButtonSize,
   type ButtonVariant,
@@ -38,9 +48,18 @@ import { ADMIN_TOKEN_KEY } from "@/lib/admin-token";
  * another origin that talks this store into a POST.
  */
 
+/**
+ * A block inside the Import panel: the feed, the folder, the queue. The page
+ * draws the panel around them, so these are bordered sections, not cards.
+ */
+const BLOCK_CLS =
+  "flex flex-col gap-2.5 rounded-[var(--radius)] border border-[color:var(--border)] p-3.5";
+/** The head of a block: icon, title, status at the right. */
+const BLOCK_HEAD_CLS = "flex items-center gap-2";
+const MUTED_CLS = MUTED;
+/** A nested card: a review item, a candidate. Tinted so it sits inside a block. */
 const CARD_CLS =
-  "bg-[var(--card)] rounded-[var(--radius)] border border-[color:var(--border)]";
-const MUTED_CLS = "text-[color:var(--muted)]";
+  "bg-[var(--card-2)] rounded-[var(--radius)] border border-[color:var(--border)]";
 
 const INPUT_CLS =
   "w-full rounded-full border border-[color:var(--border)] bg-[var(--card-2)] px-4 py-2 text-sm outline-none focus:border-[color:var(--accent)]";
@@ -339,22 +358,18 @@ export default function ImportPanel({ storePath, waiting, apps }: Props) {
     // The first load has not answered — or answered with something other
     // than a verdict on access (the app down, no admin credential configured),
     // which is worth reading rather than waiting behind.
-    return (
-      <div className={cn(CARD_CLS, "p-3.5")}>
-        {error ? (
-          <p className="text-xs text-[color:var(--danger,#f87171)]">{error}</p>
-        ) : (
-          <p className={cn("text-sm", MUTED_CLS)}>Checking your access…</p>
-        )}
-      </div>
+    return error ? (
+      <p className="text-xs text-[color:var(--danger)]">{error}</p>
+    ) : (
+      <p className={cn("text-sm", MUTED_CLS)}>Checking your access…</p>
     );
   }
 
   if (locked) {
     return (
-      <div className={cn(CARD_CLS, "flex flex-col gap-2 p-3.5")}>
-        <p className="text-sm">Sign in to import</p>
-        <p className={cn("text-xs", MUTED_CLS)}>
+      <div className="flex flex-col gap-2">
+        <p className="text-sm font-medium">Sign in to import</p>
+        <p className={NOTE}>
           <a href={withBasePath("/login?next=/manage")} className="underline">
             Signing in
           </a>{" "}
@@ -388,7 +403,7 @@ export default function ImportPanel({ storePath, waiting, apps }: Props) {
             Unlock
           </ActionButton>
         </form>
-        {error && <p className="text-xs text-[color:var(--danger,#f87171)]">{error}</p>}
+        {error && <p className="text-xs text-[color:var(--danger)]">{error}</p>}
       </div>
     );
   }
@@ -408,29 +423,35 @@ export default function ImportPanel({ storePath, waiting, apps }: Props) {
         />
       )}
 
-      <div className={cn(CARD_CLS, "flex flex-col gap-2 p-3.5")}>
-        <p className="text-sm">
-          Drop <span className="font-mono text-xs">.apk</span> or{" "}
-          <span className="font-mono text-xs">.xapk</span> files here:
+      <div className={BLOCK_CLS}>
+        <div className={BLOCK_HEAD_CLS}>
+          <FolderOpen size={15} className="shrink-0 text-[color:var(--muted-2)]" />
+          <p className="min-w-0 flex-1 truncate text-sm font-medium">Import folder</p>
+          <Pill tone={waiting > 0 ? "accent" : "neutral"}>
+            {waiting === 0
+              ? "empty"
+              : `${waiting} ${waiting === 1 ? "file" : "files"} waiting`}
+          </Pill>
+        </div>
+        <p className={NOTE}>
+          Drop <code>.apk</code> or <code>.xapk</code> files in this folder on
+          the host. The timer scans it on its own; the button does it now.
         </p>
-        <p className={cn("break-all font-mono text-xs", MUTED_CLS)}>{storePath}</p>
-        <div className="mt-1 flex flex-wrap items-center gap-2">
+        <p className="break-all rounded-[var(--radius)] bg-black/25 px-2.5 py-1.5 font-mono text-xs text-[color:var(--muted-2)]">
+          {storePath}
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
           <ActionButton size="sm" variant="secondary" onClick={scan} disabled={busy === "scan"}>
             <Upload size={13} /> {busy === "scan" ? "Scanning…" : "Scan now"}
           </ActionButton>
           <ActionButton size="sm" variant="secondary" onClick={() => void refresh()}>
             <RefreshCw size={13} /> Refresh
           </ActionButton>
-          <span className={cn("text-xs", MUTED_CLS)}>
-            {waiting === 0
-              ? "Nothing waiting"
-              : `${waiting} ${waiting === 1 ? "file" : "files"} waiting`}
-          </span>
         </div>
         {/* A file that is only a minute old is skipped on purpose, so the
             summary has to say so — otherwise a fresh drop looks ignored. */}
         {summary && (
-          <ul className={cn("mt-1 flex flex-col gap-0.5 text-xs", MUTED_CLS)}>
+          <ul className="flex flex-col gap-0.5 text-xs text-[color:var(--muted-2)]">
             {summary.imported.map((r) => (
               <li key={`i-${r.file}`}>
                 Imported {r.app} {r.version}
@@ -452,11 +473,26 @@ export default function ImportPanel({ storePath, waiting, apps }: Props) {
         )}
       </div>
 
-      {error && (
-        <p className="px-1 text-xs text-[color:var(--danger,#f87171)]">{error}</p>
-      )}
-      {notice && <p className={cn("px-1 text-xs", MUTED_CLS)}>{notice}</p>}
+      {error && <p className="text-xs text-[color:var(--danger)]">{error}</p>}
+      {notice && <p className={cn("text-xs", MUTED_CLS)}>{notice}</p>}
 
+      <div className={BLOCK_CLS}>
+        <div className={BLOCK_HEAD_CLS}>
+          <Inbox size={15} className="shrink-0 text-[color:var(--muted-2)]" />
+          <p className="min-w-0 flex-1 truncate text-sm font-medium">Review queue</p>
+          {items && items.length > 0 ? (
+            <Pill tone="warn">
+              {items.length} {items.length === 1 ? "decision" : "decisions"}
+            </Pill>
+          ) : (
+            <Pill>empty</Pill>
+          )}
+        </div>
+        <p className={NOTE}>
+          Files the scan could not place on its own: no app looked like them,
+          more than one did, or the signer did not match. Each one waits here
+          until you say where it goes.
+        </p>
       {items && items.length > 0 && (
         <div className="flex flex-col gap-2">
           {items.map((item) => (
@@ -475,8 +511,9 @@ export default function ImportPanel({ storePath, waiting, apps }: Props) {
         </div>
       )}
       {items && items.length === 0 && (
-        <p className={cn("px-1 text-xs", MUTED_CLS)}>Nothing waiting for a decision.</p>
+        <p className={cn("text-xs", MUTED_CLS)}>Nothing waiting for a decision.</p>
       )}
+      </div>
     </div>
   );
 }
@@ -520,48 +557,63 @@ function TelegramCard({
 }) {
   const when = status.run.finishedAt ?? status.run.startedAt;
   return (
-    <div className={cn(CARD_CLS, "flex flex-col gap-2 p-3.5")}>
-      <p className="text-sm">Telegram feed</p>
+    <div className={BLOCK_CLS}>
+      <div className={BLOCK_HEAD_CLS}>
+        <Send size={15} className="shrink-0 text-[color:var(--muted-2)]" />
+        <p className="min-w-0 flex-1 truncate text-sm font-medium">Telegram feed</p>
+        {!status.configured ? (
+          <Pill>not configured</Pill>
+        ) : status.running ? (
+          <Pill tone="accent">syncing</Pill>
+        ) : status.run.error ? (
+          <Pill tone="danger">failed</Pill>
+        ) : when ? (
+          <Pill tone="ok">synced {relativeTime(when)}</Pill>
+        ) : (
+          <Pill>never synced</Pill>
+        )}
+      </div>
       {!status.configured ? (
-        <p className={cn("text-xs", MUTED_CLS)}>
+        <p className={NOTE}>
           Not configured — <code>TELEGRAM_API_ID</code>,{" "}
           <code>TELEGRAM_API_HASH</code> and <code>TELEGRAM_SESSION</code> are
           unset.
         </p>
       ) : (
-        <p className={cn("text-xs", MUTED_CLS)}>
-          {status.channels
-            .map(
-              (c) =>
-                `@${c.name} — ${c.cursor ? `read up to post ${c.cursor}` : "never synced"}`
-            )
-            .join(" · ")}
-        </p>
+        <ul className="flex flex-col gap-0.5">
+          {status.channels.map((c) => (
+            <li key={c.name} className="flex items-baseline gap-2 text-xs">
+              <span className="font-medium">@{c.name}</span>
+              <span className={MUTED_CLS}>
+                {c.cursor ? `read up to post ${c.cursor}` : "never synced"}
+              </span>
+            </li>
+          ))}
+        </ul>
       )}
-      <div className="mt-1 flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <ActionButton
           variant="secondary"
           disabled={!status.configured || busy || status.running}
           onClick={onSync}
         >
-          <Send size={13} />{" "}
+          <RefreshCw size={13} className={status.running ? "animate-spin" : undefined} />{" "}
           {status.running ? "Syncing…" : busy ? "Starting…" : "Sync now"}
         </ActionButton>
         {when && !status.running && (
           <span className={cn("text-xs", MUTED_CLS)}>
-            Last run {new Date(when).toLocaleString("sv-SE")} —{" "}
-            {status.run.downloaded} file(s)
-            {status.run.error && (
-              <span className="text-[color:var(--danger,#f87171)]">
-                {" "}
-                — failed: {status.run.error}
-              </span>
-            )}
+            Last run {new Date(when).toLocaleString("sv-SE")} ·{" "}
+            {status.run.downloaded} {status.run.downloaded === 1 ? "file" : "files"}
           </span>
         )}
       </div>
+      {status.run.error && !status.running && (
+        <p className="text-xs text-[color:var(--danger)]">
+          Failed: {status.run.error}
+        </p>
+      )}
       {status.run.log.length > 0 && (
-        <ul className={cn("mt-1 flex flex-col gap-0.5 text-xs", MUTED_CLS)}>
+        <ul className="flex flex-col gap-0.5 rounded-[var(--radius)] bg-black/25 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-[color:var(--muted-2)]">
           {status.run.log.slice(-6).map((line, i) => (
             <li key={i} className="break-all">
               {line.replace(/^\S+ /, "")}
@@ -573,8 +625,8 @@ function TelegramCard({
           inside this card rather than beside it because they are the same
           run's leftovers, and a card of their own would read as a warning. */}
       {(status.candidates?.length ?? 0) > 0 && (
-        <div className="mt-1 flex flex-col gap-2">
-          <p className={cn("text-xs", MUTED_CLS)}>
+        <div className="flex flex-col gap-2 border-t border-[color:var(--border)] pt-2.5">
+          <p className={NOTE}>
             {status.candidates!.length === 1
               ? "One link was not an APK, but apkmb has a page for it"
               : `${status.candidates!.length} links were not APKs, but apkmb has pages for them`}
@@ -594,6 +646,19 @@ function TelegramCard({
       )}
     </div>
   );
+}
+
+/** "3 min ago", "2 h ago", "yesterday" — for a status pill, not a log. */
+function relativeTime(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return "just now";
+  const min = Math.round(ms / 60000);
+  if (min < 1) return "just now";
+  if (min < 60) return `${min} min ago`;
+  const h = Math.round(min / 60);
+  if (h < 24) return `${h} h ago`;
+  const d = Math.round(h / 24);
+  return d === 1 ? "yesterday" : `${d} days ago`;
 }
 
 const REASONS: Record<string, string> = {
@@ -644,7 +709,7 @@ function PlayCandidate({
   return (
     <div
       className={cn(
-        "flex flex-col gap-2 rounded-[var(--radius)] border border-[color:var(--border)] bg-[var(--card-2)] p-3"
+        "flex flex-col gap-2 rounded-[var(--radius)] border border-[color:var(--border)] bg-black/20 p-3"
       )}
     >
       <div className="flex items-start gap-3">
@@ -766,7 +831,7 @@ function LinkCandidateRow({
   return (
     <div
       className={cn(
-        "flex flex-col gap-2 rounded-[var(--radius)] border border-[color:var(--border)] bg-[var(--card-2)] p-3"
+        "flex flex-col gap-2 rounded-[var(--radius)] border border-[color:var(--border)] bg-black/20 p-3"
       )}
     >
       <div className="flex items-start gap-3">
@@ -933,10 +998,10 @@ function ReviewCard({
   }
 
   return (
-    <div className={cn(CARD_CLS, "flex flex-col gap-2 p-3.5")}>
-      <div>
-        <p className="break-all text-sm">{item.originalName}</p>
-        <p className={cn("text-xs", MUTED_CLS)}>
+    <div className={cn(CARD_CLS, "flex flex-col gap-2.5 p-3.5")}>
+      <div className="flex flex-col gap-1">
+        <p className="break-all text-sm font-medium">{item.originalName}</p>
+        <p className={cn("break-all text-xs", MUTED_CLS)}>
           {[
             item.parsedVersion && `v${item.parsedVersion}`,
             item.packageName,
@@ -945,7 +1010,7 @@ function ReviewCard({
             .filter(Boolean)
             .join(" · ")}
         </p>
-        <p className={cn("mt-1 text-xs", MUTED_CLS)}>
+        <p className="text-xs text-[color:var(--warn)]">
           {REASONS[item.reason] ?? item.reason}
         </p>
       </div>

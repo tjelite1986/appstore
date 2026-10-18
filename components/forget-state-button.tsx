@@ -42,7 +42,7 @@ export default function ForgetStateButton({ count }: { count: number }) {
   }
 
   return (
-    <div className="mt-2 flex items-center gap-2">
+    <div className="flex items-center gap-2">
       <button
         type="button"
         onClick={forget}

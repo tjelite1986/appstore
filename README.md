@@ -397,8 +397,8 @@ URL there and the shelf is on the phone.
 
 Entering the bare hostname is enough: Obtainium tries `/index.xml`,
 `/repo/index.xml` and `/fdroid/repo/index.xml` in turn, and the third answers.
-Settings shows the account's URL, copies it, and can replace it — which is also
-how a leaked one is revoked.
+Settings shows the account's URL, copies it, draws it as a QR code for the
+phone's camera, and can replace it — which is also how a leaked one is revoked.
 
 The URL adds one app at a time, and no repository can do better: Obtainium's
 search dialog is hardcoded to `onlyOneSelectionAllowed`. The whole shelf at
@@ -590,7 +590,7 @@ implies but does not draw:
 |---|---|
 | `/` Home | sketch, block for block |
 | `/apps`, `/games`, `/search`, `/updates` | sketch (only Games carried blocks) |
-| `/manage`, `/saved`, `/settings` | sketch (top bar; Saved and the Account block are wired) |
+| `/manage`, `/saved`, `/settings` | sketch (top bar). Manage opens on a strip of numbers and splits into work (add, import, review) and state (sources, old versions, shared ids, recent); Settings is the account card, the phone (URL + QR), the 18+ switch and, for admins, the store's own facts. The sketch's Appearance rows were dropped: the theme is a constant in `lib/theme.ts`, and a row that cannot be changed is not a setting |
 | `/app/[slug]` | not drawn; the sketch describes what tapping a cover opens |
 | `/category/[cat]` | not drawn; the Categories tiles have to land somewhere |
 

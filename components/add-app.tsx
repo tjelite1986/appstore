@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Check, Download, Plus, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { buttonClass } from "@/components/primitives";
+import { NOTE, buttonClass } from "@/components/primitives";
 import { adminCall } from "@/lib/admin-call";
 import { readAdminToken } from "@/lib/admin-token";
 import { detectSource } from "@/lib/sources/detect";
@@ -38,8 +38,6 @@ import { withBasePath } from "@/lib/base-path";
  * Its own file because "use client" is file-wide — see `thumb-image.tsx`.
  */
 
-const CARD_CLS =
-  "bg-[var(--card)] rounded-[var(--radius)] border border-[color:var(--border)]";
 const MUTED_CLS = "text-[color:var(--muted)]";
 const INPUT_CLS =
   "w-full rounded-full border border-[color:var(--border)] bg-[var(--card-2)] px-4 py-2 text-sm outline-none focus:border-[color:var(--accent)]";
@@ -265,7 +263,7 @@ export default function AddApp() {
   }
 
   return (
-    <div className={cn(CARD_CLS, "flex flex-col gap-3 p-3.5")}>
+    <div className="flex flex-col gap-3">
       <form
         className="flex gap-2"
         onSubmit={(e) => {
@@ -319,7 +317,7 @@ export default function AddApp() {
         )}
       </form>
 
-      <p className={cn("text-xs", MUTED_CLS)}>
+      <p className={NOTE}>
         {detected.kind === "play"
           ? "Play supplies the name, description and pictures — never the APK. The entry carries the package id, so the next matching drop attaches itself instead of waiting in the review queue."
           : detected.kind === "apkmb"

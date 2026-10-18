@@ -114,6 +114,11 @@
 - `"use client"` is file-wide: keep state in its own file
   (`components/thumb-image.tsx`). `components/primitives.tsx` stays
   server-safe; its `Button` takes no handlers on purpose, use `buttonClass()`.
+- Manage and Settings are built from `Panel`, `Stat` and `Pill` in
+  `components/primitives.tsx`; the page draws the panel, the client component
+  supplies the body. Explanations go in the panel head (`NOTE`, 12px,
+  `--muted-2`), never as 11px half-opacity text under a card — that is what
+  made Manage unreadable. Status colours are `--danger`/`--warn`/`--ok`.
 
 ### SQLite and caches
 - `lib/db.ts` opens lazily (parallel `next build` workers), `busy_timeout`

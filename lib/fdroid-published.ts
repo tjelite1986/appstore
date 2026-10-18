@@ -54,6 +54,21 @@ export const PUBLISHED_FILES: Record<string, string> = {
  * every index is in place, so its presence also answers "is there a signed
  * index yet"; that is why the settings row appears with it and not before.
  */
+/**
+ * When the signing job last finished, read off the fingerprint file it writes
+ * last — or null before it has run. Settings shows it so "is the repository
+ * current" has an answer without reading a timer log.
+ */
+export async function repoSignedAt(): Promise<string | null> {
+  const abs = await resolveInStore(FDROID_STATE_DIR, "fingerprint.txt");
+  if (!abs) return null;
+  try {
+    return (await fs.stat(abs)).mtime.toISOString();
+  } catch {
+    return null;
+  }
+}
+
 export async function repoFingerprint(): Promise<string | null> {
   const abs = await resolveInStore(FDROID_STATE_DIR, "fingerprint.txt");
   if (!abs) return null;

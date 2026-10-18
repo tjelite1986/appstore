@@ -12,14 +12,15 @@
  * Turning it on asks first. Turning it off does not — a gate should never be
  * harder to close than to open.
  *
- * The row is hand-rolled rather than a `RowCard`: switching it needs state, and
- * `rows.tsx` is imported by server components that must stay server-rendered.
+ * Hand-rolled rather than a shared row component: switching it needs state,
+ * and the shared pieces are imported by server components that must stay
+ * server-rendered.
  */
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ShieldAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { CARD, MUTED, SectionTitle } from "@/components/primitives";
+import { MUTED, NOTE, Panel } from "@/components/primitives";
 import { withBasePath } from "@/lib/base-path";
 
 export default function AdultsToggle({
@@ -60,46 +61,51 @@ export default function AdultsToggle({
   }
 
   return (
-    <section className="px-[var(--pad)]">
-      <SectionTitle title="Content" />
-      <div className={cn(CARD, "overflow-hidden")}>
-        <button
-          type="button"
-          onClick={() => void set(!allowed)}
-          disabled={!signedIn || pending}
-          aria-pressed={allowed}
-          className="flex w-full items-center gap-3 px-3.5 py-3 text-left disabled:opacity-60"
-        >
-          <ShieldAlert
-            size={17}
-            className="shrink-0 text-[color:var(--muted-2)]"
-          />
-          <span className="min-w-0 flex-1 truncate text-sm">Show 18+ apps</span>
-          {signedIn ? null : (
-            <span className={cn("shrink-0 truncate text-xs", MUTED)}>
-              Sign in
-            </span>
+    <Panel
+      icon={ShieldAlert}
+      title="Content"
+      description="What the shelf is allowed to show this account."
+      flush
+    >
+      <button
+        type="button"
+        onClick={() => void set(!allowed)}
+        disabled={!signedIn || pending}
+        aria-pressed={allowed}
+        className="flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-[var(--card-2)] disabled:opacity-60 disabled:hover:bg-transparent"
+      >
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-medium">Show 18+ apps</span>
+          <span className={cn("block", NOTE)}>
+            {signedIn
+              ? allowed
+                ? "On. Apps filed under Adults are on the shelf, in search and in your repository."
+                : "Off. Apps filed under Adults are absent everywhere — not hidden, absent."
+              : "Sign in to answer this. A signed-out visitor never sees the Adults shelf."}
+          </span>
+        </span>
+        {signedIn ? null : (
+          <span className={cn("shrink-0 text-xs", MUTED)}>Sign in</span>
+        )}
+        <span
+          className={cn(
+            "flex h-6 w-11 shrink-0 items-center rounded-full px-0.5 transition-colors",
+            allowed ? "bg-[var(--accent)]" : "bg-[var(--card-2)]"
           )}
+        >
           <span
             className={cn(
-              "flex h-5 w-9 shrink-0 items-center rounded-full px-0.5",
-              allowed ? "bg-[var(--accent)]" : "bg-[var(--card-2)]"
+              "h-5 w-5 rounded-full bg-white shadow transition-transform",
+              allowed && "translate-x-5"
             )}
-          >
-            <span
-              className={cn(
-                "h-4 w-4 rounded-full bg-white transition",
-                allowed && "translate-x-4"
-              )}
-            />
-          </span>
-        </button>
-      </div>
+          />
+        </span>
+      </button>
       {failed && (
-        <p className="mt-2 text-xs text-[color:var(--danger,#f87171)]">
+        <p className="px-4 pb-3 text-xs text-[color:var(--danger)]">
           Could not save that.
         </p>
       )}
-    </section>
+    </Panel>
   );
 }

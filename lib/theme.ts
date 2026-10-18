@@ -43,6 +43,10 @@ export const THEME_VARS = `
   --muted-2: rgba(255, 255, 255, 0.70);
   --bar: rgba(0, 0, 0, 0.60);
   --menu: rgba(28, 28, 32, 0.96);
+  /* Status colours, kept to a hint of text: the store is dark and quiet. */
+  --danger: #f87171;
+  --warn: #fbbf24;
+  --ok: #4ade80;
   --app-bg: ${BACKGROUND_CSS};
   /* Height reserved for the fixed bottom nav so page content can clear it. */
   --nav-h: 4.25rem;

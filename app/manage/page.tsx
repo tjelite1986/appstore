@@ -1,13 +1,35 @@
 import Link from "next/link";
+import {
+  Archive,
+  ChevronDown,
+  Copy,
+  FolderInput,
+  History,
+  Layers,
+  PackagePlus,
+  Rss,
+} from "lucide-react";
 import { Screen, ScreenTitle } from "@/components/screen";
-import AppRows from "@/components/app-rows";
-import { CARD, MUTED, SectionTitle } from "@/components/primitives";
+import {
+  MUTED,
+  Panel,
+  Pill,
+  Stat,
+  Thumb,
+  buttonClass,
+} from "@/components/primitives";
 import AddApp from "@/components/add-app";
 import SourcesPanel from "@/components/sources-panel";
 import ImportPanel from "@/components/import-panel";
 import PruneVersions from "@/components/prune-versions";
 import { STORE_DIRS, STORE_HOST_ROOT } from "@/lib/storage";
-import { getCatalog, pendingImports, withoutAdults } from "@/lib/store";
+import {
+  formatBytes,
+  getCatalog,
+  pendingImports,
+  withoutAdults,
+  type StoreApp,
+} from "@/lib/store";
 import { duplicatePackages } from "@/lib/merge";
 import { planPrune } from "@/lib/prune";
 import { currentUserId } from "@/lib/current-user";
@@ -16,13 +38,22 @@ import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
+/** How many shared-id groups show before the rest fold behind a disclosure. */
+const DUPLICATES_SHOWN = 4;
+
 /**
  * Manage — the admin surface, reached from the top bar.
+ *
+ * It opens on numbers: how big the library is, what is waiting, what is
+ * wrong. Under them the screen splits in two on a wide display — the work on
+ * the left (adding an app, the import folder and its review queue), the state
+ * of the library on the right (sources, old versions, shared package ids,
+ * what arrived last). On a phone the same cards stack in that order.
  *
  * The import folder is real: `ImportPanel` scans it and resolves what the scan
  * would not decide on its own, `AddApp` takes an address and works out which
  * source it belongs to, and `SourcesPanel` asks those sources what they have
- * now. Nothing on this screen is layout any more.
+ * now.
  */
 export default async function ManagePage() {
   const [{ apps: all, placeholder }, waiting] = await Promise.all([
@@ -45,6 +76,19 @@ export default async function ManagePage() {
   // behind it — read through the route with the same gate — agree.
   const stale = placeholder ? null : planPrune(apps);
 
+  const files = apps.flatMap((a) => a.versions.flatMap((v) => v.files));
+  const bytes = files.reduce((sum, f) => sum + f.bytes, 0);
+  const counts = {
+    github: apps.filter((a) => a.source?.kind === "github").length,
+    fdroid: apps.filter((a) => a.source?.kind === "fdroid").length,
+    play: apps.filter((a) => a.source?.kind === "play").length,
+  };
+  const recent = placeholder
+    ? []
+    : [...apps]
+        .sort((a, b) => (b.added ?? "").localeCompare(a.added ?? ""))
+        .slice(0, 6);
+
   return (
     <Screen>
       <ScreenTitle
@@ -52,97 +96,316 @@ export default async function ManagePage() {
         subtitle={
           placeholder
             ? "The library is empty — showing the placeholder catalog"
-            : `${apps.length} ${apps.length === 1 ? "app" : "apps"} in the catalog`
+            : "The library, what is waiting for you, and what needs a look"
         }
       />
 
-      <section className="px-[var(--pad)]">
-        <SectionTitle title="Add an app" />
-        <AddApp />
-      </section>
+      <div className="flex flex-col gap-[var(--gap)] px-[var(--pad)]">
+        {/* The numbers first. Each one that has a card behind it jumps there. */}
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+          <Stat
+            label="Apps"
+            value={apps.length}
+            sub={placeholder ? "placeholder" : plural(files.length, "file")}
+            icon={Layers}
+          />
+          <Stat
+            label="On disk"
+            value={formatBytes(bytes)}
+            sub={plural(
+              apps.reduce((n, a) => n + a.versions.length, 0),
+              "version"
+            )}
+            icon={Archive}
+          />
+          <Stat
+            label="Waiting"
+            value={waiting}
+            sub={waiting === 0 ? "import folder empty" : "in the import folder"}
+            tone={waiting > 0 ? "accent" : "neutral"}
+            href="#import"
+            icon={FolderInput}
+          />
+          <Stat
+            label="Sources"
+            value={counts.github + counts.fdroid + counts.play}
+            sub={
+              [
+                counts.github && `${counts.github} GitHub`,
+                counts.fdroid && `${counts.fdroid} F-Droid`,
+                counts.play && `${counts.play} Play`,
+              ]
+                .filter(Boolean)
+                .join(" · ") || "none linked"
+            }
+            href="#sources"
+            icon={Rss}
+          />
+          <Stat
+            label="Shared ids"
+            value={duplicates.length}
+            sub={duplicates.length === 0 ? "none" : "two listings each"}
+            tone={duplicates.length > 0 ? "warn" : "neutral"}
+            href={duplicates.length > 0 ? "#duplicates" : undefined}
+            icon={Copy}
+          />
+          <Stat
+            label="Reclaimable"
+            value={stale && stale.versions > 0 ? stale.size : "none"}
+            sub={
+              stale && stale.versions > 0
+                ? plural(stale.versions, "older version")
+                : "one version each"
+            }
+            href={stale && stale.versions > 0 ? "#older" : undefined}
+            icon={History}
+          />
+        </div>
 
-      <section className="px-[var(--pad)]">
-        <SectionTitle title="Import" />
-        <ImportPanel
-          storePath={`${STORE_HOST_ROOT}/${STORE_DIRS.import}`}
-          waiting={waiting}
-          // Placeholder rows are not folders on disk — offering them as attach
-          // targets would create an app named after an example.
-          apps={
-            placeholder
-              ? []
-              : apps.map((a) => ({ slug: a.slug, name: a.name }))
-          }
-        />
-      </section>
+        <div className="grid gap-[var(--gap)] lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:items-start">
+          {/* Left: the work. */}
+          <div className="flex min-w-0 flex-col gap-[var(--gap)]">
+            <Panel
+              icon={PackagePlus}
+              title="Add an app"
+              description="Search Google Play by name, or paste a GitHub repository, an F-Droid package or an apkmb page. The panel works out which source it is."
+            >
+              <AddApp />
+            </Panel>
 
-      <section className="px-[var(--pad)]">
-        <SectionTitle title="Sources" />
-        <SourcesPanel
-          counts={{
-            github: apps.filter((a) => a.source?.kind === "github").length,
-            fdroid: apps.filter((a) => a.source?.kind === "fdroid").length,
-            play: apps.filter((a) => a.source?.kind === "play").length,
-          }}
-        />
-      </section>
+            <Panel
+              id="import"
+              icon={FolderInput}
+              title="Import"
+              aside={
+                waiting > 0 ? (
+                  <Pill tone="accent">{plural(waiting, "file")} waiting</Pill>
+                ) : null
+              }
+              description="The Telegram feed and the import folder both land here. Files the scan cannot place on its own wait below for a decision."
+            >
+              <ImportPanel
+                storePath={`${STORE_HOST_ROOT}/${STORE_DIRS.import}`}
+                waiting={waiting}
+                // Placeholder rows are not folders on disk — offering them as
+                // attach targets would create an app named after an example.
+                apps={
+                  placeholder
+                    ? []
+                    : apps.map((a) => ({ slug: a.slug, name: a.name }))
+                }
+              />
+            </Panel>
+          </div>
 
-      {duplicates.length > 0 && (
-        <section className="px-[var(--pad)]">
-          <SectionTitle title="One package id, two listings" />
-          <div className={cn(CARD, "divide-y divide-[color:var(--border)]")}>
-            {duplicates.map((group) => (
-              <div key={group.packageName} className="space-y-1.5 p-3">
-                <p className={cn("break-all font-mono text-[11px]", MUTED)}>
-                  {group.packageName}
-                </p>
-                <div className="flex flex-wrap gap-x-3 gap-y-1">
-                  {group.apps.map((app) => (
-                    <Link
-                      key={app.slug}
-                      href={`/app/${app.slug}`}
-                      className="text-sm underline decoration-[color:var(--border)] underline-offset-4"
-                    >
-                      {app.name}{" "}
-                      <span className={cn("text-xs", MUTED)}>
-                        ({app.slug} · {app.version} ·{" "}
-                        {app.versions.length === 1
-                          ? "1 file"
-                          : `${app.versions.length} files`}
-                        )
-                      </span>
-                    </Link>
-                  ))}
-                </div>
-              </div>
+          {/* Right: the state of the library. */}
+          <div className="flex min-w-0 flex-col gap-[var(--gap)]">
+            <Panel
+              id="sources"
+              icon={Rss}
+              title="Sources"
+              description="Where the listings came from, and whether upstream has moved on. A check is a few API calls; fetching downloads every new release."
+            >
+              <SourcesPanel counts={counts} />
+            </Panel>
+
+            {stale && stale.versions > 0 && (
+              <Panel
+                id="older"
+                icon={History}
+                title="Older versions"
+                aside={<Pill>{stale.size}</Pill>}
+                description={
+                  <>
+                    Every app keeps its newest version; the ones behind it are
+                    deleted from the disk, not moved to{" "}
+                    <code>_import/_discarded/</code>. The list is shown before
+                    anything goes.
+                  </>
+                }
+              >
+                <PruneVersions
+                  summary={`${plural(stale.versions, "older version")} across ${plural(stale.apps.length, "app")} · ${stale.size}`}
+                />
+              </Panel>
+            )}
+
+            {duplicates.length > 0 && (
+              <Panel
+                id="duplicates"
+                icon={Copy}
+                title="One package id, two listings"
+                aside={<Pill tone="warn">{duplicates.length}</Pill>}
+                description="Android keys on the package id, so a phone holds one of each pair. Where it is the same app twice, open either listing and fold them together — the merge panel is on the app page, under the edit form."
+                flush
+              >
+                <DuplicateGroups groups={duplicates} />
+              </Panel>
+            )}
+
+            {recent.length > 0 && (
+              <Panel
+                icon={Layers}
+                title="Recently added"
+                aside={
+                  <Link href="/apps" className={cn("text-xs", MUTED)}>
+                    All apps &rarr;
+                  </Link>
+                }
+                description="The last listings to arrive, newest first — the ones most likely to still need a description or an icon."
+                flush
+              >
+                <RecentRows apps={recent} />
+              </Panel>
+            )}
+          </div>
+        </div>
+      </div>
+    </Screen>
+  );
+}
+
+function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
+}
+
+/** "2026-10-18T…" → "18 Oct" — close enough for a list of what came last. */
+function shortDate(iso: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
+
+/**
+ * The shared-id groups, one block per package id and one line per listing.
+ *
+ * The old rendering ran every listing into one wrapped sentence with its slug,
+ * version and file count in brackets — twenty of those in a row were a wall.
+ * Here each listing has its own line with the facts in the same columns, and
+ * everything past the first few groups folds behind a native disclosure: the
+ * count is in the head, the detail is there when wanted.
+ */
+function DuplicateGroups({
+  groups,
+}: {
+  groups: { packageName: string; apps: StoreApp[] }[];
+}) {
+  const shown = groups.slice(0, DUPLICATES_SHOWN);
+  const folded = groups.slice(DUPLICATES_SHOWN);
+  return (
+    <div className="divide-y divide-[color:var(--border)]">
+      {shown.map((group) => (
+        <DuplicateGroup key={group.packageName} group={group} />
+      ))}
+      {folded.length > 0 && (
+        <details className="group">
+          <summary
+            className={cn(
+              "flex cursor-pointer select-none items-center justify-between gap-2 px-4 py-2.5 text-xs font-medium",
+              "text-[color:var(--muted-2)] hover:bg-[var(--card-2)] [&::-webkit-details-marker]:hidden"
+            )}
+          >
+            <span>
+              <span className="group-open:hidden">
+                Show {plural(folded.length, "more package id")}
+              </span>
+              <span className="hidden group-open:inline">Show fewer</span>
+            </span>
+            <ChevronDown
+              size={14}
+              className="transition-transform group-open:rotate-180"
+            />
+          </summary>
+          <div className="divide-y divide-[color:var(--border)] border-t border-[color:var(--border)]">
+            {folded.map((group) => (
+              <DuplicateGroup key={group.packageName} group={group} />
             ))}
           </div>
-          <p className={cn("mt-2 text-[11px] leading-relaxed", MUTED)}>
-            Android keys on the package id, so a phone can hold only one of
-            each pair at a time. Where that is the same app twice, open either
-            listing to fold them together — the merge panel is on the app page,
-            under the edit form.
-          </p>
-        </section>
+        </details>
       )}
+    </div>
+  );
+}
 
-      {stale && stale.versions > 0 && (
-        <section className="px-[var(--pad)]">
-          <SectionTitle title="Older versions" />
-          <PruneVersions
-            summary={`${stale.versions} older ${stale.versions === 1 ? "version" : "versions"} across ${stale.apps.length} ${stale.apps.length === 1 ? "app" : "apps"} · ${stale.size}`}
-          />
-          <p className={cn("mt-2 text-[11px] leading-relaxed", MUTED)}>
-            Every app keeps its newest version; the ones behind it are deleted
-            from the disk, not moved to <code>_import/_discarded/</code>. The
-            list is shown before anything goes.
-          </p>
-        </section>
-      )}
+function DuplicateGroup({
+  group,
+}: {
+  group: { packageName: string; apps: StoreApp[] };
+}) {
+  return (
+    <div className="px-4 py-3">
+      <div className="flex items-center justify-between gap-2">
+        <code className={cn("min-w-0 truncate text-[11px]", MUTED)}>
+          {group.packageName}
+        </code>
+        <Pill>{plural(group.apps.length, "listing")}</Pill>
+      </div>
+      <ul className="mt-2 flex flex-col gap-1.5">
+        {group.apps.map((app) => (
+          <li key={app.slug} className="flex items-center gap-2.5">
+            <Thumb
+              seed={app.seed}
+              src={app.icon}
+              background={app.iconBackground}
+              fit={app.iconFit}
+              alt=""
+              className="h-7 w-7 shrink-0 rounded-[var(--radius-sm)]"
+            />
+            <Link
+              href={`/app/${app.slug}`}
+              className="min-w-0 flex-1 truncate text-sm font-medium hover:underline"
+            >
+              {app.name}
+            </Link>
+            <span className={cn("shrink-0 text-xs tabular-nums", MUTED)}>
+              {app.version === "—" || !app.version ? "no file" : app.version}
+              {" · "}
+              {plural(app.versions.length, "file")}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
-      {apps.length > 0 && (
-        <AppRows title="Catalog" apps={apps.slice(0, 6)} button="Edit" />
-      )}
-    </Screen>
+/** The newest listings, each with a way straight into its edit form. */
+function RecentRows({ apps }: { apps: StoreApp[] }) {
+  return (
+    <ul className="divide-y divide-[color:var(--border)]">
+      {apps.map((app) => (
+        <li key={app.slug} className="flex items-center gap-3 px-4 py-2.5">
+          <Link href={`/app/${app.slug}`} className="shrink-0">
+            <Thumb
+              seed={app.seed}
+              src={app.icon}
+              background={app.iconBackground}
+              fit={app.iconFit}
+              alt={app.name}
+              className="h-10 w-10 rounded-[var(--radius-sm)]"
+            />
+          </Link>
+          <Link href={`/app/${app.slug}`} className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-medium">{app.name}</span>
+            <span className={cn("block truncate text-xs", MUTED)}>
+              {[
+                app.version && app.version !== "—" ? app.version : "no file yet",
+                app.source?.kind,
+                shortDate(app.added),
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
+          </Link>
+          <Link
+            href={`/app/${app.slug}`}
+            className={buttonClass("secondary", "sm")}
+          >
+            Edit
+          </Link>
+        </li>
+      ))}
+    </ul>
   );
 }

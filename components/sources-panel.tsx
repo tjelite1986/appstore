@@ -2,9 +2,16 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ArrowDownToLine, RefreshCw } from "lucide-react";
+import {
+  ArrowDownToLine,
+  GitBranch,
+  Package,
+  Play,
+  RefreshCw,
+  type LucideIcon,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
-import { buttonClass } from "@/components/primitives";
+import { MUTED, NOTE, Pill, buttonClass } from "@/components/primitives";
 import { adminHeaders, readAdminToken } from "@/lib/admin-token";
 import type { SourceCheck, SourceReport } from "@/lib/sources/updates";
 import { withBasePath } from "@/lib/base-path";
@@ -21,29 +28,36 @@ import { withBasePath } from "@/lib/base-path";
  * different things: a check is a handful of API calls, a fetch is every new
  * release downloaded over a home line. Nothing is fetched without being asked
  * for by name.
+ *
+ * The page wraps this in a `Panel`; the body here is the three source rows,
+ * the buttons, and the report of the last check.
  */
-
-const CARD_CLS =
-  "bg-[var(--card)] rounded-[var(--radius)] border border-[color:var(--border)]";
-const MUTED_CLS = "text-[color:var(--muted)]";
 
 export type SourceCounts = { github: number; fdroid: number; play: number };
 
-const LINES: { key: keyof SourceCounts; label: string; note: string }[] = [
+const LINES: {
+  key: keyof SourceCounts;
+  label: string;
+  note: string;
+  Icon: LucideIcon;
+}[] = [
   {
     key: "github",
     label: "GitHub releases",
-    note: "words and binaries — the newest release is fetched",
+    note: "Words and binaries. The newest release is fetched.",
+    Icon: GitBranch,
   },
   {
     key: "fdroid",
     label: "F-Droid",
-    note: "words, icon and binaries — the recommended build is fetched",
+    note: "Words, icon and binaries. The recommended build is fetched.",
+    Icon: Package,
   },
   {
     key: "play",
     label: "Google Play",
-    note: "words and pictures only — Play serves APKs to nobody but Play",
+    note: "Words and pictures only — Play serves APKs to nobody but Play.",
+    Icon: Play,
   },
 ];
 
@@ -53,6 +67,14 @@ const STATUS_TEXT: Record<SourceCheck["status"], string> = {
   installed: "fetched",
   unavailable: "nothing to fetch",
   error: "failed",
+};
+
+const STATUS_TONE: Record<SourceCheck["status"], "neutral" | "accent" | "ok" | "danger"> = {
+  current: "neutral",
+  available: "accent",
+  installed: "ok",
+  unavailable: "neutral",
+  error: "danger",
 };
 
 export default function SourcesPanel({ counts }: { counts: SourceCounts }) {
@@ -78,7 +100,7 @@ export default function SourcesPanel({ counts }: { counts: SourceCounts }) {
       if (!res.ok) {
         throw new Error(
           res.status === 401 || res.status === 403
-            ? "Sign in as an admin, or unlock the panel below"
+            ? "Sign in as an admin, or unlock the import panel"
             : data.error || `Request failed (${res.status})`
         );
       }
@@ -91,33 +113,34 @@ export default function SourcesPanel({ counts }: { counts: SourceCounts }) {
   }
 
   return (
-    <div className={cn(CARD_CLS, "flex flex-col gap-3 p-3.5")}>
-      <div className="flex flex-col gap-2">
-        {LINES.map((line) => (
-          <div key={line.key} className="flex items-baseline gap-3">
-            <span className="min-w-0 flex-1 truncate text-sm">
-              {line.label}
-              <span className={cn("ml-2 text-[11px]", MUTED_CLS)}>
-                {line.note}
-              </span>
+    <div className="flex flex-col gap-4">
+      <ul className="flex flex-col gap-3">
+        {LINES.map(({ key, label, note, Icon }) => (
+          <li key={key} className="flex items-start gap-3">
+            <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius)] bg-[var(--card-2)] text-[color:var(--muted-2)]">
+              <Icon size={14} />
             </span>
-            <span className={cn("shrink-0 text-xs", MUTED_CLS)}>
-              {counts[line.key] === 0
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-medium">{label}</span>
+              <span className={cn("block", NOTE)}>{note}</span>
+            </span>
+            <Pill tone={counts[key] > 0 ? "accent" : "neutral"}>
+              {counts[key] === 0
                 ? "no apps"
-                : `${counts[line.key]} app${counts[line.key] === 1 ? "" : "s"}`}
-            </span>
-          </div>
+                : `${counts[key]} app${counts[key] === 1 ? "" : "s"}`}
+            </Pill>
+          </li>
         ))}
-      </div>
+      </ul>
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2 border-t border-[color:var(--border)] pt-3">
         <button
           type="button"
-          className={cn(buttonClass("secondary", "sm"))}
+          className={cn(buttonClass("secondary", "sm"), "disabled:opacity-50")}
           disabled={busy !== null || checkable === 0}
           onClick={() => void run(false)}
         >
-          <RefreshCw size={13} />
+          <RefreshCw size={13} className={busy === "check" ? "animate-spin" : undefined} />
           {busy === "check" ? "Asking…" : "Check for updates"}
         </button>
 
@@ -126,7 +149,7 @@ export default function SourcesPanel({ counts }: { counts: SourceCounts }) {
         {report && report.available > 0 && (
           <button
             type="button"
-            className={cn(buttonClass("primary", "sm"))}
+            className={cn(buttonClass("primary", "sm"), "disabled:opacity-50")}
             disabled={busy !== null}
             onClick={() => void run(true)}
           >
@@ -137,53 +160,44 @@ export default function SourcesPanel({ counts }: { counts: SourceCounts }) {
           </button>
         )}
 
-        {checkable === 0 && (
-          <span className={cn("text-xs", MUTED_CLS)}>
-            Nothing to check — add an app from GitHub or F-Droid above.
+        {checkable === 0 ? (
+          <span className={cn("text-xs", MUTED)}>
+            Nothing to check — add an app from GitHub or F-Droid first.
           </span>
-        )}
-      </div>
-
-      {error && (
-        <p className="text-xs text-[color:var(--danger,#f87171)]">{error}</p>
-      )}
-
-      {report && (
-        <div className="flex flex-col gap-1.5">
-          <p className={cn("text-xs", MUTED_CLS)}>
+        ) : report ? (
+          <span className={cn("text-xs tabular-nums", MUTED)}>
             {report.checked} checked · {report.available} newer ·{" "}
             {report.installed} fetched
             {report.errors > 0 ? ` · ${report.errors} failed` : ""}
-          </p>
+          </span>
+        ) : null}
+      </div>
+
+      {error && <p className="text-xs text-[color:var(--danger)]">{error}</p>}
+
+      {report && report.apps.length > 0 && (
+        <ul className="flex flex-col divide-y divide-[color:var(--border)] rounded-[var(--radius)] border border-[color:var(--border)]">
           {report.apps.map((app) => (
-            <div
+            <li
               key={app.slug}
-              className="flex items-baseline gap-2 rounded-[var(--radius)] bg-[var(--card-2)] px-2.5 py-2 text-xs"
+              className="flex items-center gap-2 px-3 py-2 text-xs"
             >
-              <Link href={`/app/${app.slug}`} className="truncate">
+              <Link
+                href={`/app/${app.slug}`}
+                className="min-w-0 shrink-0 truncate font-medium hover:underline"
+              >
                 {app.name}
               </Link>
-              <span className={cn("min-w-0 flex-1 truncate", MUTED_CLS)}>
+              <span className={cn("min-w-0 flex-1 truncate", MUTED)}>
                 {app.detail ??
                   [app.held && `has ${app.held}`, app.upstream && `upstream ${app.upstream}`]
                     .filter(Boolean)
                     .join(" · ")}
               </span>
-              <span
-                className={cn(
-                  "shrink-0",
-                  app.status === "error"
-                    ? "text-[color:var(--danger,#f87171)]"
-                    : app.status === "current"
-                      ? MUTED_CLS
-                      : "text-[color:var(--accent-text)]"
-                )}
-              >
-                {STATUS_TEXT[app.status]}
-              </span>
-            </div>
+              <Pill tone={STATUS_TONE[app.status]}>{STATUS_TEXT[app.status]}</Pill>
+            </li>
           ))}
-        </div>
+        </ul>
       )}
     </div>
   );
