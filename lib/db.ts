@@ -175,5 +175,34 @@ function migrate(conn: Database.Database): void {
       installed_at TEXT    NOT NULL,
       PRIMARY KEY (user_id, slug)
     );
+
+    -- Whether one build of an app worked for one person.
+    --
+    -- Keyed on the version, not the app: a mod that worked last month and
+    -- crashes on today's build is the whole reason to ask, and a single
+    -- answer per app could not tell the two apart. "Working" and "broken"
+    -- are both claims made from a phone this page cannot see; the counts on
+    -- the page are how many people made each one, nothing more.
+    CREATE TABLE IF NOT EXISTS file_status (
+      user_id    INTEGER NOT NULL,
+      slug       TEXT    NOT NULL,
+      version    TEXT    NOT NULL,
+      status     TEXT    NOT NULL CHECK (status IN ('working', 'broken')),
+      updated_at TEXT    NOT NULL,
+      PRIMARY KEY (user_id, slug, version)
+    );
+    CREATE INDEX IF NOT EXISTS file_status_file ON file_status(slug, version);
+
+    -- What people wrote about one build: "needs microG", "login broken since
+    -- 2.3", the things a version number cannot say. Plain text, newest last.
+    CREATE TABLE IF NOT EXISTS file_comments (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id    INTEGER NOT NULL,
+      slug       TEXT    NOT NULL,
+      version    TEXT    NOT NULL,
+      body       TEXT    NOT NULL,
+      created_at TEXT    NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS file_comments_file ON file_comments(slug, version, id);
   `);
 }

@@ -20,6 +20,7 @@ import PruneVersions from "@/components/prune-versions";
 import AppFamily from "@/components/app-family";
 import AppCompanions from "@/components/app-companions";
 import ShareApp from "@/components/share-app";
+import FileFeedbackCard from "@/components/file-feedback";
 import { storedText } from "@/lib/edit";
 import { abiShortLabel } from "@/lib/apk-abi";
 import { appFor, catalogFor } from "@/lib/user-state";
@@ -34,6 +35,7 @@ import { withBasePath } from "@/lib/base-path";
 import { requestOrigin } from "@/lib/origin";
 import { currentUser } from "@/lib/current-user";
 import { stateFor } from "@/lib/user-state";
+import { feedbackFor } from "@/lib/file-feedback";
 
 export const dynamic = "force-dynamic";
 
@@ -229,6 +231,18 @@ export default async function AppDetailPage({
 
   const mine = stateFor(userId, app.slug);
 
+  // Whether each build worked, and what people wrote about it — one entry per
+  // version the page draws. A linked app has no file here but does have a
+  // version someone installed, so it gets a card for that one.
+  const headVersion = latest?.version ?? (linked ? app.version : null);
+  const feedback = feedbackFor(
+    viewer,
+    app.slug,
+    [headVersion, ...older.map((v) => v.version)].filter(
+      (v): v is string => typeof v === "string"
+    )
+  );
+
   return (
     <Screen flush>
       {/* banners/<slug>.jpg when there is one; otherwise the same deterministic
@@ -336,6 +350,17 @@ export default async function AppDetailPage({
           slug={app.slug}
           latest={latest?.version ?? app.version}
           initialVersion={mine.installedVersion}
+        />
+      )}
+
+      {/* Did it run? Per build, from whoever tried it — see
+          components/file-feedback.tsx. Shown signed out too (the counts and
+          the words are the point), minus the controls. */}
+      {headVersion && feedback.get(headVersion) && (
+        <FileFeedbackCard
+          slug={app.slug}
+          feedback={feedback.get(headVersion)!}
+          signedIn={userId !== null}
         />
       )}
 
@@ -492,10 +517,11 @@ export default async function AppDetailPage({
               <div
                 key={v.version}
                 className={cn(
-                  "flex items-center gap-3 px-3.5 py-3",
+                  "px-3.5 py-3",
                   i > 0 && "border-t border-[color:var(--border)]"
                 )}
               >
+              <div className="flex items-center gap-3">
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-mono text-sm">
                     {v.version}
@@ -527,6 +553,20 @@ export default async function AppDetailPage({
                     </a>
                   ))}
                 </span>
+              </div>
+              {/* The same card as for the newest build, folded to one line:
+                  an older version is kept because someone may need it, and
+                  "did it work" is the first thing they want to know. */}
+              {feedback.get(v.version) && (
+                <div className="mt-2">
+                  <FileFeedbackCard
+                    slug={app.slug}
+                    feedback={feedback.get(v.version)!}
+                    signedIn={userId !== null}
+                    compact
+                  />
+                </div>
+              )}
               </div>
             ))}
           </div>

@@ -154,6 +154,8 @@ export function clearState(userId: number): void {
   conn.transaction(() => {
     conn.prepare("DELETE FROM user_saved WHERE user_id = ?").run(userId);
     conn.prepare("DELETE FROM user_installed WHERE user_id = ?").run(userId);
+    // What they said about builds goes too; comments stay (lib/file-feedback.ts).
+    conn.prepare("DELETE FROM file_status WHERE user_id = ?").run(userId);
   })();
 }
 

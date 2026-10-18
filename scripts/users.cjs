@@ -63,7 +63,7 @@ db.exec(`
 `);
 
 function clearUserRows(id) {
-  for (const table of ["user_saved", "user_installed", "user_prefs", "user_repo_token"]) {
+  for (const table of ["user_saved", "user_installed", "user_prefs", "user_repo_token", "file_status", "file_comments"]) {
     const exists = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
     if (exists) db.prepare(`DELETE FROM ${table} WHERE user_id = ?`).run(id);
   }

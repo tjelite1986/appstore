@@ -47,6 +47,7 @@ import {
   type StoreApp,
 } from "./store";
 import { db } from "./db";
+import { moveFeedback } from "./file-feedback";
 
 /**
  * A refusal with the answer's shape already decided.
@@ -479,6 +480,7 @@ export async function mergeApps(
 
   followFacts(facts);
   moveUserRows(from, into);
+  moveFeedback(from, into);
   invalidateCatalog();
 
   return { ...plan, moved, archived, archive: archiveRel, repointed };
