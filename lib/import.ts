@@ -84,7 +84,7 @@ async function realApps(): Promise<StoreApp[]> {
  * listing that needs re-filing by hand; being wrong away from it publishes an
  * adult app to a signed-out visitor.
  */
-async function categoryForNewSibling(
+export async function categoryForNewSibling(
   packageName: string | null | undefined
 ): Promise<Category | null> {
   if (!packageName) return null;
@@ -192,7 +192,7 @@ type MatchResult = {
   suggestions: Suggestion[];
 };
 
-function matchApps(
+export function matchApps(
   parsedName: string,
   packageName: string | null,
   signer: string | null,
@@ -200,11 +200,30 @@ function matchApps(
 ): MatchResult {
   // 1) Exact package id. The manifest's own answer to "which app is this", so
   // one hit ends the search.
+  let siblings: StoreApp[] = [];
   if (packageName) {
     const pkg = packageName.toLowerCase();
     const byPkg = apps.filter((a) => a.packageName?.toLowerCase() === pkg);
     if (byPkg.length === 1) {
       return { auto: byPkg[0], autoWhy: "package id", suggestions: [] };
+    }
+    // Several listings carry the id on purpose — the store's own build next
+    // to a public mod of the same app — and what tells them apart is the key
+    // each is signed with. One listing pinned to this drop's signer is as
+    // exact an answer as a lone package id. Otherwise the siblings are the
+    // candidates, named ahead of anything a name match turns up.
+    if (byPkg.length > 1) {
+      if (signer) {
+        const bySigner = byPkg.filter((a) => a.signingCert === signer);
+        if (bySigner.length === 1) {
+          return {
+            auto: bySigner[0],
+            autoWhy: "package id and signing key",
+            suggestions: [],
+          };
+        }
+      }
+      siblings = byPkg;
     }
   }
 
@@ -236,10 +255,20 @@ function matchApps(
     return { auto: fullCoverage[0].app, autoWhy: "name match", suggestions: [] };
   }
 
-  return {
-    auto: null,
-    autoWhy: null,
-    suggestions: scored.slice(0, 5).map((s) => ({
+  const bySibling: Suggestion[] = siblings.map((app) => ({
+    slug: app.slug,
+    name: app.name,
+    score: 1,
+    why: !app.signingCert
+      ? "same package id, no signing key pinned yet"
+      : app.signingCert === signer
+        ? "same package id and signing key"
+        : "same package id, another signing key",
+  }));
+  const byName: Suggestion[] = scored
+    .filter((s) => !siblings.includes(s.app))
+    .slice(0, Math.max(0, 5 - bySibling.length))
+    .map((s) => ({
       slug: s.app.slug,
       name: s.app.name,
       score: Math.round(s.score * 100) / 100,
@@ -247,7 +276,12 @@ function matchApps(
         signer && s.app.signingCert === signer
           ? "same signing key"
           : "name similarity",
-    })),
+    }));
+
+  return {
+    auto: null,
+    autoWhy: null,
+    suggestions: [...bySibling, ...byName],
   };
 }
 

@@ -9,7 +9,13 @@
  */
 import { requireAdmin } from "@/lib/admin";
 import { fetchImageDataUrl } from "@/lib/sources/net";
-import { addFromPlay, fetchPlayListing, PlayNoListing, searchPlay } from "@/lib/sources/play";
+import {
+  addFromPlay,
+  fetchPlayListing,
+  PlayAlreadyHere,
+  PlayNoListing,
+  searchPlay,
+} from "@/lib/sources/play";
 
 export const dynamic = "force-dynamic";
 
@@ -69,18 +75,33 @@ export async function POST(req: Request): Promise<Response> {
   } catch {
     return Response.json({ error: "Expected a JSON body" }, { status: 400 });
   }
-  const { packageId } = (body ?? {}) as { packageId?: string };
+  const { packageId, separate } = (body ?? {}) as {
+    packageId?: string;
+    separate?: boolean;
+  };
   if (typeof packageId !== "string" || !packageId) {
     return Response.json({ error: "packageId is required" }, { status: 400 });
   }
 
   try {
-    return Response.json(await addFromPlay(packageId));
+    return Response.json(await addFromPlay(packageId, { separate: separate === true }));
   } catch (err) {
-    // Everything addFromPlay throws is a sentence for the person who clicked:
-    // already in the catalog, no such listing, not a package id.
     const message = err instanceof Error ? err.message : String(err);
     console.error("[play] add failed:", message);
+    // "Already here" is an offer, not a fault: the panel may ask again with
+    // `separate` to file a second listing under the same package id.
+    if (err instanceof PlayAlreadyHere) {
+      return Response.json(
+        {
+          error: message,
+          existingSlug: err.existingSlug,
+          existingName: err.existingName,
+        },
+        { status: 409 }
+      );
+    }
+    // Everything else addFromPlay throws is a sentence for the person who
+    // clicked: no such listing, not a package id.
     return Response.json({ error: message }, { status: 400 });
   }
 }

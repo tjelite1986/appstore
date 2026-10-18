@@ -64,7 +64,12 @@
   versionName (they rarely match; every release would re-download).
 - Play is metadata-only and lookups are approved by a human: a package id
   says which app a build is *of*, not which build. Adding an id already in the
-  catalog is refused (duplicates make every future drop ambiguous).
+  catalog answers 409 with the existing slug; the panel then offers "Add as a
+  second listing" (`separate: true`) for a different build of the same app.
+  The importer tells such siblings apart by signing key (`matchApps`: one
+  sibling pinned to the drop's signer attaches; otherwise review, siblings
+  named first). `duplicatePackages` flags a group `mergeable` only where two
+  members share a key or one has none; Manage lists the rest as kept apart.
 
 ### Shelf shapes
 - Keep three shapes apart: `family` (one card; browse collapses, search does

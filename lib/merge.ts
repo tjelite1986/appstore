@@ -522,16 +522,24 @@ async function repointSlug(from: string, into: string): Promise<string[]> {
 }
 
 /**
- * Listings that describe the same package.
+ * Listings that describe the same package and could be one listing.
  *
  * The duplicate this feature exists for is invisible until something looks for
  * it: two rows in a catalog of a hundred, alphabetically adjacent only by
  * luck. Groups of one are not returned — the answer is "nothing to merge",
  * not a list of every app.
+ *
+ * Two listings pinned to different signing keys are not that duplicate. They
+ * are two builds of one app kept apart on purpose — the store's own patched
+ * client beside a public mod — and a merge would have to throw one key away.
+ * A group is `mergeable` only while two of its members could become one:
+ * signed by the same key, or one of them with no key pinned yet. The rest are
+ * still returned, flagged, because the shared id is still the only place the
+ * pair is visible and a phone still holds one of them at a time.
  */
 export function duplicatePackages(
   apps: StoreApp[]
-): { packageName: string; apps: StoreApp[] }[] {
+): { packageName: string; apps: StoreApp[]; mergeable: boolean }[] {
   const groups = new Map<string, StoreApp[]>();
   for (const app of apps) {
     if (!app.packageName) continue;
@@ -539,8 +547,22 @@ export function duplicatePackages(
     if (list) list.push(app);
     else groups.set(app.packageName, [app]);
   }
+  const mergeable = (list: StoreApp[]) =>
+    list.filter((app) =>
+      list.some(
+        (other) =>
+          other !== app &&
+          (!other.signingCert ||
+            !app.signingCert ||
+            other.signingCert === app.signingCert)
+      )
+    );
   return [...groups]
     .filter(([, list]) => list.length > 1)
-    .map(([packageName, list]) => ({ packageName, apps: list }))
+    .map(([packageName, list]) => ({
+      packageName,
+      apps: list,
+      mergeable: mergeable(list).length > 1,
+    }))
     .sort((a, b) => a.apps[0].name.localeCompare(b.apps[0].name));
 }

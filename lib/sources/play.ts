@@ -18,8 +18,14 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { STORE_DIRS, STORE_ROOT } from "@/lib/storage";
-import { readMetaRaw, uniqueSlug, writeMeta } from "@/lib/import";
 import {
+  categoryForNewSibling,
+  readMetaRaw,
+  uniqueSlug,
+  writeMeta,
+} from "@/lib/import";
+import {
+  ADULT_CATEGORY,
   getApps,
   invalidateCatalog,
   type AppSource,
@@ -397,21 +403,44 @@ export type PlayAddResult = {
 };
 
 /**
+ * The package is already here. Carries the listing it is here as, so the
+ * panel can offer the second listing instead of only repeating the sentence.
+ */
+export class PlayAlreadyHere extends Error {
+  constructor(
+    readonly existingSlug: string,
+    readonly existingName: string
+  ) {
+    super(`${existingName} is already in the catalog as "${existingSlug}"`);
+  }
+}
+
+/**
  * Create a catalog entry from a Play listing.
  *
- * Refuses a package the catalog already carries. Two entries for one package
- * id do not merely duplicate a row — the importer matches on that id and
- * treats more than one hit as ambiguous, so a duplicate would silently stop
- * every future drop of that app from attaching itself.
+ * Refuses a package the catalog already carries unless `separate` says the
+ * second listing is wanted. Two listings under one package id are not a
+ * duplicate row when they are two builds — the store's own patched client
+ * beside a public mod — and each keeps its own page, versions and signing
+ * key. The importer tells such siblings apart by the key a drop is signed
+ * with, so the second listing does not stop future drops from attaching;
+ * only a drop signed by a key neither listing has pinned waits for review.
+ *
+ * The sibling's shelf is inherited where it is the gated one: a second
+ * listing of an adult app must not start outside the 18+ gate because Play
+ * files it under a different genre.
  */
-export async function addFromPlay(packageId: string): Promise<PlayAddResult> {
+export async function addFromPlay(
+  packageId: string,
+  opts: { separate?: boolean } = {}
+): Promise<PlayAddResult> {
   const listing = await fetchPlayListing(packageId);
 
   const clash = (await getApps()).find(
     (a) => a.packageName?.toLowerCase() === listing.packageId.toLowerCase()
   );
-  if (clash) {
-    throw new Error(`${clash.name} is already in the catalog as "${clash.slug}"`);
+  if (clash && !opts.separate) {
+    throw new PlayAlreadyHere(clash.slug, clash.name);
   }
 
   const slug = await uniqueSlug(listing.name);
@@ -428,6 +457,13 @@ export async function addFromPlay(packageId: string): Promise<PlayAddResult> {
       addedFrom: "manage/add",
     },
   });
+  if (clash) {
+    const inherited = await categoryForNewSibling(listing.packageId);
+    if (inherited === ADULT_CATEGORY) {
+      await writeMeta(slug, { category: ADULT_CATEGORY });
+      invalidateCatalog();
+    }
+  }
 
   return {
     slug,

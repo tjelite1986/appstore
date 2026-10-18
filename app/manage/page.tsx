@@ -81,6 +81,10 @@ export default async function ManagePage() {
   // alphabetically adjacent only by luck, and the merge control lives on the
   // app page, where you have to already suspect it to go looking.
   const duplicates = placeholder ? [] : duplicatePackages(apps);
+  // Same key or no key yet: the same app twice, to fold together. Different
+  // keys: two builds of one app on purpose, listed but not offered a merge.
+  const toMerge = duplicates.filter((g) => g.mergeable);
+  const apart = duplicates.filter((g) => !g.mergeable);
   // Counted off the same gated list, so the number on the button and the list
   // behind it — read through the route with the same gate — agree.
   const stale = placeholder ? null : planPrune(apps);
@@ -201,8 +205,16 @@ export default async function ManagePage() {
           <Stat
             label="Shared ids"
             value={duplicates.length}
-            sub={duplicates.length === 0 ? "none" : "two listings each"}
-            tone={duplicates.length > 0 ? "warn" : "neutral"}
+            sub={
+              duplicates.length === 0
+                ? "none"
+                : toMerge.length === 0
+                  ? "all kept apart"
+                  : apart.length === 0
+                    ? "to merge"
+                    : `${toMerge.length} to merge · ${apart.length} apart`
+            }
+            tone={toMerge.length > 0 ? "warn" : "neutral"}
             href={duplicates.length > 0 ? "#duplicates" : undefined}
             icon={Copy}
           />
@@ -322,11 +334,39 @@ export default async function ManagePage() {
                 id="duplicates"
                 icon={Copy}
                 title="One package id, two listings"
-                aside={<Pill tone="warn">{duplicates.length}</Pill>}
-                description="Android keys on the package id, so a phone holds one of each pair. Where it is the same app twice, open either listing and fold them together — the merge panel is on the app page, under the edit form."
+                aside={
+                  toMerge.length > 0 ? (
+                    <Pill tone="warn">{toMerge.length}</Pill>
+                  ) : (
+                    <Pill>{plural(apart.length, "kept apart")}</Pill>
+                  )
+                }
+                description="Android keys on the package id, so a phone holds one of each pair. Where it is the same app twice, open either listing and fold them together — the merge panel is on the app page, under the edit form. Listings signed by different keys are two builds of one app on purpose, like the store's own patched client beside a public mod; they are kept apart and only counted below."
                 flush
               >
-                <DuplicateGroups groups={duplicates} />
+                <DuplicateGroups groups={toMerge} />
+                {apart.length > 0 && (
+                  <details className="group border-t border-[color:var(--border)]">
+                    <summary
+                      className={cn(
+                        "flex cursor-pointer select-none items-center justify-between gap-2 px-4 py-2.5 text-xs font-medium",
+                        "text-[color:var(--muted-2)] hover:bg-[var(--card-2)] [&::-webkit-details-marker]:hidden"
+                      )}
+                    >
+                      <span>
+                        {plural(apart.length, "package id")} shared by builds
+                        with different signing keys
+                      </span>
+                      <span className="group-open:hidden">Show</span>
+                      <span className="hidden group-open:inline">Hide</span>
+                    </summary>
+                    <div className="divide-y divide-[color:var(--border)] border-t border-[color:var(--border)]">
+                      {apart.map((group) => (
+                        <DuplicateGroup key={group.packageName} group={group} />
+                      ))}
+                    </div>
+                  </details>
+                )}
               </Panel>
             )}
 

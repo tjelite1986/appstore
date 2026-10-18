@@ -79,6 +79,8 @@ export default function AddApp() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [added, setAdded] = useState<Record<string, PlayAddResult>>({});
+  /** The hit whose "add it again" question is open — one at a time. */
+  const [again, setAgain] = useState<string | null>(null);
   const [landed, setLanded] = useState<SourceLanding | null>(null);
   const [apkmb, setApkmb] = useState<ApkmbCandidate | null>(null);
   const [apkmbDone, setApkmbDone] = useState<string | null>(null);
@@ -243,13 +245,19 @@ export default function AddApp() {
     }
   }
 
-  async function add(hit: PlayHit) {
+  /**
+   * `separate` files a second listing under a package id the catalog already
+   * carries — a build of its own beside the one that is here, not a copy of
+   * it. Asked for explicitly, since a listing has no delete button.
+   */
+  async function add(hit: PlayHit, separate = false) {
     setBusy(hit.packageId);
     setError(null);
+    setAgain(null);
     try {
       const result: PlayAddResult = await call("/api/sources/play", {
         method: "POST",
-        body: JSON.stringify({ packageId: hit.packageId }),
+        body: JSON.stringify({ packageId: hit.packageId, separate }),
       });
       setAdded((prev) => ({ ...prev, [hit.packageId]: result }));
       // The catalog counts and the rows around this panel are rendered by the
@@ -445,8 +453,9 @@ export default function AddApp() {
             return (
               <li
                 key={hit.packageId}
-                className="flex items-center gap-3 rounded-[var(--radius)] bg-[var(--card-2)] p-2.5"
+                className="flex flex-col gap-2 rounded-[var(--radius)] bg-[var(--card-2)] p-2.5"
               >
+                <div className="flex flex-wrap items-center gap-3">
                 {hit.iconUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element -- proxied
                   <img
@@ -460,7 +469,7 @@ export default function AddApp() {
                   <div className="h-10 w-10 shrink-0 rounded-[12px] bg-[var(--card)]" />
                 )}
 
-                <div className="min-w-0 flex-1">
+                <div className="min-w-[9rem] flex-1">
                   <p className="truncate text-sm">{hit.name}</p>
                   <p className={cn("truncate text-xs", MUTED_CLS)}>
                     {[
@@ -474,12 +483,29 @@ export default function AddApp() {
                 </div>
 
                 {slug ? (
-                  <Link
-                    href={`/app/${slug}`}
-                    className={cn(buttonClass("secondary", "sm"), "shrink-0")}
-                  >
-                    <Check size={13} /> {result ? "Added" : "In catalog"}
-                  </Link>
+                  <div className="ml-auto flex shrink-0 gap-2">
+                    <Link
+                      href={`/app/${slug}`}
+                      className={cn(buttonClass("secondary", "sm"), "shrink-0")}
+                    >
+                      <Check size={13} /> {result ? "Added" : "In catalog"}
+                    </Link>
+                    {/* A second listing under the same package id: the store's
+                        own build beside a public mod. Two clicks on purpose —
+                        a listing has no delete button. */}
+                    {!result && (
+                      <button
+                        type="button"
+                        className={cn(buttonClass("ghost", "sm"), "shrink-0")}
+                        disabled={busy === hit.packageId}
+                        onClick={() =>
+                          setAgain(again === hit.packageId ? null : hit.packageId)
+                        }
+                      >
+                        <Plus size={13} /> Add another
+                      </button>
+                    )}
+                  </div>
                 ) : (
                   <button
                     type="button"
@@ -490,6 +516,25 @@ export default function AddApp() {
                     <Plus size={13} />
                     {busy === hit.packageId ? "Adding…" : "Add"}
                   </button>
+                )}
+                </div>
+                {again === hit.packageId && !result && (
+                  <div className="flex flex-wrap items-center gap-2 border-t border-[color:var(--border)] pt-2">
+                    <p className={cn("min-w-0 flex-1 text-xs", MUTED_CLS)}>
+                      A second listing for <code>{hit.packageId}</code>, beside{" "}
+                      <code>{hit.existingSlug}</code>: its own page, versions
+                      and signing key, for a different build of the same app.
+                      A phone still holds only one of them at a time.
+                    </p>
+                    <button
+                      type="button"
+                      className={cn(buttonClass("primary", "sm"), "shrink-0")}
+                      disabled={busy === hit.packageId}
+                      onClick={() => void add(hit, true)}
+                    >
+                      {busy === hit.packageId ? "Adding…" : "Add as a second listing"}
+                    </button>
+                  </div>
                 )}
               </li>
             );
