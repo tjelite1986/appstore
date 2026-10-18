@@ -60,6 +60,13 @@ const SOURCE_LABEL: Record<"github" | "fdroid" | "play" | "apkmb", string> = {
   apkmb: "apkmb",
 };
 
+/** A source's "already here" answer, held until the person says which way. */
+type SourceClash = {
+  ref: string;
+  existingSlug: string;
+  existingName: string;
+};
+
 /** A read of an apkmb page, held while the person decides what to do with it. */
 type ApkmbCandidate = {
   listing: ApkmbListing;
@@ -82,7 +89,11 @@ export default function AddApp() {
   /** The hit whose "add it again" question is open — one at a time. */
   const [again, setAgain] = useState<string | null>(null);
   const [landed, setLanded] = useState<SourceLanding | null>(null);
+  /** F-Droid's 409: the id is here already, and the second listing is on offer. */
+  const [fdroidAgain, setFdroidAgain] = useState<SourceClash | null>(null);
   const [apkmb, setApkmb] = useState<ApkmbCandidate | null>(null);
+  /** Whether the apkmb card's "add it again" question is open. */
+  const [apkmbAgain, setApkmbAgain] = useState(false);
   const [apkmbDone, setApkmbDone] = useState<string | null>(null);
   const router = useRouter();
 
@@ -91,9 +102,10 @@ export default function AddApp() {
   useEffect(() => setToken(readAdminToken()), []);
 
   const call = useCallback(
-    (path: string, init?: RequestInit) =>
+    (path: string, init?: RequestInit, accept?: number[]) =>
       adminCall(path, init, token, {
         hint: "Sign in as an admin, or unlock the panel below",
+        accept,
       }),
     [token]
   );
@@ -104,22 +116,37 @@ export default function AddApp() {
    * The request holds the line for as long as the download takes — a release
    * is hundreds of megabytes and the answer worth having is "it landed, and
    * this is the version", not "started".
+   *
+   * F-Droid answers 409 when the package id is already here. That is an
+   * offer, not a failure: it is shown as a question, and `separate` is the
+   * yes — a second listing under the same id, for a different build of the
+   * same app. Nothing was written by the refused request.
    */
-  async function addFromSource(kind: "github" | "fdroid", ref: string) {
+  async function addFromSource(
+    kind: "github" | "fdroid",
+    ref: string,
+    separate = false
+  ) {
     setBusy(kind);
     setError(null);
     setLanded(null);
+    setFdroidAgain(null);
     try {
-      const data: GithubAddResult | FdroidAddResult =
+      const data: GithubAddResult | FdroidAddResult | SourceClash =
         kind === "github"
           ? await call("/api/sources/github", {
               method: "POST",
               body: JSON.stringify({ ref }),
             })
-          : await call("/api/sources/fdroid", {
-              method: "POST",
-              body: JSON.stringify({ packageId: ref }),
-            });
+          : await call(
+              "/api/sources/fdroid",
+              { method: "POST", body: JSON.stringify({ packageId: ref, separate }) },
+              [409]
+            );
+      if ("existingSlug" in data) {
+        setFdroidAgain({ ...data, ref });
+        return;
+      }
       // GitHub reads the release and lets go of it; F-Droid still hands its
       // file to the importer. The two answer "which version" differently.
       setLanded(
@@ -161,6 +188,7 @@ export default function AddApp() {
     setBusy("apkmb");
     setError(null);
     setApkmb(null);
+    setApkmbAgain(false);
     setApkmbDone(null);
     try {
       const data = await call(
@@ -204,23 +232,32 @@ export default function AddApp() {
     }
   }
 
-  /** Onto a new shelf, with no APK on it until one arrives from somewhere else. */
-  async function addApkmb(listing: ApkmbListing) {
+  /**
+   * Onto a new shelf, with no APK on it until one arrives from somewhere else.
+   *
+   * `separate` files it beside the listing that already carries the page's
+   * package id — a different build of the same app, not a copy. Asked for
+   * explicitly, since a listing has no delete button.
+   */
+  async function addApkmb(listing: ApkmbListing, separate = false) {
     setBusy("apkmb-write");
     setError(null);
     try {
       const result: ApkmbAddResult = await call("/api/sources/apkmb", {
         method: "POST",
-        body: JSON.stringify({ url: listing.url }),
+        body: JSON.stringify({ url: listing.url, separate }),
       });
       setApkmbDone(
-        `${result.name} added as ${result.slug} — ${
-          result.images.icon ? "icon" : "no icon"
-        }, ${result.images.screenshots} screenshot${
+        `${result.name} added as ${result.slug}${
+          separate && listing.existingSlug ? ` beside ${listing.existingSlug}` : ""
+        } — ${result.images.icon ? "icon" : "no icon"}, ${
+          result.images.screenshots
+        } screenshot${
           result.images.screenshots === 1 ? "" : "s"
         }. It has no versions until an APK for it lands.`
       );
       setApkmb(null);
+      setApkmbAgain(false);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -333,6 +370,43 @@ export default function AddApp() {
             : `${SOURCE_LABEL[detected.kind]} serves the binary too: the newest release is downloaded, checked against the app's pinned signer, and put on the shelf as it is added. Large releases take a while — this waits for the file.`}
       </p>
 
+      {/* F-Droid said the id is here already. Two clicks on purpose — a
+          listing has no delete button — and the second one downloads. */}
+      {fdroidAgain && (
+        <div className="flex flex-wrap items-center gap-2 rounded-[var(--radius)] bg-[var(--card-2)] p-2.5">
+          <p className={cn("min-w-0 flex-1 text-xs", MUTED_CLS)}>
+            <strong className="font-normal text-[color:var(--fg)]">
+              {fdroidAgain.existingName}
+            </strong>{" "}
+            is already in the catalog as{" "}
+            <Link href={`/app/${fdroidAgain.existingSlug}`} className="underline">
+              {fdroidAgain.existingSlug}
+            </Link>
+            . A second listing beside it would get its own page, versions and
+            signing key, with F-Droid&apos;s build on the shelf — for a
+            different build of the same app. A phone still holds only one of
+            them at a time.
+          </p>
+          <button
+            type="button"
+            className={cn(buttonClass("ghost", "sm"), "shrink-0")}
+            disabled={busy === "fdroid"}
+            onClick={() => setFdroidAgain(null)}
+          >
+            Never mind
+          </button>
+          <button
+            type="button"
+            className={cn(buttonClass("primary", "sm"), "shrink-0")}
+            disabled={busy === "fdroid"}
+            onClick={() => void addFromSource("fdroid", fdroidAgain.ref, true)}
+          >
+            <Download size={13} />
+            {busy === "fdroid" ? "Fetching…" : "Add as a second listing"}
+          </button>
+        </div>
+      )}
+
       {landed && (
         <p className={cn("text-xs", MUTED_CLS)}>
           <strong className="font-normal text-[color:var(--fg)]">
@@ -357,7 +431,9 @@ export default function AddApp() {
           a judgement only somebody looking at both can make. */}
       {apkmb && (
         <div className="flex flex-col gap-2 rounded-[var(--radius)] bg-[var(--card-2)] p-2.5">
-          <div className="flex items-center gap-3">
+          {/* Wraps like the Play row: two buttons beside a name do not fit a
+              phone, and a clipped "Add another" is an offer nobody sees. */}
+          <div className="flex flex-wrap items-center gap-3">
             {apkmb.iconDataUrl ? (
               // eslint-disable-next-line @next/next/no-img-element -- inlined data URL
               <img
@@ -371,7 +447,7 @@ export default function AddApp() {
               <div className="h-10 w-10 shrink-0 rounded-[12px] bg-[var(--card)]" />
             )}
 
-            <div className="min-w-0 flex-1">
+            <div className="min-w-[9rem] flex-1">
               <p className="truncate text-sm">{apkmb.listing.name}</p>
               <p className={cn("truncate text-xs", MUTED_CLS)}>
                 {[
@@ -386,24 +462,61 @@ export default function AddApp() {
               </p>
             </div>
 
-            <button
-              type="button"
-              className={cn(buttonClass("primary", "sm"), "shrink-0")}
-              disabled={busy === "apkmb-write"}
-              onClick={() =>
-                apkmb.listing.existingSlug
-                  ? void fillApkmb(apkmb.listing, apkmb.listing.existingSlug)
-                  : void addApkmb(apkmb.listing)
-              }
-            >
-              <Plus size={13} />
-              {busy === "apkmb-write"
-                ? "Writing…"
-                : apkmb.listing.existingSlug
-                  ? `Fill ${apkmb.listing.existingSlug}`
-                  : "Add"}
-            </button>
+            {/* The fill button carries a slug, so the pair can outgrow a
+                phone-width panel on its own: it wraps as well. */}
+            <div className="ml-auto flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                className={cn(buttonClass("primary", "sm"), "shrink-0")}
+                disabled={busy === "apkmb-write"}
+                onClick={() =>
+                  apkmb.listing.existingSlug
+                    ? void fillApkmb(apkmb.listing, apkmb.listing.existingSlug)
+                    : void addApkmb(apkmb.listing)
+                }
+              >
+                <Plus size={13} />
+                {busy === "apkmb-write"
+                  ? "Writing…"
+                  : apkmb.listing.existingSlug
+                    ? `Fill ${apkmb.listing.existingSlug}`
+                    : "Add"}
+              </button>
+              {/* A second listing under the same package id, as the Play
+                  row offers it. Only an id match qualifies: a page matched
+                  by name alone has nothing the importer could tell two
+                  shelves apart by. */}
+              {apkmb.listing.existingBy === "packageId" && (
+                <button
+                  type="button"
+                  className={cn(buttonClass("ghost", "sm"), "shrink-0")}
+                  disabled={busy === "apkmb-write"}
+                  onClick={() => setApkmbAgain((open) => !open)}
+                >
+                  <Plus size={13} /> Add another
+                </button>
+              )}
+            </div>
           </div>
+
+          {apkmbAgain && apkmb.listing.existingBy === "packageId" && (
+            <div className="flex flex-wrap items-center gap-2 border-t border-[color:var(--border)] pt-2">
+              <p className={cn("min-w-0 flex-1 text-xs", MUTED_CLS)}>
+                A second listing for <code>{apkmb.listing.packageId}</code>,
+                beside <code>{apkmb.listing.existingSlug}</code>: its own page,
+                versions and signing key, for a different build of the same
+                app. A phone still holds only one of them at a time.
+              </p>
+              <button
+                type="button"
+                className={cn(buttonClass("primary", "sm"), "shrink-0")}
+                disabled={busy === "apkmb-write"}
+                onClick={() => void addApkmb(apkmb.listing, true)}
+              >
+                {busy === "apkmb-write" ? "Writing…" : "Add as a second listing"}
+              </button>
+            </div>
+          )}
 
           {apkmb.listing.tagline && (
             <p className="text-xs">{apkmb.listing.tagline}</p>

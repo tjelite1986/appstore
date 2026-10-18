@@ -9,10 +9,10 @@
  */
 import { requireAdmin } from "@/lib/admin";
 import { fetchImageDataUrl } from "@/lib/sources/net";
+import { AlreadyHere, alreadyHereResponse } from "@/lib/sources/already-here";
 import {
   addFromPlay,
   fetchPlayListing,
-  PlayAlreadyHere,
   PlayNoListing,
   searchPlay,
 } from "@/lib/sources/play";
@@ -90,16 +90,7 @@ export async function POST(req: Request): Promise<Response> {
     console.error("[play] add failed:", message);
     // "Already here" is an offer, not a fault: the panel may ask again with
     // `separate` to file a second listing under the same package id.
-    if (err instanceof PlayAlreadyHere) {
-      return Response.json(
-        {
-          error: message,
-          existingSlug: err.existingSlug,
-          existingName: err.existingName,
-        },
-        { status: 409 }
-      );
-    }
+    if (err instanceof AlreadyHere) return alreadyHereResponse(err);
     // Everything else addFromPlay throws is a sentence for the person who
     // clicked: no such listing, not a package id.
     return Response.json({ error: message }, { status: 400 });

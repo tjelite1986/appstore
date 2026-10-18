@@ -64,8 +64,12 @@
   versionName (they rarely match; every release would re-download).
 - Play is metadata-only and lookups are approved by a human: a package id
   says which app a build is *of*, not which build. Adding an id already in the
-  catalog answers 409 with the existing slug; the panel then offers "Add as a
-  second listing" (`separate: true`) for a different build of the same app.
+  catalog answers 409 with the existing slug (`AlreadyHere` in
+  `lib/sources/already-here.ts`, thrown by the Play, apkmb and F-Droid adds
+  alike); the panel then offers "Add as a second listing" (`separate: true`)
+  for a different build of the same app. apkmb offers it only on an id match
+  (`existingBy`), never on a name match. A sibling inherits the Adults
+  category before its first write.
   The importer tells such siblings apart by signing key (`matchApps`: one
   sibling pinned to the drop's signer attaches; otherwise review, siblings
   named first). `duplicatePackages` flags a group `mergeable` only where two

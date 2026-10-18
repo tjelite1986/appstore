@@ -18,6 +18,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { STORE_DIRS, STORE_ROOT } from "@/lib/storage";
+import { AlreadyHere } from "@/lib/sources/already-here";
 import {
   categoryForNewSibling,
   readMetaRaw,
@@ -403,19 +404,6 @@ export type PlayAddResult = {
 };
 
 /**
- * The package is already here. Carries the listing it is here as, so the
- * panel can offer the second listing instead of only repeating the sentence.
- */
-export class PlayAlreadyHere extends Error {
-  constructor(
-    readonly existingSlug: string,
-    readonly existingName: string
-  ) {
-    super(`${existingName} is already in the catalog as "${existingSlug}"`);
-  }
-}
-
-/**
  * Create a catalog entry from a Play listing.
  *
  * Refuses a package the catalog already carries unless `separate` says the
@@ -440,7 +428,7 @@ export async function addFromPlay(
     (a) => a.packageName?.toLowerCase() === listing.packageId.toLowerCase()
   );
   if (clash && !opts.separate) {
-    throw new PlayAlreadyHere(clash.slug, clash.name);
+    throw new AlreadyHere(clash.slug, clash.name);
   }
 
   // The gate is decided before anything is written: a second listing of an

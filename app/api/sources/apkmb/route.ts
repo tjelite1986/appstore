@@ -1,6 +1,9 @@
 /**
  * GET  /api/sources/apkmb?url=…   read one product page, writing nothing
- * POST /api/sources/apkmb         { url } — add that listing to the catalog
+ * POST /api/sources/apkmb         { url, separate? } — add that listing to
+ *                                  the catalog; 409 with the existing slug
+ *                                  when its package id is already here,
+ *                                  unless `separate` asks for a second listing
  *
  * Admin-gated like the rest of the write surface, the GET included: it makes
  * an outbound request in this server's name, and leaving it open would turn
@@ -10,6 +13,7 @@
  */
 import { requireAdmin } from "@/lib/admin";
 import { fetchImageDataUrl } from "@/lib/sources/net";
+import { AlreadyHere, alreadyHereResponse } from "@/lib/sources/already-here";
 import { addFromApkmb, lookupApkmb } from "@/lib/sources/apkmb";
 
 export const dynamic = "force-dynamic";
@@ -51,17 +55,25 @@ export async function POST(req: Request): Promise<Response> {
   } catch {
     return Response.json({ error: "Expected a JSON body" }, { status: 400 });
   }
-  const { url } = (body ?? {}) as { url?: string };
+  const { url, separate } = (body ?? {}) as {
+    url?: string;
+    separate?: boolean;
+  };
   if (typeof url !== "string" || !url) {
     return Response.json({ error: "url is required" }, { status: 400 });
   }
 
   try {
-    return Response.json(await addFromApkmb(url));
+    return Response.json(
+      await addFromApkmb(url, { separate: separate === true }),
+    );
   } catch (err) {
-    // Everything addFromApkmb throws is a sentence for the person who clicked.
     const message = err instanceof Error ? err.message : String(err);
     console.error("[apkmb] add failed:", message);
+    // "Already here" is an offer, not a fault: the panel may ask again with
+    // `separate` to file a second listing under the same package id.
+    if (err instanceof AlreadyHere) return alreadyHereResponse(err);
+    // Everything else addFromApkmb throws is a sentence for the person who clicked.
     return Response.json({ error: message }, { status: 400 });
   }
 }

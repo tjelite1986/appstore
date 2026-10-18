@@ -22,8 +22,19 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { STORE_DIRS, STORE_ROOT } from "@/lib/storage";
-import { readMetaRaw, uniqueSlug, writeMeta } from "@/lib/import";
-import { getApps, invalidateCatalog, type Category } from "@/lib/store";
+import {
+  categoryForNewSibling,
+  readMetaRaw,
+  uniqueSlug,
+  writeMeta,
+} from "@/lib/import";
+import {
+  ADULT_CATEGORY,
+  getApps,
+  invalidateCatalog,
+  type Category,
+} from "@/lib/store";
+import { AlreadyHere } from "@/lib/sources/already-here";
 import { BROWSER_USER_AGENT, saveImage } from "@/lib/sources/net";
 import { categoryForGenre, decodeEntities } from "@/lib/sources/play";
 
@@ -262,6 +273,12 @@ export type ApkmbListing = {
   downloadPageUrl: string | null;
   /** The slug this app already has here, when the catalog carries it. */
   existingSlug?: string;
+  /**
+   * What `existingSlug` was found on. Only a package id can carry a second
+   * listing: a name match is the same app described twice, and the importer
+   * would have nothing to tell the two shelves apart by.
+   */
+  existingBy?: "packageId" | "name";
 };
 
 /** A page address this source will read, or a refusal saying why not. */
@@ -413,14 +430,25 @@ export async function apkmbDownloadLinks(input: string): Promise<string[]> {
 export async function lookupApkmb(input: string): Promise<ApkmbListing> {
   const listing = await fetchApkmbListing(input);
   const apps = await getApps();
-  const match =
-    (listing.packageId
-      ? apps.find(
-          (a) => a.packageName?.toLowerCase() === listing.packageId!.toLowerCase()
-        )
-      : undefined) ??
-    apps.find((a) => a.name.trim().toLowerCase() === listing.name.trim().toLowerCase());
-  return match ? { ...listing, existingSlug: match.slug } : listing;
+  const byId = findByPackageId(apps, listing.packageId);
+  if (byId) return { ...listing, existingSlug: byId.slug, existingBy: "packageId" };
+  const byName = findByName(apps, listing.name);
+  if (byName) return { ...listing, existingSlug: byName.slug, existingBy: "name" };
+  return listing;
+}
+
+function findByPackageId<T extends { packageName?: string | null }>(
+  apps: T[],
+  packageId: string | null
+): T | undefined {
+  if (!packageId) return undefined;
+  const pkg = packageId.toLowerCase();
+  return apps.find((a) => a.packageName?.toLowerCase() === pkg);
+}
+
+function findByName<T extends { name: string }>(apps: T[], name: string): T | undefined {
+  const wanted = name.trim().toLowerCase();
+  return apps.find((a) => a.name.trim().toLowerCase() === wanted);
 }
 
 /* -------------------------------------------------------------------- fill */
@@ -558,35 +586,41 @@ export type ApkmbAddResult = {
  * package id where the page gave one and on the name otherwise, which is why
  * the name is taken from the JSON-LD rather than from the page title.
  *
- * Refuses a package the catalog already carries, for the reason the Play add
- * refuses one: two entries for a package id make every future drop of that app
- * ambiguous, so a duplicate would quietly stop the importer instead of
- * duplicating a row.
+ * Refuses a package the catalog already carries unless `separate` says the
+ * second listing is wanted — the same offer the Play add makes, see
+ * `AlreadyHere`. The page has to give a package id for that: two shelves the
+ * importer cannot tell apart would be a duplicate, not a sibling. A name
+ * match without an id clash stays a refusal, because "fill it instead" is the
+ * answer there.
+ *
+ * A sibling of an adult listing starts behind the 18+ gate whatever genre
+ * apkmb files it under, decided before anything is written.
  */
-export async function addFromApkmb(input: string): Promise<ApkmbAddResult> {
+export async function addFromApkmb(
+  input: string,
+  opts: { separate?: boolean } = {}
+): Promise<ApkmbAddResult> {
   const listing = await fetchApkmbListing(input);
   const apps = await getApps();
 
-  if (listing.packageId) {
-    const clash = apps.find(
-      (a) => a.packageName?.toLowerCase() === listing.packageId!.toLowerCase()
-    );
-    if (clash) {
-      throw new Error(`${clash.name} is already in the catalog as "${clash.slug}"`);
-    }
-  }
-  const named = apps.find(
-    (a) => a.name.trim().toLowerCase() === listing.name.trim().toLowerCase()
-  );
+  const clash = findByPackageId(apps, listing.packageId);
+  if (clash && !opts.separate) throw new AlreadyHere(clash.slug, clash.name);
+  // Siblings usually share a name, so the name check is only for a page whose
+  // id did not clash: there it means the same app, described twice.
+  const named = clash ? undefined : findByName(apps, listing.name);
   if (named) {
     throw new Error(
       `${named.name} is already in the catalog as "${named.slug}" — fill it instead`
     );
   }
 
+  const inherited = clash ? await categoryForNewSibling(listing.packageId) : null;
+  const gated =
+    inherited === ADULT_CATEGORY ? { ...listing, category: ADULT_CATEGORY } : listing;
+
   const slug = await uniqueSlug(listing.name);
   // Nothing is on this slug yet, so there is no hand-written value to protect.
-  const fill = await fillFromApkmb(slug, listing, { overwrite: true });
+  const fill = await fillFromApkmb(slug, gated, { overwrite: true });
 
   return {
     slug,

@@ -16,8 +16,14 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { STORE_DIRS, STORE_ROOT } from "@/lib/storage";
-import { uniqueSlug, writeMeta } from "@/lib/import";
-import { getApps, invalidateCatalog, type StoreApp } from "@/lib/store";
+import { categoryForNewSibling, uniqueSlug, writeMeta } from "@/lib/import";
+import {
+  ADULT_CATEGORY,
+  getApps,
+  invalidateCatalog,
+  type StoreApp,
+} from "@/lib/store";
+import { AlreadyHere } from "@/lib/sources/already-here";
 import { saveImage, USER_AGENT } from "@/lib/sources/net";
 import { installFromUrl, type InstalledVersion } from "@/lib/sources/install";
 
@@ -204,11 +210,19 @@ export type FdroidAddResult = {
 /**
  * Add an F-Droid package to the catalog and install its recommended build.
  *
- * Refuses a package the catalog already carries, for the same reason the Play
- * source does: the importer matches a dropped file on the package id, and two
- * entries claiming one id make every later drop ambiguous.
+ * Refuses a package the catalog already carries unless `separate` says the
+ * second listing is wanted — the same offer the Play add makes, see
+ * `AlreadyHere`. F-Droid's own build beside a mod of it is the usual case;
+ * the build installed here pins its signer on the new listing, so the
+ * importer can tell later drops of the two apart.
+ *
+ * A sibling of an adult listing starts behind the 18+ gate, decided before
+ * anything is written; the F-Droid index carries no category of its own.
  */
-export async function addFromFdroid(input: string): Promise<FdroidAddResult> {
+export async function addFromFdroid(
+  input: string,
+  opts: { separate?: boolean } = {}
+): Promise<FdroidAddResult> {
   const packageId = parsePackageId(input);
   if (!packageId) {
     throw new Error("Enter a package id, or paste the F-Droid page URL");
@@ -217,9 +231,8 @@ export async function addFromFdroid(input: string): Promise<FdroidAddResult> {
   const clash = (await getApps()).find(
     (a) => a.packageName?.toLowerCase() === packageId.toLowerCase()
   );
-  if (clash) {
-    throw new Error(`${clash.name} is already in the catalog as "${clash.slug}"`);
-  }
+  if (clash && !opts.separate) throw new AlreadyHere(clash.slug, clash.name);
+  const inherited = clash ? await categoryForNewSibling(packageId) : null;
 
   const app = await fetchApp(packageId);
   const build = buildToInstall(app);
@@ -228,6 +241,7 @@ export async function addFromFdroid(input: string): Promise<FdroidAddResult> {
   await writeMeta(slug, {
     name: app.name,
     packageName: packageId,
+    ...(inherited === ADULT_CATEGORY ? { category: ADULT_CATEGORY } : {}),
     // Left out on purpose — see the same omission in `lib/sources/github.ts`.
     tagline: app.summary ?? undefined,
     description: app.description ?? undefined,
