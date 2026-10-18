@@ -31,6 +31,12 @@ import { withBasePath } from "@/lib/base-path";
  *
  * The page wraps this in a `Panel`; the body here is the three source rows,
  * the buttons, and the report of the last check.
+ *
+ * The last check may have been the timer's. Its saved report arrives as
+ * `initialReport`, so the summary line and the "Fetch" button are right from
+ * the first paint; the per-app list stays folded until a run happens here,
+ * because every sourced app at once is a long list and the "Behind upstream"
+ * card beside this one already shows the part that matters.
  */
 
 export type SourceCounts = { github: number; fdroid: number; play: number };
@@ -77,8 +83,15 @@ const STATUS_TONE: Record<SourceCheck["status"], "neutral" | "accent" | "ok" | "
   error: "danger",
 };
 
-export default function SourcesPanel({ counts }: { counts: SourceCounts }) {
-  const [report, setReport] = useState<SourceReport | null>(null);
+export default function SourcesPanel({
+  counts,
+  initialReport = null,
+}: {
+  counts: SourceCounts;
+  initialReport?: SourceReport | null;
+}) {
+  const [report, setReport] = useState<SourceReport | null>(initialReport);
+  const [ran, setRan] = useState(false);
   const [busy, setBusy] = useState<"check" | "fetch" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -105,6 +118,7 @@ export default function SourcesPanel({ counts }: { counts: SourceCounts }) {
         );
       }
       setReport(data as SourceReport);
+      setRan(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -175,7 +189,7 @@ export default function SourcesPanel({ counts }: { counts: SourceCounts }) {
 
       {error && <p className="text-xs text-[color:var(--danger)]">{error}</p>}
 
-      {report && report.apps.length > 0 && (
+      {ran && report && report.apps.length > 0 && (
         <ul className="flex flex-col divide-y divide-[color:var(--border)] rounded-[var(--radius)] border border-[color:var(--border)]">
           {report.apps.map((app) => (
             <li

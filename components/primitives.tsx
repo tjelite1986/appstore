@@ -267,6 +267,7 @@ export function Stat({
   href,
   icon: Icon,
   tone = "neutral",
+  className,
 }: {
   label: string;
   value: React.ReactNode;
@@ -274,6 +275,7 @@ export function Stat({
   href?: string;
   icon?: LucideIcon;
   tone?: "neutral" | "accent" | "warn";
+  className?: string;
 }) {
   const body = (
     <>
@@ -297,7 +299,7 @@ export function Stat({
       ) : null}
     </>
   );
-  const cls = cn(CARD, "flex min-w-0 flex-col px-3.5 py-3");
+  const cls = cn(CARD, "flex min-w-0 flex-col px-3.5 py-3", className);
   return href ? (
     <Link href={href} className={cn(cls, "transition hover:bg-[var(--card-2)]")}>
       {body}

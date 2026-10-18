@@ -11,7 +11,10 @@
  * Play listings are skipped: Google serves APKs to the Play client and to
  * nobody else, so there is never anything here to fetch.
  */
+import { promises as fs } from "node:fs";
+import path from "node:path";
 import { getApps, invalidateCatalog, type StoreApp } from "@/lib/store";
+import { STORE_DIRS, STORE_ROOT } from "@/lib/storage";
 import { writeMeta } from "@/lib/import";
 import { RefusedRelease, alreadyHeld, installFromUrl } from "@/lib/sources/install";
 import { checkGitHub, isLinked, relinkGitHub } from "@/lib/sources/github";
@@ -34,9 +37,19 @@ export type SourceCheck = {
   held: string | null;
   status: SourceStatus;
   detail?: string;
+  /**
+   * The release upstream offers is one the importer already turned down —
+   * a different signer than the pin. It stays `available` because it is, but
+   * nothing will fetch it again; a person decides in the review queue.
+   */
+  refused?: true;
 };
 
 export type SourceReport = {
+  /** When the run finished, ISO. */
+  at: string;
+  /** Whether the run was allowed to take what was newer. */
+  fetched: boolean;
   checked: number;
   available: number;
   installed: number;
@@ -49,17 +62,92 @@ export type SourceReport = {
 let inFlight: Promise<SourceReport> | null = null;
 
 /**
+ * Where the last report is kept.
+ *
+ * A check used to leave nothing behind: the timer's result went to the
+ * journal and the button's to the browser that pressed it, so "what is behind
+ * upstream right now" could only be answered by running another check. Now
+ * every run writes its report here and Manage reads it back.
+ */
+const REPORT_FILE = path.join(STORE_ROOT, STORE_DIRS.state, "sources.json");
+
+/**
  * `checkSources`, with a second caller joining the run in flight instead of
  * starting its own. The joiner gets that run's report, install flag included —
  * a check that arrives while an install is running has its answer either way.
  */
 export function runSourceCheck(opts: { install?: boolean } = {}): Promise<SourceReport> {
   if (!inFlight) {
-    inFlight = checkSources(opts).finally(() => {
-      inFlight = null;
-    });
+    inFlight = checkSources(opts)
+      .then(async (report) => {
+        await saveReport(report);
+        return report;
+      })
+      .finally(() => {
+        inFlight = null;
+      });
   }
   return inFlight;
+}
+
+/**
+ * Write the report down. One writer at a time is already guaranteed by the
+ * single flight above; the temp name guards against a crash mid-write
+ * leaving half a file where the reader looks.
+ *
+ * A report that cannot be written is logged, not thrown: the check itself
+ * succeeded and its caller is still owed the answer.
+ */
+async function saveReport(report: SourceReport): Promise<void> {
+  const tmp = `${REPORT_FILE}.${process.pid}.tmp`;
+  try {
+    await fs.mkdir(path.dirname(REPORT_FILE), { recursive: true });
+    await fs.writeFile(tmp, JSON.stringify(report, null, 2) + "\n", "utf8");
+    await fs.rename(tmp, REPORT_FILE);
+  } catch (err) {
+    await fs.rm(tmp, { force: true }).catch(() => {});
+    console.error("[sources] could not save the report:", err);
+  }
+}
+
+/** The report of the last run, or null when none has finished yet. */
+export async function lastSourceReport(): Promise<SourceReport | null> {
+  try {
+    const parsed = JSON.parse(await fs.readFile(REPORT_FILE, "utf8")) as unknown;
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      typeof (parsed as SourceReport).at !== "string" ||
+      !Array.isArray((parsed as SourceReport).apps)
+    ) {
+      return null;
+    }
+    return parsed as SourceReport;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      console.error("[sources] could not read the last report:", err);
+    }
+    return null;
+  }
+}
+
+/**
+ * The same report, with only the listed apps in it and the counts redone.
+ *
+ * The file holds every sourced app; a reader that shows a gated subset of the
+ * library (Manage, under the 18+ gate) has to cut the report to match, or an
+ * app it does not list is named in the panel anyway.
+ */
+export function restrictReport(report: SourceReport, slugs: Set<string>): SourceReport {
+  const apps = report.apps.filter((a) => slugs.has(a.slug));
+  return {
+    ...report,
+    apps,
+    checked: apps.length,
+    available: apps.filter((a) => a.status === "available").length,
+    installed: apps.filter((a) => a.status === "installed").length,
+    errors: apps.filter((a) => a.status === "error").length,
+  };
 }
 
 /** True while a check is running. */
@@ -85,6 +173,8 @@ export async function checkSources(
   opts: { install?: boolean } = {}
 ): Promise<SourceReport> {
   const report: SourceReport = {
+    at: new Date().toISOString(),
+    fetched: Boolean(opts.install),
     checked: 0,
     available: 0,
     installed: 0,
@@ -116,6 +206,7 @@ export async function checkSources(
   }
 
   if (report.installed > 0) invalidateCatalog();
+  report.at = new Date().toISOString();
   return report;
 }
 
@@ -146,7 +237,14 @@ async function checkOne(app: StoreApp, install: boolean): Promise<SourceCheck> {
       return { ...base, kind: "github", upstream: release.tag, status: "current" };
     }
     if (release.tag === app.source.refusedTag) {
-      return { ...base, kind: "github", upstream: release.tag, status: "available", detail: REFUSED };
+      return {
+        ...base,
+        kind: "github",
+        upstream: release.tag,
+        status: "available",
+        detail: REFUSED,
+        refused: true,
+      };
     }
     if (!install) {
       return { ...base, kind: "github", upstream: release.tag, status: "available" };
@@ -207,6 +305,7 @@ async function checkOne(app: StoreApp, install: boolean): Promise<SourceCheck> {
       upstream: build.versionName || String(build.versionCode),
       status: "available",
       detail: REFUSED,
+      refused: true,
     };
   }
   if (!install) {

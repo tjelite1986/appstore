@@ -1,6 +1,7 @@
 import Link from "next/link";
 import {
   Archive,
+  ArrowUpFromLine,
   ChevronDown,
   Copy,
   FolderInput,
@@ -34,7 +35,12 @@ import { duplicatePackages } from "@/lib/merge";
 import { planPrune } from "@/lib/prune";
 import { currentUserId } from "@/lib/current-user";
 import { adultsAllowed } from "@/lib/user-state";
-import { cn } from "@/lib/utils";
+import {
+  lastSourceReport,
+  restrictReport,
+  type SourceCheck,
+} from "@/lib/sources/updates";
+import { cn, relativeTime } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -56,9 +62,10 @@ const DUPLICATES_SHOWN = 4;
  * now.
  */
 export default async function ManagePage() {
-  const [{ apps: all, placeholder }, waiting] = await Promise.all([
+  const [{ apps: all, placeholder }, waiting, lastReport] = await Promise.all([
     getCatalog(),
     pendingImports(),
+    lastSourceReport(),
   ]);
   // Manage is reachable by anyone — only its write actions ask who you are —
   // so the 18+ gate applies to the listing here as well. An admin who needs to
@@ -89,6 +96,19 @@ export default async function ManagePage() {
         .sort((a, b) => (b.added ?? "").localeCompare(a.added ?? ""))
         .slice(0, 6);
 
+  // What the last source check found, cut to the same gated list as every
+  // other number on this screen. "Behind" is what upstream has and the
+  // library does not; a failed check is listed with it, because an app the
+  // check could not reach is not known to be current either.
+  const report =
+    lastReport && !placeholder
+      ? restrictReport(lastReport, new Set(apps.map((a) => a.slug)))
+      : null;
+  const behind = report ? report.apps.filter((a) => a.status === "available") : [];
+  const failed = report ? report.apps.filter((a) => a.status === "error") : [];
+  const checkedAgo = report ? relativeTime(report.at) : null;
+  const bySlug = new Map(apps.map((a) => [a.slug, a]));
+
   return (
     <Screen>
       <ScreenTitle
@@ -102,7 +122,7 @@ export default async function ManagePage() {
 
       <div className="flex flex-col gap-[var(--gap)] px-[var(--pad)]">
         {/* The numbers first. Each one that has a card behind it jumps there. */}
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
           <Stat
             label="Apps"
             value={apps.length}
@@ -142,6 +162,20 @@ export default async function ManagePage() {
             icon={Rss}
           />
           <Stat
+            label="Behind"
+            value={report ? behind.length : "—"}
+            sub={
+              report
+                ? failed.length > 0
+                  ? `${failed.length} failed · ${checkedAgo}`
+                  : `checked ${checkedAgo}`
+                : "no check yet"
+            }
+            tone={behind.length > 0 || failed.length > 0 ? "warn" : "neutral"}
+            href={counts.github + counts.fdroid > 0 ? "#behind" : undefined}
+            icon={ArrowUpFromLine}
+          />
+          <Stat
             label="Shared ids"
             value={duplicates.length}
             sub={duplicates.length === 0 ? "none" : "two listings each"}
@@ -159,6 +193,9 @@ export default async function ManagePage() {
             }
             href={stale && stale.versions > 0 ? "#older" : undefined}
             icon={History}
+            // Seven tiles on a two-column phone grid leave one alone; it
+            // takes the row.
+            className="col-span-2 sm:col-span-1"
           />
         </div>
 
@@ -206,8 +243,34 @@ export default async function ManagePage() {
               title="Sources"
               description="Where the listings came from, and whether upstream has moved on. A check is a few API calls; fetching downloads every new release."
             >
-              <SourcesPanel counts={counts} />
+              <SourcesPanel counts={counts} initialReport={report} />
             </Panel>
+
+            {counts.github + counts.fdroid > 0 && (
+              <Panel
+                id="behind"
+                icon={ArrowUpFromLine}
+                title="Behind upstream"
+                aside={
+                  !report ? null : behind.length + failed.length > 0 ? (
+                    <Pill tone="warn">
+                      {behind.length + failed.length}
+                    </Pill>
+                  ) : (
+                    <Pill tone="ok">all current</Pill>
+                  )
+                }
+                description="GitHub and F-Droid apps the last check could not call current: upstream has a release the library does not hold, or did not answer. The timer fetches what is new every six hours, so what stays here is a release the importer refused — decide it in the review queue — or an address to fix."
+                flush
+              >
+                <BehindRows
+                  behind={behind}
+                  failed={failed}
+                  report={report}
+                  bySlug={bySlug}
+                />
+              </Panel>
+            )}
 
             {stale && stale.versions > 0 && (
               <Panel
@@ -367,6 +430,105 @@ function DuplicateGroup({
         ))}
       </ul>
     </div>
+  );
+}
+
+/**
+ * The apps that are not known to be current, one row each: what the library
+ * holds against what upstream calls its newest, and why it was not fetched.
+ */
+function BehindRows({
+  behind,
+  failed,
+  report,
+  bySlug,
+}: {
+  behind: SourceCheck[];
+  failed: SourceCheck[];
+  report: { at: string; checked: number; fetched: boolean } | null;
+  bySlug: Map<string, StoreApp>;
+}) {
+  if (!report) {
+    return (
+      <p className={cn("px-4 py-4 text-sm", MUTED)}>
+        No check has run yet. The timer runs one every six hours, or ask for one
+        in the Sources card above.
+      </p>
+    );
+  }
+  if (behind.length === 0 && failed.length === 0) {
+    return (
+      <p className={cn("px-4 py-4 text-sm", MUTED)}>
+        Everything the check could reach is current &mdash;{" "}
+        {plural(report.checked, "app")} checked {relativeTime(report.at)}
+        {report.fetched ? "" : ", without fetching"}.
+      </p>
+    );
+  }
+  return (
+    <ul className="divide-y divide-[color:var(--border)]">
+      {[...behind, ...failed].map((check) => {
+        const app = bySlug.get(check.slug);
+        return (
+          <li key={check.slug} className="flex items-start gap-3 px-4 py-2.5">
+            {app ? (
+              <Link href={`/app/${app.slug}`} className="shrink-0">
+                <Thumb
+                  seed={app.seed}
+                  src={app.icon}
+                  background={app.iconBackground}
+                  fit={app.iconFit}
+                  alt={app.name}
+                  className="h-10 w-10 rounded-[var(--radius-sm)]"
+                />
+              </Link>
+            ) : null}
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <Link
+                  href={`/app/${check.slug}`}
+                  className="min-w-0 flex-1 truncate text-sm font-medium hover:underline"
+                >
+                  {check.name}
+                </Link>
+                <Pill
+                  tone={
+                    check.status === "error"
+                      ? "danger"
+                      : check.refused
+                        ? "warn"
+                        : "accent"
+                  }
+                >
+                  {check.status === "error"
+                    ? "check failed"
+                    : check.refused
+                      ? "refused"
+                      : "newer upstream"}
+                </Pill>
+              </div>
+              <span className={cn("block truncate text-xs tabular-nums", MUTED)}>
+                {[
+                  check.kind,
+                  `holds ${check.held ?? "nothing"}`,
+                  check.upstream && `upstream ${check.upstream}`,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </span>
+              {check.detail ? (
+                <span
+                  className={cn("mt-0.5 block truncate text-xs", MUTED)}
+                  title={check.detail}
+                >
+                  {check.detail}
+                </span>
+              ) : null}
+            </div>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 

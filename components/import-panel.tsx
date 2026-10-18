@@ -10,7 +10,7 @@ import {
   Send,
   Upload,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, relativeTime } from "@/lib/utils";
 import {
   MUTED,
   NOTE,
@@ -649,18 +649,6 @@ function TelegramCard({
 }
 
 /** "3 min ago", "2 h ago", "yesterday" — for a status pill, not a log. */
-function relativeTime(iso: string): string {
-  const ms = Date.now() - new Date(iso).getTime();
-  if (!Number.isFinite(ms) || ms < 0) return "just now";
-  const min = Math.round(ms / 60000);
-  if (min < 1) return "just now";
-  if (min < 60) return `${min} min ago`;
-  const h = Math.round(min / 60);
-  if (h < 24) return `${h} h ago`;
-  const d = Math.round(h / 24);
-  return d === 1 ? "yesterday" : `${d} days ago`;
-}
-
 const REASONS: Record<string, string> = {
   no_match: "No app in the catalog looks like this",
   ambiguous: "More than one app could be the target",

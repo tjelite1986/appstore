@@ -29,8 +29,8 @@ $STORE_ROOT
 ├── meta/         <slug>.json
 ├── _import/      drop zone; _review/ holds what needs a decision,
 │                 _discarded/ what was rejected
-└── _state/       bookkeeping, not content: the Telegram cursor and
-                  store.db, the per-account saved/installed rows
+└── _state/       bookkeeping, not content: the Telegram cursor, the last
+                  source report, and store.db with the per-account rows
 ```
 
 `lib/storage.ts` is the only place those paths are named; `lib/store.ts` reads
@@ -288,6 +288,15 @@ hours, because the manifest rarely says what the tag says.
 hours. `GITHUB_TOKEN` in the compose env file is worth setting once more than a
 handful of repositories are watched: anonymous GitHub requests are 60 an hour
 for the whole machine, and that limit is the first thing a timer hits.
+
+Every run, the timer's or the button's, leaves its report in
+`_state/sources.json`. Manage reads it back: the "Behind" tile counts the apps
+whose upstream has a release the library does not hold, plus the checks that
+failed, and the "Behind upstream" card lists them with what is held against
+what upstream offers. Since the timer fetches what it can, what stays on that
+card is a release the importer refused over its signer — decided in the
+review queue — or an address that no longer answers. The card is cut to the
+same 18+-gated list as the rest of Manage, so a gated app is never named on it.
 
 ### The Telegram feed
 
