@@ -23,6 +23,7 @@ import AddApp from "@/components/add-app";
 import SourcesPanel from "@/components/sources-panel";
 import ImportPanel from "@/components/import-panel";
 import PruneVersions from "@/components/prune-versions";
+import TrackUpstreamButton from "@/components/track-upstream";
 import { STORE_DIRS, STORE_HOST_ROOT } from "@/lib/storage";
 import {
   formatBytes,
@@ -91,6 +92,7 @@ export default async function ManagePage() {
     fdroid: apps.filter((a) => a.source?.kind === "fdroid").length,
     play: apps.filter((a) => a.source?.kind === "play").length,
   };
+  const checkable = counts.github + counts.fdroid + counts.play;
   const recent = placeholder
     ? []
     : [...apps]
@@ -99,8 +101,14 @@ export default async function ManagePage() {
 
   // What the last source check found, cut to the same gated list as every
   // other number on this screen. "Behind" is what upstream has and the
-  // library does not; a failed check is listed with it, because an app the
+  // library does not — whether a fetch will take it (`available`) or nothing
+  // can (`behind`, Play); a failed check is listed with it, because an app the
   // check could not reach is not known to be current either.
+  //
+  // An app marked `untracked` since the report was written is cut out here
+  // rather than waiting for the next run: the mark is the person's answer,
+  // and the saved report is older than it. Cut from the report itself, so the
+  // Sources card's summary line and this card count the same apps.
   //
   // Admins only, like the check route that produced it: the report carries
   // error messages from upstream calls, and before it was saved those only
@@ -109,12 +117,18 @@ export default async function ManagePage() {
   const admin = user?.role === "admin";
   const report =
     admin && lastReport && !placeholder
-      ? restrictReport(lastReport, new Set(apps.map((a) => a.slug)))
+      ? restrictReport(
+          lastReport,
+          new Set(apps.filter((a) => !a.source?.untracked).map((a) => a.slug))
+        )
       : null;
-  const behind = report ? report.apps.filter((a) => a.status === "available") : [];
-  const failed = report ? report.apps.filter((a) => a.status === "error") : [];
-  const checkedAgo = report ? relativeTime(report.at) : null;
   const bySlug = new Map(apps.map((a) => [a.slug, a]));
+  const behind = report
+    ? report.apps.filter((a) => a.status === "available" || a.status === "behind")
+    : [];
+  const failed = report ? report.apps.filter((a) => a.status === "error") : [];
+  const untracked = admin ? apps.filter((a) => a.source?.untracked) : [];
+  const checkedAgo = report ? relativeTime(report.at) : null;
 
   return (
     <Screen>
@@ -181,7 +195,7 @@ export default async function ManagePage() {
                   : "admins only"
             }
             tone={behind.length > 0 || failed.length > 0 ? "warn" : "neutral"}
-            href={admin && counts.github + counts.fdroid > 0 ? "#behind" : undefined}
+            href={admin && checkable > 0 ? "#behind" : undefined}
             icon={ArrowUpFromLine}
           />
           <Stat
@@ -255,7 +269,7 @@ export default async function ManagePage() {
               <SourcesPanel counts={counts} initialReport={report} />
             </Panel>
 
-            {admin && counts.github + counts.fdroid > 0 && (
+            {admin && checkable > 0 && (
               <Panel
                 id="behind"
                 icon={ArrowUpFromLine}
@@ -269,12 +283,13 @@ export default async function ManagePage() {
                     <Pill tone="ok">all current</Pill>
                   )
                 }
-                description="GitHub and F-Droid apps the last check could not call current: upstream has a release the library does not hold, or did not answer. The timer fetches what is new every six hours, so what stays here is a release the importer refused — decide it in the review queue — or an address to fix."
+                description="Apps the last check could not call current: upstream has a release the library does not hold, or did not answer. GitHub and F-Droid releases are fetched by the timer every six hours, so what stays here from them is a release the importer refused — decide it in the review queue — or an address to fix. A Play app stays until a newer build arrives from elsewhere; one that is a modified build can be taken off the comparison."
                 flush
               >
                 <BehindRows
                   behind={behind}
                   failed={failed}
+                  untracked={untracked}
                   report={report}
                   bySlug={bySlug}
                 />
@@ -445,99 +460,148 @@ function DuplicateGroup({
 /**
  * The apps that are not known to be current, one row each: what the library
  * holds against what upstream calls its newest, and why it was not fetched.
+ *
+ * Under them, the Play apps somebody has taken off the comparison, each with
+ * the button that puts it back — a decision the check honours should stay in
+ * view where it was made, or the card quietly stops counting an app.
  */
 function BehindRows({
   behind,
   failed,
+  untracked,
   report,
   bySlug,
 }: {
   behind: SourceCheck[];
   failed: SourceCheck[];
+  untracked: StoreApp[];
   report: { at: string; checked: number; fetched: boolean } | null;
   bySlug: Map<string, StoreApp>;
 }) {
+  const foot =
+    untracked.length > 0 ? (
+      <div className="border-t border-[color:var(--border)] px-4 py-3">
+        <p className={cn("text-xs", MUTED)}>
+          Not compared with Play &mdash; modified builds:
+        </p>
+        <ul className="mt-1 flex flex-col">
+          {untracked.map((app) => (
+            <li key={app.slug} className="flex items-center gap-2 py-1">
+              <Link
+                href={`/app/${app.slug}`}
+                className="min-w-0 flex-1 truncate text-sm hover:underline"
+              >
+                {app.name}
+              </Link>
+              <span className={cn("shrink-0 text-xs tabular-nums", MUTED)}>
+                holds {app.versions[0]?.version ?? "nothing"}
+              </span>
+              <TrackUpstreamButton slug={app.slug} name={app.name} track />
+            </li>
+          ))}
+        </ul>
+      </div>
+    ) : null;
+
   if (!report) {
     return (
-      <p className={cn("px-4 py-4 text-sm", MUTED)}>
-        No check has run yet. The timer runs one every six hours, or ask for one
-        in the Sources card above.
-      </p>
+      <>
+        <p className={cn("px-4 py-4 text-sm", MUTED)}>
+          No check has run yet. The timer runs one every six hours, or ask for
+          one in the Sources card above.
+        </p>
+        {foot}
+      </>
     );
   }
   if (behind.length === 0 && failed.length === 0) {
     return (
-      <p className={cn("px-4 py-4 text-sm", MUTED)}>
-        Everything the check could reach is current &mdash;{" "}
-        {plural(report.checked, "app")} checked {relativeTime(report.at)}
-        {report.fetched ? "" : ", without fetching"}.
-      </p>
+      <>
+        <p className={cn("px-4 py-4 text-sm", MUTED)}>
+          Everything the check could reach is current &mdash;{" "}
+          {plural(report.checked, "app")} checked {relativeTime(report.at)}
+          {report.fetched ? "" : ", without fetching"}.
+        </p>
+        {foot}
+      </>
     );
   }
   return (
-    <ul className="divide-y divide-[color:var(--border)]">
-      {[...behind, ...failed].map((check) => {
-        const app = bySlug.get(check.slug);
-        return (
-          <li key={check.slug} className="flex items-start gap-3 px-4 py-2.5">
-            {app ? (
-              <Link href={`/app/${app.slug}`} className="shrink-0">
-                <Thumb
-                  seed={app.seed}
-                  src={app.icon}
-                  background={app.iconBackground}
-                  fit={app.iconFit}
-                  alt={app.name}
-                  className="h-10 w-10 rounded-[var(--radius-sm)]"
-                />
-              </Link>
-            ) : null}
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <Link
-                  href={`/app/${check.slug}`}
-                  className="min-w-0 flex-1 truncate text-sm font-medium hover:underline"
-                >
-                  {check.name}
+    <>
+      <ul className="divide-y divide-[color:var(--border)]">
+        {[...behind, ...failed].map((check) => {
+          const app = bySlug.get(check.slug);
+          return (
+            <li key={check.slug} className="flex items-start gap-3 px-4 py-2.5">
+              {app ? (
+                <Link href={`/app/${app.slug}`} className="shrink-0">
+                  <Thumb
+                    seed={app.seed}
+                    src={app.icon}
+                    background={app.iconBackground}
+                    fit={app.iconFit}
+                    alt={app.name}
+                    className="h-10 w-10 rounded-[var(--radius-sm)]"
+                  />
                 </Link>
-                <Pill
-                  tone={
-                    check.status === "error"
-                      ? "danger"
-                      : check.refused
-                        ? "warn"
-                        : "accent"
-                  }
-                >
-                  {check.status === "error"
-                    ? "check failed"
-                    : check.refused
-                      ? "refused"
-                      : "newer upstream"}
-                </Pill>
-              </div>
-              <span className={cn("block truncate text-xs tabular-nums", MUTED)}>
-                {[
-                  check.kind,
-                  `holds ${check.held ?? "nothing"}`,
-                  check.upstream && `upstream ${check.upstream}`,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </span>
-              {check.detail ? (
-                <span
-                  className={cn("mt-0.5 block truncate text-xs", MUTED)}
-                  title={check.detail}
-                >
-                  {check.detail}
-                </span>
               ) : null}
-            </div>
-          </li>
-        );
-      })}
-    </ul>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <Link
+                    href={`/app/${check.slug}`}
+                    className="min-w-0 flex-1 truncate text-sm font-medium hover:underline"
+                  >
+                    {check.name}
+                  </Link>
+                  <Pill
+                    tone={
+                      check.status === "error"
+                        ? "danger"
+                        : check.refused
+                          ? "warn"
+                          : "accent"
+                    }
+                  >
+                    {check.status === "error"
+                      ? "check failed"
+                      : check.refused
+                        ? "refused"
+                        : check.status === "behind"
+                          ? "newer on Play"
+                          : "newer upstream"}
+                  </Pill>
+                  {check.kind === "play" && check.status !== "error" && (
+                    <TrackUpstreamButton
+                      slug={check.slug}
+                      name={check.name}
+                      track={false}
+                    />
+                  )}
+                </div>
+                <span className={cn("block truncate text-xs tabular-nums", MUTED)}>
+                  {[
+                    check.kind,
+                    `holds ${check.held ?? "nothing"}`,
+                    check.upstream && `upstream ${check.upstream}`,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </span>
+                {check.detail ? (
+                  <span
+                    className={cn("mt-0.5 block truncate text-xs", MUTED)}
+                    title={check.detail}
+                  >
+                    {check.detail}
+                  </span>
+                ) : null}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      {foot}
+    </>
   );
 }
 

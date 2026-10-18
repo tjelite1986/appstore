@@ -118,6 +118,15 @@ export type AppSource = {
   /** F-Droid: the package id the repository is addressed by. */
   package?: string;
   addedFrom?: string;
+  /**
+   * Play: this listing is not meant to keep up with Play's version.
+   *
+   * A modified build is numbered by whoever modified it and lags Play by
+   * design, so a check that compared it would call it behind forever. Set
+   * from the Behind card on Manage; the check skips the app and the card
+   * lists it under "not tracked" so the decision stays visible.
+   */
+  untracked?: true;
 };
 
 function readSource(raw: unknown): AppSource | undefined {

@@ -4,7 +4,7 @@
 #
 #   sync     pull new APKs from the Telegram channel, then wait out the run
 #   scan     run the importer over the drop folder
-#   sources  ask GitHub and F-Droid what they have, and fetch what is newer
+#   sources  ask GitHub, F-Droid and Play what they have, and fetch what is newer
 #
 # All three are HTTP calls into the container: the work belongs to the app, and
 # a host script that touched the library directly would be a second
@@ -84,6 +84,7 @@ case "${1:-}" in
     report=$(call POST /api/sources/check 3600)
     "$JQ" -r '
       "sources: \(.checked) checked, \(.installed) fetched"
+        + (if (.behind // 0) > 0 then ", \(.behind) behind Play" else "" end)
         + (if .errors > 0 then ", \(.errors) failed" else "" end)
         + (.apps // [] | map(select(.status == "installed" or .status == "error"))
              | map("\n  \(.name): \(.status) \(.detail // "")") | join(""))' <<<"$report"

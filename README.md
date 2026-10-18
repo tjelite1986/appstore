@@ -294,9 +294,25 @@ Every run, the timer's or the button's, leaves its report in
 whose upstream has a release the library does not hold, plus the checks that
 failed, and the "Behind upstream" card lists them with what is held against
 what upstream offers (admins only, like the route that produced it). Since the timer fetches what it can, what stays on that
-card is a release the importer refused over its signer — decided in the
+card from GitHub and F-Droid is a release the importer refused over its signer — decided in the
 review queue — or an address that no longer answers. The card is cut to the
 same 18+-gated list as the rest of Manage, so a gated app is never named on it.
+
+Play apps are checked too, and never fetched. The check asks Play for the
+version its page shows and compares it with the newest build the library
+holds, with `compareVersions`: a library ahead of Play is current, a library
+behind it is reported as `behind` — a status apart from `available`, so the
+"Fetch N updates" button and the timer's count name only what a fetch will
+actually take. "Varies with device" is `unavailable`; a package Play no longer
+lists says so in its detail. The snapshot in `source.playVersion` is not
+consulted: it is what Play said the day the shelf was made.
+
+A modified build carries its modifier's version number and would read as
+behind on every run. The "Not a Play build" button on its row (`POST
+/api/sources/track` with `{slug, track: false}`) writes `source.untracked` on
+the listing; the check skips it, and the card lists it under "not compared"
+with a "Track again" button that takes the mark off. The route accepts Play
+apps only — a GitHub or F-Droid app that is behind gets fetched.
 
 ### The Telegram feed
 

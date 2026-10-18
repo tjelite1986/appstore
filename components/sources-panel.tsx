@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   ArrowDownToLine,
@@ -25,9 +25,10 @@ import { withBasePath } from "@/lib/base-path";
  * app carries its address — but what it has now.
  *
  * Checking and fetching are two buttons rather than one because they cost very
- * different things: a check is a handful of API calls, a fetch is every new
- * release downloaded over a home line. Nothing is fetched without being asked
- * for by name.
+ * different things: a check is one request per sourced app, a fetch is every
+ * new release downloaded over a home line. Nothing is fetched without being
+ * asked for by name. Play apps are checked and never fetched, so what they
+ * add to a report is a "behind" count, not a bigger Fetch button.
  *
  * The page wraps this in a `Panel`; the body here is the three source rows,
  * the buttons, and the report of the last check.
@@ -62,7 +63,7 @@ const LINES: {
   {
     key: "play",
     label: "Google Play",
-    note: "Words and pictures only — Play serves APKs to nobody but Play.",
+    note: "Words and pictures. The version Play shows is compared, never fetched.",
     Icon: Play,
   },
 ];
@@ -70,6 +71,7 @@ const LINES: {
 const STATUS_TEXT: Record<SourceCheck["status"], string> = {
   current: "up to date",
   available: "newer upstream",
+  behind: "newer on Play",
   installed: "fetched",
   unavailable: "nothing to fetch",
   error: "failed",
@@ -78,6 +80,7 @@ const STATUS_TEXT: Record<SourceCheck["status"], string> = {
 const STATUS_TONE: Record<SourceCheck["status"], "neutral" | "accent" | "ok" | "danger"> = {
   current: "neutral",
   available: "accent",
+  behind: "accent",
   installed: "ok",
   unavailable: "neutral",
   error: "danger",
@@ -92,10 +95,16 @@ export default function SourcesPanel({
 }) {
   const [report, setReport] = useState<SourceReport | null>(initialReport);
   const [ran, setRan] = useState(false);
+  // The page re-renders with a new saved report — after a row on the Behind
+  // card is taken off the comparison, say — and until a run has happened here
+  // that report is the one to show, or the two cards count different apps.
+  useEffect(() => {
+    if (!ran) setReport(initialReport);
+  }, [initialReport, ran]);
   const [busy, setBusy] = useState<"check" | "fetch" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const checkable = counts.github + counts.fdroid;
+  const checkable = counts.github + counts.fdroid + counts.play;
 
   async function run(install: boolean) {
     setBusy(install ? "fetch" : "check");
@@ -176,12 +185,13 @@ export default function SourcesPanel({
 
         {checkable === 0 ? (
           <span className={cn("text-xs", MUTED)}>
-            Nothing to check — add an app from GitHub or F-Droid first.
+            Nothing to check — add an app from GitHub, F-Droid or Play first.
           </span>
         ) : report ? (
           <span className={cn("text-xs tabular-nums", MUTED)}>
             {report.checked} checked · {report.available} newer ·{" "}
             {report.installed} fetched
+            {report.behind > 0 ? ` · ${report.behind} behind Play` : ""}
             {report.errors > 0 ? ` · ${report.errors} failed` : ""}
           </span>
         ) : null}

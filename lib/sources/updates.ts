@@ -8,21 +8,29 @@
  * every six hours. So each install records what it took, and the check
  * compares against that.
  *
- * Play listings are skipped: Google serves APKs to the Play client and to
- * nobody else, so there is never anything here to fetch.
+ * Play listings are checked but never fetched: Google serves APKs to the Play
+ * client and to nobody else. What Play's page says its version is gets
+ * compared against the newest build the library holds, and an app behind it
+ * is reported as `behind` — a fact for a person, since the build has to come
+ * from somewhere else — rather than `available`, which names what the next
+ * fetch will take.
  */
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { getApps, invalidateCatalog, type StoreApp } from "@/lib/store";
+import { compareVersions, getApps, invalidateCatalog, type StoreApp } from "@/lib/store";
 import { STORE_DIRS, STORE_ROOT } from "@/lib/storage";
 import { writeMeta } from "@/lib/import";
 import { RefusedRelease, alreadyHeld, installFromUrl } from "@/lib/sources/install";
 import { checkGitHub, isLinked, relinkGitHub } from "@/lib/sources/github";
 import { apkUrl, buildToInstall, checkFdroid } from "@/lib/sources/fdroid";
+import { PlayNoListing, fetchPlayListing } from "@/lib/sources/play";
 
 export type SourceStatus =
   | "current"
+  /** Upstream has a newer release and a fetch would take it. */
   | "available"
+  /** Upstream has a newer release and nothing here can take it — Play. */
+  | "behind"
   | "installed"
   | "unavailable"
   | "error";
@@ -52,6 +60,8 @@ export type SourceReport = {
   fetched: boolean;
   checked: number;
   available: number;
+  /** Apps newer upstream that no fetch can bring in — see `SourceStatus`. */
+  behind: number;
   installed: number;
   errors: number;
   apps: SourceCheck[];
@@ -122,7 +132,9 @@ export async function lastSourceReport(): Promise<SourceReport | null> {
     ) {
       return null;
     }
-    return parsed as SourceReport;
+    const report = parsed as SourceReport;
+    // Reports written before Play was checked carry no `behind` count.
+    return { ...report, behind: report.behind ?? 0 };
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
       console.error("[sources] could not read the last report:", err);
@@ -145,6 +157,7 @@ export function restrictReport(report: SourceReport, slugs: Set<string>): Source
     apps,
     checked: apps.length,
     available: apps.filter((a) => a.status === "available").length,
+    behind: apps.filter((a) => a.status === "behind").length,
     installed: apps.filter((a) => a.status === "installed").length,
     errors: apps.filter((a) => a.status === "error").length,
   };
@@ -155,10 +168,19 @@ export function sourceCheckRunning(): boolean {
   return inFlight !== null;
 }
 
-/** The apps a check has anything to ask about. */
+/**
+ * The apps a check has anything to ask about.
+ *
+ * A Play app marked `untracked` is left out: somebody has said its version is
+ * not supposed to follow Play's, and asking anyway would only put it back on
+ * the Behind card they took it off.
+ */
 export function sourcedApps(apps: StoreApp[]): StoreApp[] {
   return apps.filter(
-    (a) => a.source?.kind === "github" || a.source?.kind === "fdroid"
+    (a) =>
+      a.source?.kind === "github" ||
+      a.source?.kind === "fdroid" ||
+      (a.source?.kind === "play" && !a.source.untracked)
   );
 }
 
@@ -177,6 +199,7 @@ export async function checkSources(
     fetched: Boolean(opts.install),
     checked: 0,
     available: 0,
+    behind: 0,
     installed: 0,
     errors: 0,
     apps: [],
@@ -188,6 +211,7 @@ export async function checkSources(
       const check = await checkOne(app, Boolean(opts.install));
       report.apps.push(check);
       if (check.status === "available") report.available++;
+      if (check.status === "behind") report.behind++;
       if (check.status === "installed") report.installed++;
     } catch (err) {
       report.errors++;
@@ -282,6 +306,10 @@ async function checkOne(app: StoreApp, install: boolean): Promise<SourceCheck> {
     };
   }
 
+  if (app.source?.kind === "play") {
+    return checkPlay(app, base);
+  }
+
   const fdroid = await checkFdroid(app);
   if (!fdroid) {
     return { ...base, kind: "none", upstream: null, status: "unavailable" };
@@ -332,6 +360,92 @@ async function checkOne(app: StoreApp, install: boolean): Promise<SourceCheck> {
     status: "installed",
     detail: installed.version,
   };
+}
+
+/**
+ * Play, asked what version it shows — and nothing taken from the answer but
+ * the number.
+ *
+ * The library's own builds are compared to it rather than `source.playVersion`:
+ * that field is what Play said on the day the shelf was made, and the shelf
+ * has usually been filled since. `held` newer than Play is `current`, not an
+ * error — a build can reach the store before Play rolls it out everywhere, and
+ * a modified build is numbered by its own author. Play's "varies with device"
+ * is `unavailable`: there is no number to compare, and saying so is more
+ * useful than guessing.
+ */
+async function checkPlay(
+  app: StoreApp,
+  base: { slug: string; name: string; held: string | null }
+): Promise<SourceCheck> {
+  const kind = "play";
+  const packageId = app.packageName ?? playPackageId(app.source?.url);
+  if (!packageId) {
+    return {
+      ...base,
+      kind,
+      upstream: null,
+      status: "unavailable",
+      detail: "no package id to ask Play about",
+    };
+  }
+
+  let upstream: string | null;
+  try {
+    upstream = (await fetchPlayListing(packageId)).playVersion;
+  } catch (err) {
+    if (err instanceof PlayNoListing) {
+      return {
+        ...base,
+        kind,
+        upstream: null,
+        status: "unavailable",
+        detail: "Play no longer lists this package",
+      };
+    }
+    throw err;
+  }
+  if (!upstream) {
+    return {
+      ...base,
+      kind,
+      upstream: null,
+      status: "unavailable",
+      detail: "Play says the version varies with device",
+    };
+  }
+  if (!base.held) {
+    return {
+      ...base,
+      kind,
+      upstream,
+      status: "behind",
+      detail: "no build in the library yet",
+    };
+  }
+  // compareVersions sorts newest first: at most zero means `held` is Play's
+  // version or past it.
+  if (alreadyHeld(app.versions, upstream) || compareVersions(base.held, upstream) <= 0) {
+    return { ...base, kind, upstream, status: "current" };
+  }
+  return {
+    ...base,
+    kind,
+    upstream,
+    status: "behind",
+    detail: "Play has a newer build than the library holds; it has to come from elsewhere",
+  };
+}
+
+/** The `id` a Play listing address carries, for a shelf that has no package name yet. */
+function playPackageId(url: string | undefined): string | null {
+  if (!url) return null;
+  try {
+    const id = new URL(url).searchParams.get("id");
+    return id && /^[a-zA-Z0-9._]+$/.test(id) ? id : null;
+  } catch {
+    return null;
+  }
 }
 
 /** What the check says about a release it will not fetch again. */
