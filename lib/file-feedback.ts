@@ -21,7 +21,7 @@ export type FileStatus = "working" | "broken";
 
 export type FileComment = {
   id: number;
-  /** Whoever wrote it, as the part of their address before the @. */
+  /** Whoever wrote it, as the part of their address before the @ — signed in only. */
   author: string;
   body: string;
   createdAt: string;
@@ -104,6 +104,10 @@ export function feedbackFor(
   // The author's address is read off `users` at display time rather than
   // copied onto the comment, so a renamed account reads right everywhere. A
   // comment whose account is gone keeps its words under "someone".
+  //
+  // The name is shown only to signed-in viewers. The store answers on a
+  // public hostname, and the part before the @ is most of an address: a
+  // crawler should get the words, not a list of who has an account here.
   const comments = conn
     .prepare(
       `SELECT c.id, c.version, c.user_id, c.body, c.created_at, u.email
@@ -123,7 +127,11 @@ export function feedbackFor(
     if (!entry) continue;
     entry.comments.push({
       id: row.id,
-      author: row.email ? displayName(row.email) : "someone",
+      author: !viewer
+        ? "a member"
+        : row.email
+          ? displayName(row.email)
+          : "someone",
       body: row.body,
       createdAt: row.created_at,
       deletable:
