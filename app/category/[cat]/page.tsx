@@ -4,10 +4,11 @@ import AppGrid from "@/components/app-grid";
 import { categoryTiles } from "@/lib/store";
 import { currentUserId } from "@/lib/current-user";
 import { adultsAllowed, shelfFor } from "@/lib/user-state";
+import { categoryLabel, categorySlug, kindOf } from "@/lib/categories";
 
 export const dynamic = "force-dynamic";
 
-/** One category, reached from the Categories tiles on Home and Apps. */
+/** One category, reached from the Categories tiles on Home, Apps and Games. */
 export default async function CategoryPage({
   params,
 }: {
@@ -15,20 +16,24 @@ export default async function CategoryPage({
 }) {
   const { cat } = await params;
   const userId = await currentUserId();
-  const match = (await categoryTiles({ adults: adultsAllowed(userId) })).find(
-    (c) => c.label.toLowerCase() === cat.toLowerCase()
-  );
+  // Every shelf, not only the tiles drawn: an empty game shelf has no tile
+  // but its address should still answer rather than 404.
+  const match = (
+    await categoryTiles({ adults: adultsAllowed(userId), kind: "all" })
+  ).find((c) => categorySlug(c.label) === categorySlug(decodeURIComponent(cat)));
   if (!match) notFound();
 
   const apps = (await shelfFor(userId)).filter(
     (a) => a.category === match.label
   );
 
+  const noun = kindOf(match.label) === "game" ? "game" : "app";
+
   return (
     <Screen>
       <ScreenTitle
-        title={match.label}
-        subtitle={`${apps.length} ${apps.length === 1 ? "app" : "apps"}`}
+        title={categoryLabel(match.label)}
+        subtitle={`${apps.length} ${noun}${apps.length === 1 ? "" : "s"}`}
       />
       <AppGrid apps={apps} empty="This category is empty." />
     </Screen>

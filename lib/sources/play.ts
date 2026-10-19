@@ -33,6 +33,7 @@ import {
   type Category,
 } from "@/lib/store";
 import { saveImage } from "@/lib/sources/net";
+import { gameCategoryFor } from "@/lib/categories";
 
 const SEARCH_LIMIT = 12;
 /** Play answers in a second or two; a request still open after this is stuck. */
@@ -93,8 +94,9 @@ const CATEGORY_BY_GENRE: Record<string, Category> = {
  */
 export function categoryForGenre(genreId: unknown): Category | null {
   if (typeof genreId !== "string") return null;
-  // Every game genre is GAME_SOMETHING, and there are dozens of them.
-  if (genreId.startsWith("GAME")) return "Games";
+  // Every game genre is GAME_SOMETHING, and there are dozens of them. The
+  // ones with a shelf here go on it; the rest wait on the generic one.
+  if (genreId.startsWith("GAME")) return gameCategoryFor(genreId) ?? "Games";
   return CATEGORY_BY_GENRE[genreId] ?? null;
 }
 

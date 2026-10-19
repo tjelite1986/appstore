@@ -38,6 +38,7 @@ import {
 } from "@/lib/store";
 import { AlreadyHere } from "@/lib/sources/already-here";
 import { BROWSER_USER_AGENT, saveImage } from "@/lib/sources/net";
+import { gameCategoryFor } from "@/lib/categories";
 import { categoryForGenre, decodeEntities } from "@/lib/sources/play";
 
 const PAGE_TIMEOUT_MS = 20_000;
@@ -111,7 +112,11 @@ const CATEGORY_BY_SECTION: Record<string, Category> = {
  */
 function categoryFor(sections: string[], genreId: unknown): Category | null {
   for (const raw of [...sections].reverse()) {
-    const hit = CATEGORY_BY_SECTION[raw.trim().toLowerCase()];
+    const name = raw.trim().toLowerCase();
+    // "Puzzle Games", "Role Playing Games": a game section names its shelf.
+    const hit =
+      (/\bgames?$/.test(name) ? gameCategoryFor(name) : null) ??
+      CATEGORY_BY_SECTION[name];
     if (hit) return hit;
   }
   return categoryForGenre(genreId);

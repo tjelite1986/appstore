@@ -2,7 +2,8 @@ import { Screen, ScreenTitle } from "@/components/screen";
 import AppGrid from "@/components/app-grid";
 import QuickLinks from "@/components/quick-links";
 import { currentUserId } from "@/lib/current-user";
-import { shelfFor } from "@/lib/user-state";
+import { adultsAllowed, shelfFor } from "@/lib/user-state";
+import { kindOf } from "@/lib/categories";
 
 export const dynamic = "force-dynamic";
 
@@ -13,15 +14,16 @@ export const dynamic = "force-dynamic";
  */
 export default async function AppsPage() {
   // The catalog as this account sees it, so a tile can say "installed".
-  const apps = (await shelfFor(await currentUserId())).filter(
-    (a) => a.category !== "Games"
+  const userId = await currentUserId();
+  const apps = (await shelfFor(userId)).filter(
+    (a) => kindOf(a.category) === "app"
   );
 
   return (
     <Screen>
       <ScreenTitle title="Apps" subtitle={`${apps.length} in the catalog`} />
       <AppGrid apps={apps} />
-      <QuickLinks title="Categories" />
+      <QuickLinks title="Categories" adults={adultsAllowed(userId)} />
     </Screen>
   );
 }

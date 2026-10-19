@@ -21,9 +21,9 @@ import {
   invalidateCatalog,
   normaliseHexColor,
   normaliseIconFit,
-  type Category,
 } from "@/lib/store";
 import { fetchImageBytes } from "@/lib/sources/net";
+import { findCategory } from "@/lib/categories";
 
 /** What a person owns. Anything not in here is refused, not ignored. */
 export const EDITABLE_FIELDS = [
@@ -49,15 +49,6 @@ export type EditableField = (typeof EDITABLE_FIELDS)[number];
  */
 const PROTECTED_FIELDS = ["packageName", "signingCert", "source", "hidden"];
 
-export const CATEGORIES: Category[] = [
-  "Editor",
-  "Media",
-  "Entertainment",
-  "Communication",
-  "Games",
-  "Adults",
-  "Other",
-];
 
 /** Long enough for a real store description, short enough to stay a file. */
 const MAX_LENGTHS: Record<EditableField, number> = {
@@ -231,9 +222,7 @@ export async function editApp(slug: string, patch: unknown): Promise<void> {
       continue;
     }
     if (field === "category" && trimmed) {
-      const hit = CATEGORIES.find(
-        (c) => c.toLowerCase() === trimmed.toLowerCase()
-      );
+      const hit = findCategory(trimmed);
       if (!hit) throw new EditError(`${trimmed} is not one of the categories`);
       write.category = hit;
       continue;

@@ -24,16 +24,12 @@ import {
   thumbBackground,
 } from "@/components/primitives";
 import { cn } from "@/lib/utils";
-
-const CATEGORIES = [
-  "Editor",
-  "Media",
-  "Entertainment",
-  "Communication",
-  "Games",
-  "Adults",
-  "Other",
-];
+import {
+  categoriesOf,
+  categoryLabel,
+  DEFAULT_GAME_CATEGORY,
+  kindOf,
+} from "@/lib/categories";
 
 const FIELD =
   "w-full rounded-[var(--radius)] border border-[color:var(--border)] bg-[var(--card-2)] px-3 py-2 text-sm outline-none focus:border-[color:var(--accent)]";
@@ -281,26 +277,55 @@ export default function EditApp({ app }: { app: EditableApp }) {
           />
         </div>
 
-        <label className="block">
-          <span className={cn("mb-1 block text-[11px]", MUTED)}>Category</span>
-          <select
-            className={FIELD}
-            value={form.category}
-            onChange={(e) =>
-              setForm((f) => ({ ...f, category: e.target.value }))
-            }
-          >
-            {/* Not one of the seven: an app nobody has filed shows as "Other"
-                without the file saying so, and leaving it here is what keeps
-                a Play or F-Droid category able to arrive later. */}
-            <option value="">Not filed ({app.fallback.category})</option>
-            {CATEGORIES.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
-        </label>
+        {/* Two selects, one field: the type is read off the category, so
+            switching it only moves the category to that type's first answer —
+            "Not filed" for an app, the unsorted shelf for a game. */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[10rem_1fr]">
+          <label className="block">
+            <span className={cn("mb-1 block text-[11px]", MUTED)}>Type</span>
+            <select
+              className={FIELD}
+              value={kindOf(form.category)}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  category: e.target.value === "game" ? DEFAULT_GAME_CATEGORY : "",
+                }))
+              }
+            >
+              <option value="app">App</option>
+              <option value="game">Game</option>
+            </select>
+          </label>
+          <label className="block">
+            <span className={cn("mb-1 block text-[11px]", MUTED)}>Category</span>
+            <select
+              className={FIELD}
+              value={form.category}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, category: e.target.value }))
+              }
+            >
+              {/* Not one of the categories: an app nobody has filed shows as
+                  "Other" without the file saying so, and leaving it here is
+                  what keeps a Play or F-Droid category able to arrive later.
+                  A game has no such option — "not filed" reads as an app. */}
+              {kindOf(form.category) === "app" && (
+                <option value="">Not filed ({app.fallback.category})</option>
+              )}
+              {categoriesOf(kindOf(form.category)).map((c) => (
+                <option key={c} value={c}>
+                  {categoryLabel(c)}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        {base.category === "Adults" && form.category !== "Adults" && (
+          <p className="text-xs text-[color:var(--warn)]">
+            Saving this takes the listing off the 18+ shelf: everyone will see it.
+          </p>
+        )}
 
         {/* Several listings can be one app in different wrappers — five
             Instagram mods, five cards on a shelf that holds one app. Filing

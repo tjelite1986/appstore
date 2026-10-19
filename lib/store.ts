@@ -27,14 +27,14 @@ import { withBasePath } from "./base-path";
 import { abiLabel, abiRank, apkAbis } from "./apk-abi";
 import { PLACEHOLDER_APPS, PLACEHOLDER_CHANGELOG } from "./catalog";
 
-export type Category =
-  | "Editor"
-  | "Media"
-  | "Entertainment"
-  | "Communication"
-  | "Games"
-  | "Adults"
-  | "Other";
+import {
+  GAME_CATEGORIES,
+  findCategory,
+  type Category,
+  type CategoryKind,
+} from "./categories";
+
+export type { Category, CategoryKind } from "./categories";
 
 /**
  * One binary. A version usually has exactly one; an app published as separate
@@ -274,6 +274,23 @@ export const CATEGORIES: { label: Category; icon: string }[] = [
   { label: "Adults", icon: "store" },
 ];
 
+/** The Games screen's tiles. Not in the sketch, so the icons are ours. */
+const GAME_ICONS: Record<string, string> = {
+  Action: "swords",
+  Adventure: "compass",
+  Arcade: "joystick",
+  Board: "dices",
+  Card: "spade",
+  Casual: "smile",
+  Puzzle: "puzzle",
+  Racing: "car",
+  "Role Playing": "shield",
+  Simulation: "plane",
+  Sports: "trophy",
+  Strategy: "crown",
+  Games: "gamepad",
+};
+
 /**
  * The one category this store keeps behind a gate.
  *
@@ -287,16 +304,6 @@ export const ADULT_CATEGORY: Category = "Adults";
 export function withoutAdults<T extends { category: Category }>(apps: T[]): T[] {
   return apps.filter((a) => a.category !== ADULT_CATEGORY);
 }
-
-const KNOWN_CATEGORIES: Category[] = [
-  "Editor",
-  "Media",
-  "Entertainment",
-  "Communication",
-  "Games",
-  "Adults",
-  "Other",
-];
 
 const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp", ".avif", ".gif"];
 const APK_EXTENSIONS = [".apk", ".xapk", ".apks", ".apkm"];
@@ -415,11 +422,7 @@ export function normaliseIconFit(raw: unknown): IconFit | undefined {
 }
 
 function normaliseCategory(raw: string | undefined): Category {
-  if (!raw) return "Other";
-  const hit = KNOWN_CATEGORIES.find(
-    (c) => c.toLowerCase() === raw.trim().toLowerCase()
-  );
-  return hit ?? "Other";
+  return findCategory(raw) ?? "Other";
 }
 
 /** Directory entries, or nothing at all if the directory is missing. */
@@ -957,11 +960,30 @@ export async function findApp(slug: string): Promise<StoreApp | undefined> {
 /**
  * The five tiles the sketch draws, plus "Other" only when something is in it —
  * an imported APK with no category lands there and needs somewhere to be found.
+ *
+ * With `kind: "game"`, the game shelves instead, and only those that hold
+ * something: thirteen tiles over a library with four games is mostly empty
+ * pages. `kind: "all"` is every shelf there is, for resolving a URL.
  */
 export async function categoryTiles(
-  opts: { adults?: boolean } = {}
+  opts: { adults?: boolean; kind?: CategoryKind | "all" } = {}
 ): Promise<{ label: Category; icon: string }[]> {
   const apps = await getApps();
+  if (opts.kind === "game") {
+    const filled = new Set(apps.map((a) => a.category));
+    return GAME_CATEGORIES.filter((c) => filled.has(c)).map((label) => ({
+      label,
+      icon: GAME_ICONS[label] ?? "gamepad",
+    }));
+  }
+  if (opts.kind === "all") {
+    const tiles: { label: Category; icon: string }[] = [
+      ...CATEGORIES,
+      { label: "Other", icon: "package" },
+      ...GAME_CATEGORIES.map((label) => ({ label, icon: GAME_ICONS[label] ?? "gamepad" })),
+    ];
+    return opts.adults ? tiles : tiles.filter((c) => c.label !== ADULT_CATEGORY);
+  }
   const hasOther = apps.some((a) => a.category === "Other");
   const tiles = opts.adults
     ? CATEGORIES
