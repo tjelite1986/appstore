@@ -83,8 +83,15 @@ const CATEGORY_BY_GENRE: Record<string, Category> = {
   SOCIAL: "Communication",
   DATING: "Communication",
   ART_AND_DESIGN: "Editor",
-  PRODUCTIVITY: "Editor",
-  BUSINESS: "Editor",
+  PRODUCTIVITY: "Productivity",
+  BUSINESS: "Productivity",
+  TOOLS: "Tools",
+  PERSONALIZATION: "Tools",
+  EDUCATION: "Education",
+  BOOKS_AND_REFERENCE: "Education",
+  HEALTH_AND_FITNESS: "Health & Fitness",
+  MEDICAL: "Health & Fitness",
+  FINANCE: "Finance",
 };
 
 /**

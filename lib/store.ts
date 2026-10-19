@@ -265,12 +265,20 @@ export type PlaceholderApp = Omit<
   "screenshots" | "versions" | "added" | "requires"
 >;
 
-/** The category tiles the sketch draws, in its order. */
+/**
+ * The category tiles the sketch draws, in its order, then the shelves added
+ * after it (Productivity to Finance) before the gated one.
+ */
 export const CATEGORIES: { label: Category; icon: string }[] = [
   { label: "Editor", icon: "images" },
   { label: "Media", icon: "clapperboard" },
   { label: "Entertainment", icon: "users" },
   { label: "Communication", icon: "message" },
+  { label: "Productivity", icon: "briefcase" },
+  { label: "Tools", icon: "wrench" },
+  { label: "Education", icon: "graduation" },
+  { label: "Health & Fitness", icon: "heart" },
+  { label: "Finance", icon: "wallet" },
   { label: "Adults", icon: "store" },
 ];
 

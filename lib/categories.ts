@@ -19,6 +19,11 @@ export type AppCategory =
   | "Media"
   | "Entertainment"
   | "Communication"
+  | "Productivity"
+  | "Tools"
+  | "Education"
+  | "Health & Fitness"
+  | "Finance"
   | "Adults"
   | "Other";
 
@@ -47,6 +52,11 @@ export const APP_CATEGORIES: AppCategory[] = [
   "Media",
   "Entertainment",
   "Communication",
+  "Productivity",
+  "Tools",
+  "Education",
+  "Health & Fitness",
+  "Finance",
   "Adults",
   "Other",
 ];
@@ -86,9 +96,12 @@ export function categoryLabel(category: string): string {
   return category === DEFAULT_GAME_CATEGORY ? "Other games" : category;
 }
 
-/** The URL segment for `/category/<slug>`: "Role Playing" → "role-playing". */
+/**
+ * The URL segment for `/category/<slug>`: "Role Playing" → "role-playing",
+ * "Health & Fitness" → "health-and-fitness".
+ */
 export function categorySlug(category: string): string {
-  return category.toLowerCase().replace(/\s+/g, "-");
+  return category.toLowerCase().replace(/\s*&\s*/g, " and ").trim().replace(/\s+/g, "-");
 }
 
 /** Case-, space- and dash-insensitive, so "role playing" and "role-playing" both hit. */

@@ -91,8 +91,15 @@ const CATEGORY_BY_SECTION: Record<string, Category> = {
   social: "Communication",
   dating: "Communication",
   "art & design": "Editor",
-  productivity: "Editor",
-  tools: "Editor",
+  productivity: "Productivity",
+  business: "Productivity",
+  tools: "Tools",
+  personalization: "Tools",
+  education: "Education",
+  "books & reference": "Education",
+  "health & fitness": "Health & Fitness",
+  medical: "Health & Fitness",
+  finance: "Finance",
 };
 
 /**
