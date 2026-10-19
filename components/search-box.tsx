@@ -7,6 +7,7 @@ import { LayoutGrid, Loader2, Search, X } from "lucide-react";
 import { MUTED, Thumb } from "@/components/primitives";
 import { cn } from "@/lib/utils";
 import { withBasePath } from "@/lib/base-path";
+import { matchRanges } from "@/lib/search";
 import type { SearchResponse } from "@/app/api/search/route";
 
 /**
@@ -283,19 +284,11 @@ export default function SearchBox({
 
 /** The first case-insensitive occurrence of each typed word, in bold. */
 function Highlight({ text, query }: { text: string; query: string }) {
-  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-  const lower = text.toLowerCase();
-  const marks: [number, number][] = [];
-  for (const w of words) {
-    const at = lower.indexOf(w);
-    if (at >= 0) marks.push([at, at + w.length]);
-  }
+  const marks = matchRanges(text, query);
   if (marks.length === 0) return <>{text}</>;
-  marks.sort((a, b) => a[0] - b[0]);
   const parts: React.ReactNode[] = [];
   let pos = 0;
   for (const [s, e] of marks) {
-    if (s < pos) continue;
     if (s > pos) parts.push(text.slice(pos, s));
     parts.push(
       <mark key={s} className="bg-transparent font-semibold text-[color:var(--accent-text)]">

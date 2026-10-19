@@ -52,6 +52,57 @@ function scoreOne(app: Searchable, terms: string[]): number {
   return score;
 }
 
+/**
+ * Where the words of a query sit in `text`, as [start, end) offsets into the
+ * original string, sorted and merged. Matched the way the search matches
+ * (accent-free, case-free), so "resume" marks "Résumé" — a hit with nothing
+ * highlighted reads as a wrong hit. First occurrence of each word.
+ */
+export function matchRanges(text: string, query: string): [number, number][] {
+  // Normalise one character at a time, remembering which original character
+  // each normalised one came from: NFKD can grow or shrink a character.
+  let flat = "";
+  const from: number[] = [];
+  const width: number[] = [];
+  let i = 0;
+  for (const ch of text) {
+    const n = norm(ch);
+    for (let k = 0; k < n.length; k++) {
+      from.push(i);
+      width.push(ch.length);
+    }
+    flat += n;
+    i += ch.length;
+  }
+
+  const ranges: [number, number][] = [];
+  for (const t of queryTerms(query)) {
+    const at = flat.indexOf(t);
+    if (at < 0) continue;
+    // End where the next normalised character starts, so a trailing
+    // combining accent (normalised to nothing) stays with its letter.
+    const next = at + t.length;
+    const end =
+      next >= from.length
+        ? text.length
+        : from[next] !== from[next - 1]
+          ? from[next]
+          : from[next - 1] + width[next - 1];
+    ranges.push([from[at], end]);
+  }
+  ranges.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
+
+  // "edit editor" over "Photo Editor": both start at the same place, the
+  // longer one wins instead of the first one dropping the second.
+  const merged: [number, number][] = [];
+  for (const [s, e] of ranges) {
+    const prev = merged[merged.length - 1];
+    if (prev && s <= prev[1]) prev[1] = Math.max(prev[1], e);
+    else merged.push([s, e]);
+  }
+  return merged;
+}
+
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
