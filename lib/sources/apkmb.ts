@@ -57,6 +57,13 @@ const MAX_DESCRIPTION = 8000;
 
 const HOSTS = /^(www\.)?apkmb\.com$/i;
 
+/** Words in a write-up that mean the APK may not be the whole install. */
+const DATA_HINT =
+  /\bOBB\b|Android\/(obb|data)\b|\b(data|cache) (files?|folder)\b|\badditional (data|files?|download)\b/i;
+/** A file on the download step that is not an APK: game data, by its extension. */
+const EXTRA_FILE = /\.(obb|zip|7z|rar)$/i;
+const APK_FILE = /\.(apk|xapk|apks|apkm)$/i;
+
 /**
  * apkmb's own breadcrumb sections against this store's categories.
  *
@@ -273,6 +280,12 @@ export type ApkmbListing = {
   screenshotUrls: string[];
   /** apkmb's own download page for this app, not the APK. */
   downloadPageUrl: string | null;
+  /**
+   * A sentence from the write-up that talks about OBB or data files, when one
+   * does. Shown as a warning, not acted on: the build may need a file beside
+   * it that the APK download does not bring.
+   */
+  dataHint: string | null;
   /** The slug this app already has here, when the catalog carries it. */
   existingSlug?: string;
   /**
@@ -375,6 +388,10 @@ export async function fetchApkmbListing(input: string): Promise<ApkmbListing> {
   }
   const description = lines.join("\n\n") || null;
 
+  const hint = description
+    ?.split(/(?<=[.!?])\s+|\n+/)
+    .find((sentence) => DATA_HINT.test(sentence));
+
   return {
     url,
     name,
@@ -389,6 +406,7 @@ export async function fetchApkmbListing(input: string): Promise<ApkmbListing> {
     iconUrl: typeof app?.image === "string" ? app.image : (app?.image?.url ?? null),
     screenshotUrls: screenshots,
     downloadPageUrl: dl ? new URL(dl[1], url).href : null,
+    dataHint: hint ? hint.trim().slice(0, 240) : null,
   };
 }
 
@@ -401,15 +419,27 @@ export async function fetchApkmbListing(input: string): Promise<ApkmbListing> {
  * proves the address serves an APK; the caller fetches it through the same
  * guard and manifest check as any other link.
  */
-export async function apkmbDownloadLinks(input: string): Promise<string[]> {
+export type ApkmbDownloadFile = {
+  url: string;
+  /** The button text, which is what tells "APK 1" from "OBB" on the page. */
+  label: string;
+  /**
+   * `apk` by extension, `extra` for game data (by extension, or a label that
+   * says OBB/data), `unknown` for an address that says neither — tried as an
+   * APK, because the download proves what it is.
+   */
+  kind: "apk" | "extra" | "unknown";
+};
+
+export async function apkmbDownloadFiles(input: string): Promise<ApkmbDownloadFile[]> {
   const page = apkmbUrl(input);
   const step = /\/download\/$/.test(page) ? page : `${page}download/`;
   const html = await readPage(step);
 
   const list = /<ul\b[^>]*\bid=["']list-downloadlinks["'][^>]*>([\s\S]*?)<\/ul>/i.exec(html);
   if (!list) return [];
-  const out: string[] = [];
-  for (const m of list[1].matchAll(/<a\b[^>]*\bhref=["']([^"']+)["']/gi)) {
+  const out: ApkmbDownloadFile[] = [];
+  for (const m of list[1].matchAll(/<a\b[^>]*\bhref=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
     let url: URL;
     try {
       url = new URL(decodeEntities(m[1]), step);
@@ -417,9 +447,32 @@ export async function apkmbDownloadLinks(input: string): Promise<string[]> {
       continue;
     }
     if (url.protocol !== "https:" && url.protocol !== "http:") continue;
-    if (!out.includes(url.href)) out.push(url.href);
+    if (out.some((f) => f.url === url.href)) continue;
+    const label = text(m[2]);
+    let file = url.pathname;
+    try {
+      file = decodeURIComponent(file);
+    } catch {
+      // Keep the encoded form; only the extension is read from it.
+    }
+    const kind = APK_FILE.test(file)
+      ? "apk"
+      : EXTRA_FILE.test(file) || /\b(OBB|data|cache)\b/i.test(label)
+        ? "extra"
+        : "unknown";
+    out.push({ url: url.href, label, kind });
   }
   return out;
+}
+
+/**
+ * The addresses worth trying as the APK: everything but the game data, which
+ * would be downloaded in full only to fail the manifest check.
+ */
+export async function apkmbDownloadLinks(input: string): Promise<string[]> {
+  return (await apkmbDownloadFiles(input))
+    .filter((f) => f.kind !== "extra")
+    .map((f) => f.url);
 }
 
 /**

@@ -1,5 +1,6 @@
 /**
- * GET  /api/sources/apkmb?url=…   read one product page, writing nothing
+ * GET  /api/sources/apkmb?url=…   read one product page and its download
+ *                                  step, writing nothing
  * POST /api/sources/apkmb         { url, separate? } — add that listing to
  *                                  the catalog; 409 with the existing slug
  *                                  when its package id is already here,
@@ -14,7 +15,7 @@
 import { requireAdmin } from "@/lib/admin";
 import { fetchImageDataUrl } from "@/lib/sources/net";
 import { AlreadyHere, alreadyHereResponse } from "@/lib/sources/already-here";
-import { addFromApkmb, lookupApkmb } from "@/lib/sources/apkmb";
+import { addFromApkmb, apkmbDownloadFiles, lookupApkmb } from "@/lib/sources/apkmb";
 
 export const dynamic = "force-dynamic";
 
@@ -35,7 +36,14 @@ export async function GET(req: Request): Promise<Response> {
     const icon = listing.iconUrl
       ? await fetchImageDataUrl(listing.iconUrl, "apkmb")
       : null;
-    return Response.json({ listing, iconDataUrl: icon });
+    // What the download step offers, so the card can say whether the APK is
+    // the whole install. Its own fetch, and a failure is not the lookup's:
+    // `null` means "not known", which the card says nothing about.
+    const downloads = await apkmbDownloadFiles(listing.url).catch((err) => {
+      console.error("[apkmb] download step unreadable:", err instanceof Error ? err.message : err);
+      return null;
+    });
+    return Response.json({ listing, iconDataUrl: icon, downloads });
   } catch (err) {
     // "That page does not describe an app" is the answer, not a fault in the
     // request, and the panel shows it as one.

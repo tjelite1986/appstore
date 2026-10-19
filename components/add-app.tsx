@@ -5,14 +5,19 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Check, Download, Plus, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { NOTE, buttonClass } from "@/components/primitives";
+import { NOTE, Pill, buttonClass } from "@/components/primitives";
 import { adminCall } from "@/lib/admin-call";
 import { readAdminToken } from "@/lib/admin-token";
 import { detectSource } from "@/lib/sources/detect";
 import type { PlayAddResult, PlayHit } from "@/lib/sources/play";
 import type { GithubAddResult } from "@/lib/sources/github";
 import type { FdroidAddResult } from "@/lib/sources/fdroid";
-import type { ApkmbAddResult, ApkmbFill, ApkmbListing } from "@/lib/sources/apkmb";
+import type {
+  ApkmbAddResult,
+  ApkmbDownloadFile,
+  ApkmbFill,
+  ApkmbListing,
+} from "@/lib/sources/apkmb";
 import type { ApkmbBuildJob } from "@/lib/sources/apkmb-build";
 import { withBasePath } from "@/lib/base-path";
 
@@ -73,6 +78,8 @@ type ApkmbCandidate = {
   listing: ApkmbListing;
   /** Inlined by the route: the icon is on apkmb's CDN and the CSP is `img-src 'self'`. */
   iconDataUrl: string | null;
+  /** What the page's download step lists; `null` when it could not be read. */
+  downloads: ApkmbDownloadFile[] | null;
 };
 
 /** Play icons are on Google's CDN and the CSP is `img-src 'self'`. */
@@ -218,7 +225,11 @@ export default function AddApp() {
         `/api/sources/apkmb?url=${encodeURIComponent(term.trim())}`
       );
       if (!data.listing) throw new Error(data.error ?? "apkmb returned nothing");
-      setApkmb({ listing: data.listing, iconDataUrl: data.iconDataUrl ?? null });
+      setApkmb({
+        listing: data.listing,
+        iconDataUrl: data.iconDataUrl ?? null,
+        downloads: data.downloads ?? null,
+      });
       setHits(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -565,6 +576,11 @@ export default function AddApp() {
               {apkmb.listing.description}
             </p>
           )}
+          <DownloadNotes
+            downloads={apkmb.downloads}
+            dataHint={apkmb.listing.dataHint}
+          />
+
           <label className="flex items-center gap-2 text-xs">
             <input
               type="checkbox"
@@ -743,4 +759,64 @@ function BuildLine({ job }: { job: ApkmbBuildJob }) {
       tone = "text-[color:var(--danger,#f87171)]";
   }
   return <p className={cn("text-xs", tone)}>{text}</p>;
+}
+
+/**
+ * Whether the APK is the whole install. Only the APK is ever downloaded, so a
+ * game that also needs an OBB or a cache zip has to be told apart here — that
+ * file goes on through "OBB / cache files" on the app's page.
+ */
+function DownloadNotes({
+  downloads,
+  dataHint,
+}: {
+  downloads: ApkmbDownloadFile[] | null;
+  dataHint: string | null;
+}) {
+  const extras = downloads?.filter((f) => f.kind === "extra") ?? [];
+  const apks = downloads?.filter((f) => f.kind !== "extra") ?? [];
+  const notes: React.ReactNode[] = [];
+
+  if (extras.length) {
+    notes.push(
+      <div key="extras" className="flex flex-col gap-1">
+        <Pill tone="warn" className="self-start">
+          Extra files: {extras.length}
+        </Pill>
+        <p className="text-xs">
+          The page also offers {extras.map((f) => f.label || f.url).join(", ")}.
+          Only the APK is downloaded — add the rest under &quot;OBB / cache
+          files&quot; on the app&apos;s page.
+        </p>
+      </div>
+    );
+  } else if (dataHint) {
+    notes.push(
+      <div key="hint" className="flex flex-col gap-1">
+        <Pill tone="warn" className="self-start">
+          May need OBB / data
+        </Pill>
+        <p className="text-xs">
+          The write-up says: &ldquo;{dataHint}&rdquo; The download step lists no
+          such file, so it may have to be found elsewhere.
+        </p>
+      </div>
+    );
+  }
+  if (apks.length > 1) {
+    notes.push(
+      <p key="apks" className={cn("text-xs", MUTED_CLS)}>
+        {apks.length} APKs are listed ({apks.map((f) => f.label).join(", ")}) —
+        the first one that proves to be an APK is the one fetched.
+      </p>
+    );
+  }
+  if (downloads && !downloads.length) {
+    notes.push(
+      <p key="none" className="text-xs text-[color:var(--warn)]">
+        The download step lists no file, so there is no APK to fetch.
+      </p>
+    );
+  }
+  return notes.length ? <>{notes}</> : null;
 }
