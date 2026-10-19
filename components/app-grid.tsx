@@ -3,6 +3,7 @@ import { ArrowUpCircle, Bookmark, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MUTED, SectionTitle, Thumb, metaLine } from "@/components/primitives";
 import type { StoreApp } from "@/lib/store";
+import { categoryLabel } from "@/lib/categories";
 
 /**
  * The catalog grid the browse screens are built from — Apps, Games, a category
@@ -26,12 +27,12 @@ export default function AppGrid({
       {apps.length === 0 ? (
         <p className={cn("py-8 text-center text-sm", MUTED)}>{empty}</p>
       ) : (
-        <div className="grid grid-cols-2 gap-[var(--gap)] sm:grid-cols-3 lg:grid-cols-4">
+        <div className="-mx-2 grid grid-cols-2 gap-x-2 gap-y-1 sm:grid-cols-3 lg:grid-cols-4">
           {apps.map((app) => (
             <Link
               key={app.slug}
               href={`/app/${app.slug}`}
-              className="flex min-w-0 items-start gap-3"
+              className="flex min-w-0 items-start gap-3 rounded-[var(--radius-lg)] p-2 transition hover:bg-[var(--card)]"
             >
               <Thumb
                 seed={app.seed}
@@ -46,7 +47,7 @@ export default function AppGrid({
                   {app.name}
                 </span>
                 <span className={cn("block truncate text-[11px]", MUTED)}>
-                  {app.category}
+                  {categoryLabel(app.category)}
                 </span>
                 <span className={cn("block truncate text-[11px]", MUTED)}>
                   {metaLine(app.rating, app.size)}

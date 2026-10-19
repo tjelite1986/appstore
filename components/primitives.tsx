@@ -90,13 +90,18 @@ export function Thumb({
   );
 }
 
-/** Small caps section heading with an optional trailing link. */
+/**
+ * Small caps section heading with an optional trailing link. Without `href`
+ * the action is a label, as the sketch draws it; with one it goes somewhere.
+ */
 export function SectionTitle({
   title,
   action,
+  href,
 }: {
   title: string;
   action?: string;
+  href?: string;
 }) {
   if (!title && !action) return null;
   return (
@@ -104,7 +109,14 @@ export function SectionTitle({
       <h2 className="truncate text-sm font-semibold text-[color:var(--muted-2)]">
         {title}
       </h2>
-      {action ? (
+      {action && href ? (
+        <Link
+          href={href}
+          className="shrink-0 text-xs font-medium text-[color:var(--accent-text)] hover:underline"
+        >
+          {action} &rarr;
+        </Link>
+      ) : action ? (
         <span className={cn("shrink-0 text-xs", MUTED)}>{action} &rarr;</span>
       ) : null}
     </div>

@@ -1,33 +1,8 @@
-import { Screen, ScreenTitle } from "@/components/screen";
-import CoverShelf from "@/components/cover-shelf";
-import AppGrid from "@/components/app-grid";
-import QuickLinks from "@/components/quick-links";
-import { currentUserId } from "@/lib/current-user";
-import { shelfFor } from "@/lib/user-state";
-import { kindOf } from "@/lib/categories";
+import KindBrowse from "@/components/kind-browse";
 
 export const dynamic = "force-dynamic";
 
-/** Games. The chip row is the sketch's; the rest follows Home's language. */
-export default async function GamesPage() {
-  const games = (await shelfFor(await currentUserId())).filter(
-    (a) => kindOf(a.category) === "game"
-  );
-
-  return (
-    <Screen>
-      <ScreenTitle title="Games" />
-      {games.length > 0 && (
-        <CoverShelf
-          title="Popular this week"
-          action="View all"
-          apps={games.slice(0, 6)}
-          columns={6}
-          sub="developer"
-        />
-      )}
-      <QuickLinks title="Categories" kind="game" />
-      <AppGrid title="All games" apps={games} empty="No games yet." />
-    </Screen>
-  );
+/** Games — the same screen as Apps over the game shelves. */
+export default function GamesPage() {
+  return <KindBrowse kind="game" />;
 }

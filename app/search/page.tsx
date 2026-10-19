@@ -1,18 +1,19 @@
-import Form from "next/form";
-import { Search } from "lucide-react";
 import { Screen } from "@/components/screen";
 import AppGrid from "@/components/app-grid";
-import { MUTED } from "@/components/primitives";
-import { cn } from "@/lib/utils";
+import CategoryChips from "@/components/category-chips";
+import IconShelf from "@/components/icon-shelf";
+import SearchBox from "@/components/search-box";
 import { currentUserId } from "@/lib/current-user";
-import { catalogFor } from "@/lib/user-state";
+import { adultsAllowed, catalogFor, shelfFor } from "@/lib/user-state";
+import { byTopRated, searchApps } from "@/lib/search";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Search. A plain GET form — the whole catalog is already in memory, so a
- * server round trip answers faster than shipping a client search would, and
- * the query stays in the URL where it can be shared and gone back to.
+ * Search. The box suggests as it is typed (`components/search-box.tsx`);
+ * Enter lands here with the query in the URL, where it can be shared and gone
+ * back to. Both rank through `lib/search.ts`, so the list here starts with the
+ * suggestions that were under the box.
  */
 export default async function SearchPage({
   searchParams,
@@ -21,50 +22,38 @@ export default async function SearchPage({
 }) {
   const { q } = await searchParams;
   const query = (q ?? "").trim();
+  const userId = await currentUserId();
   // Every listing, members of a family included: the shelf shows a family as
   // one card, but someone typing "Elitogram" means that build and no other.
-  const apps = await catalogFor(await currentUserId());
-
-  const needle = query.toLowerCase();
-  const results = query
-    ? apps.filter((a) =>
-        [a.name, a.developer, a.tagline, a.category, a.packageName ?? ""]
-          .join(" ")
-          .toLowerCase()
-          .includes(needle)
-      )
-    : [];
+  const apps = await catalogFor(userId);
+  const results = searchApps(apps, query);
 
   return (
     <Screen>
-      <Form action="/search" className="px-[var(--pad)]">
-        <div
-          className={cn(
-            "flex items-center gap-2.5 rounded-full border border-[color:var(--border)] bg-[var(--card)] px-4 py-2.5 text-sm",
-            MUTED
-          )}
-        >
-          <Search size={16} className="shrink-0" />
-          <input
-            type="search"
-            name="q"
-            defaultValue={query}
-            placeholder="Search apps and games"
-            aria-label="Search apps and games"
-            autoComplete="off"
-            className="w-full bg-transparent text-[color:var(--fg)] outline-none placeholder:text-[color:var(--muted)]"
-          />
-        </div>
-      </Form>
+      <div className="px-[var(--pad)]">
+        {/* Keyed on the query so going back to another search resets the box. */}
+        <SearchBox key={query} initialQuery={query} autoFocus={!query} />
+      </div>
       {query ? (
         <AppGrid
           title={`${results.length} ${results.length === 1 ? "result" : "results"} for "${query}"`}
           apps={results}
-          empty="Nothing matched."
+          empty="Nothing matched. Try fewer or shorter words."
         />
       ) : (
-        <AppGrid title="Suggestions" apps={apps.slice(0, 8)} />
+        <Browse userId={userId} />
       )}
     </Screen>
+  );
+}
+
+/** Before anything is typed: the shelves to wander into instead. */
+async function Browse({ userId }: { userId: number | null }) {
+  const shelf = await shelfFor(userId);
+  return (
+    <>
+      <CategoryChips apps={shelf} adults={adultsAllowed(userId)} />
+      <IconShelf title="Popular" apps={byTopRated(shelf).slice(0, 15)} />
+    </>
   );
 }

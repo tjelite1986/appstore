@@ -31,7 +31,7 @@ import { categoryTiles, type CategoryKind } from "@/lib/store";
 import { categoryLabel, categorySlug } from "@/lib/categories";
 
 /** The icon names the sketch writes on each quick-link item. */
-const ICONS: Record<string, LucideIcon> = {
+export const ICONS: Record<string, LucideIcon> = {
   images: Images,
   clapperboard: Clapperboard,
   users: Users,
