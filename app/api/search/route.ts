@@ -8,7 +8,7 @@
  */
 import { sessionUser } from "@/lib/auth";
 import { catalogFor } from "@/lib/user-state";
-import { searchApps, queryTerms } from "@/lib/search";
+import { searchApps, queryTerms, norm } from "@/lib/search";
 import { categoryLabel, categorySlug } from "@/lib/categories";
 import type { StoreApp } from "@/lib/store";
 
@@ -49,7 +49,7 @@ export async function GET(req: Request): Promise<Response> {
       const label = categoryLabel(a.category);
       if (seen.has(label)) continue;
       seen.add(label);
-      const hay = label.toLowerCase();
+      const hay = norm(label);
       if (terms.every((t) => hay.includes(t))) {
         categories.push({ label, slug: categorySlug(a.category) });
       }

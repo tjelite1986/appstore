@@ -25,7 +25,8 @@ type Searchable = {
   rating: number;
 };
 
-function norm(s: string): string {
+/** Lower-cased and accent-free — the form every comparison here is made in. */
+export function norm(s: string): string {
   return s.toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "");
 }
 
