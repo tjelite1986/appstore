@@ -161,6 +161,45 @@ export function parseApkFilename(fileName: string): ParsedApkName {
   return { name, version, packageName };
 }
 
+/**
+ * `needle` inside `hay` as a version or the leading part of one: "2026.06.27"
+ * is in "v2026.06.27.176", "1.2026.26" is not in "1.2026.265".
+ */
+function containsVersion(hay: string, needle: string): boolean {
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?<![\\d.])${escaped}(?!\\d)`, "i").test(hay);
+}
+
+/** "1.0.0" and "1.0" are one version; "v2.1" and "2.1" too. */
+function sameVersion(a: string, b: string): boolean {
+  const norm = (s: string) => s.replace(/^v/i, "").replace(/(?:\.0+)+$/, "");
+  return norm(a) === norm(b);
+}
+
+/**
+ * The version a file's name claims, when it contradicts the version folder
+ * the file sits in — null when the name agrees or claims nothing.
+ *
+ * The folder is the manifest's versionName, which is what the store sorts by
+ * and what the phone shows after install. A release name that says otherwise
+ * ("ChatGPT_v1.2026.265_Plus.apk" whose manifest says 1.2026.223) is a mod
+ * built on an older base or a mislabelled upload, and either way the store
+ * ranks it by the lower number. Loose on purpose: a name that only carries
+ * part of the version ("16.58.0" for "16.58.0-260903") or the version among
+ * other numbers ("1.1.1.1-6.38.8") agrees.
+ */
+export function filenameVersionConflict(
+  fileName: string,
+  version: string
+): string | null {
+  const claimed = parseApkFilename(fileName).version;
+  if (!claimed || isPlaceholderVersion(claimed)) return null;
+  if (sameVersion(claimed, version)) return null;
+  if (containsVersion(version, claimed)) return null;
+  if (containsVersion(fileName, version.replace(/^v/i, ""))) return null;
+  return claimed;
+}
+
 /* ---------------------------------------------------------------- matching */
 
 /** Release-name decorations that say nothing about WHICH app it is. */

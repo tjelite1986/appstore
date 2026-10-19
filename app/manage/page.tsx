@@ -4,6 +4,7 @@ import {
   ArrowUpFromLine,
   ChevronDown,
   Copy,
+  FileWarning,
   FolderInput,
   History,
   Layers,
@@ -33,6 +34,7 @@ import {
   type StoreApp,
 } from "@/lib/store";
 import { duplicatePackages } from "@/lib/merge";
+import { filenameVersionConflict } from "@/lib/import";
 import { planPrune } from "@/lib/prune";
 import { currentUser } from "@/lib/current-user";
 import { adultsAllowed } from "@/lib/user-state";
@@ -88,6 +90,22 @@ export default async function ManagePage() {
   // Counted off the same gated list, so the number on the button and the list
   // behind it — read through the route with the same gate — agree.
   const stale = placeholder ? null : planPrune(apps);
+  // Files whose release name claims another version than the manifest the
+  // folder is named after. The store ranks such a build by the manifest, so a
+  // mod sold as newer can sit below a real older release; derived on read so
+  // a rename makes the row go away with nothing to clear.
+  const misnamed: Misnamed[] = placeholder
+    ? []
+    : apps.flatMap((app) =>
+        app.versions.flatMap((v) =>
+          v.files.flatMap((f) => {
+            const claimed = filenameVersionConflict(f.file, v.version);
+            return claimed
+              ? [{ app, version: v.version, file: f.file, claimed }]
+              : [];
+          })
+        )
+      );
 
   const files = apps.flatMap((a) => a.versions.flatMap((v) => v.files));
   const bytes = files.reduce((sum, f) => sum + f.bytes, 0);
@@ -305,6 +323,19 @@ export default async function ManagePage() {
                   report={report}
                   bySlug={bySlug}
                 />
+              </Panel>
+            )}
+
+            {misnamed.length > 0 && (
+              <Panel
+                id="misnamed"
+                icon={FileWarning}
+                title="Name and version disagree"
+                aside={<Pill tone="warn">{misnamed.length}</Pill>}
+                description="The file name claims one version, the APK's manifest another. The store and the phone both go by the manifest, so the build is ranked by that number — a later upload between the two would count as newer. Rename the file to match, or replace it if the newer build was what you wanted."
+                flush
+              >
+                <MisnamedRows rows={misnamed} />
               </Panel>
             )}
 
@@ -642,6 +673,55 @@ function BehindRows({
       </ul>
       {foot}
     </>
+  );
+}
+
+type Misnamed = {
+  app: StoreApp;
+  version: string;
+  file: string;
+  claimed: string;
+};
+
+/** One line per file whose name and manifest name different versions. */
+function MisnamedRows({ rows }: { rows: Misnamed[] }) {
+  return (
+    <ul className="divide-y divide-[color:var(--border)]">
+      {rows.map(({ app, version, file, claimed }) => (
+        <li
+          key={`${app.slug}/${version}/${file}`}
+          className="flex items-center gap-3 px-4 py-2.5"
+        >
+          <Link href={`/app/${app.slug}`} className="shrink-0">
+            <Thumb
+              seed={app.seed}
+              src={app.icon}
+              background={app.iconBackground}
+              fit={app.iconFit}
+              alt={app.name}
+              className="h-10 w-10 rounded-[var(--radius-sm)]"
+            />
+          </Link>
+          <div className="min-w-0 flex-1">
+            <Link
+              href={`/app/${app.slug}`}
+              className="block truncate text-sm font-medium hover:underline"
+            >
+              {app.name}
+            </Link>
+            <span className={cn("block truncate text-xs tabular-nums", MUTED)}>
+              manifest {version} · name says {claimed}
+            </span>
+            <code
+              className={cn("block truncate text-[11px]", MUTED)}
+              title={file}
+            >
+              {file}
+            </code>
+          </div>
+        </li>
+      ))}
+    </ul>
   );
 }
 
