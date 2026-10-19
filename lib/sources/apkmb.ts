@@ -14,10 +14,12 @@
  * and the mod-feature list are scraped; everything else is not.
  *
  * The APK is not fetched here. `apkmbDownloadLinks` reads the addresses off
- * the page's download step, and only the Telegram feed follows them: a page
- * posted to the channel is a request for the build, and the feed already knows
- * how to fetch a link and prove it is an APK before the importer sees it.
- * Filling metadata and taking a binary from a mod mirror stay two decisions.
+ * the page's download step, and two callers follow them: the Telegram feed,
+ * for a page posted to the channel, and `lib/sources/apkmb-build.ts`, for an
+ * admin who ticked "download the build" in "Add an app". Both go through
+ * `lib/link-download.ts`, which proves the file is an APK before the importer
+ * sees it. Filling metadata and taking a binary from a mod mirror stay two
+ * decisions — two requests, even when one click makes both.
  */
 import { promises as fs } from "node:fs";
 import path from "node:path";

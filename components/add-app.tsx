@@ -13,6 +13,7 @@ import type { PlayAddResult, PlayHit } from "@/lib/sources/play";
 import type { GithubAddResult } from "@/lib/sources/github";
 import type { FdroidAddResult } from "@/lib/sources/fdroid";
 import type { ApkmbAddResult, ApkmbFill, ApkmbListing } from "@/lib/sources/apkmb";
+import type { ApkmbBuildJob } from "@/lib/sources/apkmb-build";
 import { withBasePath } from "@/lib/base-path";
 
 /**
@@ -95,6 +96,9 @@ export default function AddApp() {
   /** Whether the apkmb card's "add it again" question is open. */
   const [apkmbAgain, setApkmbAgain] = useState(false);
   const [apkmbDone, setApkmbDone] = useState<string | null>(null);
+  /** Whether adding or filling from apkmb also fetches the page's APK. */
+  const [apkmbBuild, setApkmbBuild] = useState(true);
+  const [buildJob, setBuildJob] = useState<ApkmbBuildJob | null>(null);
   const router = useRouter();
 
   const detected = detectSource(term);
@@ -109,6 +113,25 @@ export default function AddApp() {
       }),
     [token]
   );
+
+  // The build is fetched in the background: poll until it is filed, then
+  // redraw so the new version shows up in the rows around the panel.
+  useEffect(() => {
+    if (!buildJob || buildJob.finishedAt) return;
+    const timer = setTimeout(async () => {
+      try {
+        const data = await call(
+          `/api/sources/apkmb/build?url=${encodeURIComponent(buildJob.url)}`
+        );
+        if (!data.job) return;
+        setBuildJob(data.job);
+        if (data.job.finishedAt) router.refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [buildJob, call, router]);
 
   /**
    * Add from a source that serves binaries.
@@ -204,6 +227,19 @@ export default function AddApp() {
     }
   }
 
+  /** Hand the page to the server to fetch its APK; `buildJob` follows it. */
+  async function startBuild(url: string) {
+    try {
+      const data = await call("/api/sources/apkmb/build", {
+        method: "POST",
+        body: JSON.stringify({ url }),
+      });
+      setBuildJob(data.job);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   /** Onto the app the store already has — gaps only, which the route enforces. */
   async function fillApkmb(listing: ApkmbListing, slug: string) {
     setBusy("apkmb-write");
@@ -223,6 +259,7 @@ export default function AddApp() {
           : null,
       ].filter(Boolean);
       setApkmbDone(`${fill.name}: ${wrote.join(", ")}.`);
+      if (apkmbBuild) await startBuild(listing.url);
       setApkmb(null);
       router.refresh();
     } catch (err) {
@@ -254,8 +291,9 @@ export default function AddApp() {
           result.images.screenshots
         } screenshot${
           result.images.screenshots === 1 ? "" : "s"
-        }. It has no versions until an APK for it lands.`
+        }.${apkmbBuild ? "" : " It has no versions until an APK for it lands."}`
       );
+      if (apkmbBuild) await startBuild(listing.url);
       setApkmb(null);
       setApkmbAgain(false);
       router.refresh();
@@ -425,6 +463,7 @@ export default function AddApp() {
       )}
 
       {apkmbDone && <p className={cn("text-xs", MUTED_CLS)}>{apkmbDone}</p>}
+      {buildJob && <BuildLine job={buildJob} />}
 
       {/* Shown before anything is written: a mod mirror describes the build it
           hosts, and whether that description fits the copy this store holds is
@@ -526,11 +565,21 @@ export default function AddApp() {
               {apkmb.listing.description}
             </p>
           )}
+          <label className="flex items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              checked={apkmbBuild}
+              onChange={(e) => setApkmbBuild(e.target.checked)}
+            />
+            Also download the APK from this page
+          </label>
           <p className={cn("text-xs", MUTED_CLS)}>
             {apkmb.listing.screenshotUrls.length} screenshot
             {apkmb.listing.screenshotUrls.length === 1 ? "" : "s"}
             {apkmb.listing.existingSlug
               ? " — filling writes only into the fields this app has left empty"
+              : apkmbBuild
+              ? " — the shelf is created and the APK is fetched into it"
               : " — the shelf is created empty; the APK has to arrive separately"}
             {apkmb.listing.downloadPageUrl
               ? ", and apkmb's own download page for it is "
@@ -666,4 +715,32 @@ export default function AddApp() {
       ))}
     </div>
   );
+}
+
+/** One line for the build the server is fetching from apkmb. */
+function BuildLine({ job }: { job: ApkmbBuildJob }) {
+  const size = job.size ? ` (${(job.size / 1048576).toFixed(1)} MB)` : "";
+  let text: string;
+  let tone = MUTED_CLS;
+  switch (job.state) {
+    case "downloading":
+      text = "Downloading the APK from apkmb…";
+      break;
+    case "settling":
+    case "importing":
+      text = `${job.file}${size} downloaded — handing it to the importer…`;
+      break;
+    case "done":
+      text = job.imported
+        ? `${job.file}${size} is on ${job.imported.app} as version ${job.imported.version}.`
+        : job.parked
+          ? `${job.file}${size} was held for review: ${job.parked}.`
+          : `${job.file}${size} was picked up by another import scan.`;
+      if (job.parked) tone = "text-[color:var(--warn)]";
+      break;
+    default:
+      text = `The APK download failed: ${job.error ?? "unknown error"}`;
+      tone = "text-[color:var(--danger,#f87171)]";
+  }
+  return <p className={cn("text-xs", tone)}>{text}</p>;
 }

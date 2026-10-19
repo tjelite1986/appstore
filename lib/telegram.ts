@@ -20,23 +20,27 @@
  * own libraries — that is fine, and turning one of them off is a decision, not
  * a bug to fix here.
  */
-import { promises as fs, statfsSync } from "node:fs";
+import { promises as fs } from "node:fs";
 import path from "node:path";
 import { setMaxListeners } from "node:events";
 import { createHash } from "node:crypto";
 import { STORE_DIRS, STORE_ROOT } from "./storage";
 import { runImportScan, type ImportSummary } from "./import";
-import { readApkInfo } from "./apk-manifest";
-import { BROWSER_USER_AGENT, openGuarded } from "./sources/net";
 import { detectSource } from "./sources/detect";
-import { apkmbDownloadLinks, apkmbUrl } from "./sources/apkmb";
+import { apkmbUrl } from "./sources/apkmb";
+import {
+  APK_EXT,
+  DROP_DIR,
+  MAX_LINKS,
+  NotAnApk,
+  claimName,
+  downloadApkLink,
+  downloadApkmbBuild,
+  freeBytes,
+} from "./link-download";
 
-const DROP_DIR = path.join(STORE_ROOT, STORE_DIRS.import);
 const STATE_FILE = path.join(STORE_ROOT, STORE_DIRS.state, "telegram.json");
 
-const APK_EXT = /\.(apk|xapk|apks|apkm)$/i;
-/** Path separators and control characters — nothing else is touched. */
-const UNSAFE_NAME = new RegExp("[/\\\\]|[\\u0000-\\u001f]", "g");
 
 /**
  * The link path.
@@ -48,16 +52,6 @@ const UNSAFE_NAME = new RegExp("[/\\\\]|[\\u0000-\\u001f]", "g");
  */
 /** Telegram's own domains are navigation, never a download. */
 const TELEGRAM_HOST = /(^|\.)(t\.me|telegram\.(me|org|dog))$/i;
-/** Links followed per message. A channel post is not a link farm. */
-const MAX_LINKS = 3;
-/** A transfer that has not moved a byte for this long is abandoned. */
-const LINK_IDLE_MS = 60_000;
-/**
- * And a ceiling on top of the idle timer: a mirror that trickles bytes just
- * often enough never trips idle, and one link must not eat the whole run —
- * the timer gives up on the run itself at forty minutes.
- */
-const LINK_DEADLINE_MS = 15 * 60_000;
 
 /** Cross-run download tries per message before it is left alone. */
 const MAX_ATTEMPTS = 3;
@@ -394,29 +388,10 @@ export async function clearCandidate(url: string): Promise<boolean> {
 const mb = (bytes: number) => (bytes / 1048576).toFixed(1);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-function freeBytes(dir: string): number {
-  try {
-    const st = statfsSync(dir);
-    return Number(st.bavail) * Number(st.bsize);
-  } catch {
-    return Number.POSITIVE_INFINITY;
-  }
-}
-
-/**
- * The rest of the upload name — version, mod-site credit — is exactly what the
- * import parser reads, so only what could escape the directory is removed.
- */
-function safeName(name: string): string {
-  return name.replace(UNSAFE_NAME, "_").trim();
-}
 
 function msgOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
-
-/** A verdict, not a failure: these bytes are not an APK, so retrying is pointless. */
-class NotAnApk extends Error {}
 
 /**
  * Every URL a message offers, in the order Telegram gives them.
@@ -461,42 +436,6 @@ function messageUrls(message: any): string[] {
   return out;
 }
 
-/**
- * What to call a fetched file.
- *
- * The import parser reads the name for the app's name and version, so the
- * server's own name is kept whenever it gives one. A name is invented only
- * when there is nothing to keep — and it must carry an APK extension, because
- * the importer skips every file that does not.
- */
-function linkFileName(
-  requested: string,
-  finalUrl: string,
-  disposition: string,
-  info: { packageName: string | null; versionName: string | null }
-): string {
-  const star = /filename\*=\s*(?:UTF-8'')?([^;]+)/i.exec(disposition);
-  const plain = /filename=\s*"?([^";]+)"?/i.exec(disposition);
-  const fallback = (plain?.[1] ?? "").trim().replace(/^"|"$/g, "");
-  let name = fallback;
-  if (star) {
-    try {
-      name = decodeURIComponent(star[1].trim().replace(/^"|"$/g, ""));
-    } catch {
-      name = fallback;
-    }
-  }
-  if (!name) {
-    try {
-      name = decodeURIComponent(path.basename(new URL(finalUrl || requested).pathname));
-    } catch {
-      name = "";
-    }
-  }
-  if (APK_EXT.test(name)) return name;
-  const stem = name.replace(/\.[a-z0-9]{1,5}$/i, "").trim() || info.packageName || "telegram-link";
-  return `${stem}${info.versionName ? `_v${info.versionName}` : ""}.apk`;
-}
 
 // A run outlives the request that started it, so the promise is the lock: a
 // second trigger returns the run in flight instead of racing it.
@@ -615,7 +554,6 @@ async function run(): Promise<void> {
   );
 
   let downloaded = 0;
-  let linkSeq = 0;
 
   /** The real upload filename, off the document's attributes. */
   /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -707,118 +645,19 @@ async function run(): Promise<void> {
     return dc;
   }
 
-  /** A free name in the drop folder — a repost must not overwrite the first copy. */
-  async function claimName(raw: string, messageId: number): Promise<string> {
-    const fileName = safeName(raw);
-    const taken = await fs
-      .stat(path.join(DROP_DIR, fileName))
-      .then(() => true, () => false);
-    if (!taken) return fileName;
-    const ext = path.extname(fileName);
-    return `${path.basename(fileName, ext)}-tg${messageId}${ext}`;
+
+  /** A posted link, fetched into the drop folder — see `lib/link-download.ts`. */
+  function downloadLink(url: string, messageId: number) {
+    return downloadApkLink(url, { suffix: `tg${messageId}`, maxBytes: cfg.maxBytes });
   }
 
-  /**
-   * Fetch an APK that was posted as a link.
-   *
-   * None of the MTProto machinery applies here — no data centre, no chunking,
-   * no file reference — but one thing has to replace all of it: the response
-   * must prove it is an APK. `content-type` is the server's claim about itself,
-   * and a login wall or a "click here to download" page answers 200 with HTML,
-   * so the bytes are handed to the same manifest reader the importer uses. No
-   * package name, no file.
-   *
-   * The address was written in a channel post, not handed over by an upstream
-   * listing, so it goes through `openGuarded`: every hop is refused if it
-   * resolves onto this machine's own network, and no fetcher follows a
-   * redirect before that check has run.
-   */
-  async function downloadLink(
-    url: string,
-    messageId: number
-  ): Promise<{ name: string; size: number }> {
-    await fs.mkdir(DROP_DIR, { recursive: true });
-    const tmp = path.join(DROP_DIR, `.link-${messageId}-${linkSeq++}.part`);
-    const deadlineAt = Date.now() + LINK_DEADLINE_MS;
-
-    // The idle timer lives on the socket (see `requestOnce`): a 200 MB file
-    // over a slow mirror is not a hung transfer, but one that has stopped
-    // sending is. The deadline is checked as bytes arrive.
-    const { res, url: finalUrl } = await openGuarded(url, {
-      idleMs: LINK_IDLE_MS,
-      headers: { "user-agent": BROWSER_USER_AGENT },
+  /** The build an apkmb page offers, one step further on its download page. */
+  function downloadApkmb(pageUrl: string, messageId: number) {
+    return downloadApkmbBuild(pageUrl, {
+      suffix: `tg${messageId}`,
+      maxBytes: cfg.maxBytes,
+      onFail: (link, why) => say(`  ${link}: ${why}`),
     });
-
-    try {
-      const declared = Number(res.headers["content-length"]);
-      if (Number.isFinite(declared) && declared > cfg.maxBytes) {
-        throw new NotAnApk(`over size cap (${mb(declared)} MB)`);
-      }
-
-      let written = 0;
-      const handle = await fs.open(tmp, "w");
-      try {
-        for await (const chunk of res as AsyncIterable<Buffer>) {
-          if (Date.now() > deadlineAt) {
-            throw new Error(`still downloading after ${LINK_DEADLINE_MS / 60_000} min — gave up`);
-          }
-          written += chunk.byteLength;
-          // The cap again, on the bytes: a server may declare no length at all.
-          if (written > cfg.maxBytes) {
-            throw new NotAnApk(`over size cap (>${mb(cfg.maxBytes)} MB)`);
-          }
-          await handle.write(chunk);
-        }
-      } finally {
-        await handle.close();
-      }
-
-      const info = await readApkInfo(tmp);
-      if (!info.packageName) {
-        const type = res.headers["content-type"] || "no content-type";
-        throw new NotAnApk(`not an APK (${written} bytes, ${type})`);
-      }
-
-      const disposition = res.headers["content-disposition"] ?? "";
-      const fileName = await claimName(
-        linkFileName(url, finalUrl, disposition, info),
-        messageId
-      );
-      await fs.rename(tmp, path.join(DROP_DIR, fileName));
-      return { name: fileName, size: written };
-    } catch (err) {
-      // A throw mid-body leaves the socket open until it is destroyed.
-      res.destroy();
-      await fs.rm(tmp, { force: true }).catch(() => {});
-      throw err;
-    }
-  }
-
-  /**
-   * Fetch the APK an apkmb product page offers.
-   *
-   * The page is HTML; the build sits one step further, on its download page.
-   * Each address listed there is tried in order until one proves to be an
-   * APK — the list is usually a single file, and a second entry is a variant
-   * of the same app, not a different one.
-   */
-  async function downloadApkmb(
-    pageUrl: string,
-    messageId: number
-  ): Promise<{ name: string; size: number }> {
-    // Capped like a message: a page is not a link farm either.
-    const links = (await apkmbDownloadLinks(pageUrl)).slice(0, MAX_LINKS);
-    if (!links.length) throw new NotAnApk("no download link on the page");
-    let lastError: unknown;
-    for (const link of links) {
-      try {
-        return await downloadLink(link, messageId);
-      } catch (err) {
-        lastError = err;
-        say(`  ${link}: ${msgOf(err)}`);
-      }
-    }
-    throw lastError;
   }
 
   /**
@@ -833,7 +672,7 @@ async function run(): Promise<void> {
     info: { doc: any; documentId: string; homeDc: number; fileName: string; fileSize: number }
   ): Promise<string> {
     await fs.mkdir(DROP_DIR, { recursive: true });
-    const fileName = await claimName(info.fileName, message.id);
+    const fileName = await claimName(info.fileName, `tg${message.id}`);
     const partPath = path.join(DROP_DIR, `.${fileName}.part`);
 
     // Pinned for the whole transfer: every chunk starts at the right data
