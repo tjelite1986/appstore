@@ -15,6 +15,7 @@
  * Play APKs are never fetched. Google does not serve them to anyone but the
  * Play client, and the store hosts what it was given, not what it scraped.
  */
+import type { IAppItemFullDetail } from "google-play-scraper";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { STORE_DIRS, STORE_ROOT } from "@/lib/storage";
@@ -54,9 +55,11 @@ export type PlayHit = {
 
 // google-play-scraper v10 is ESM; load it dynamically so it works whichever
 // module system Next compiles this file into.
-async function gplay(): Promise<any> {
-  const mod: any = await import("google-play-scraper");
-  return mod.default ?? mod;
+type GPlay = typeof import("google-play-scraper").default;
+
+async function gplay(): Promise<GPlay> {
+  const mod = await import("google-play-scraper");
+  return (mod as { default?: GPlay }).default ?? (mod as unknown as GPlay);
 }
 
 /**
@@ -157,7 +160,7 @@ export async function searchPlay(term: string): Promise<PlayHit[]> {
   if (!query) return [];
 
   const gp = await gplay();
-  const results: any[] = await gp.search({
+  const results = await gp.search({
     term: query,
     num: SEARCH_LIMIT,
     requestOptions: { timeout: PLAY_TIMEOUT_MS },
@@ -228,9 +231,12 @@ export async function fetchPlayListing(packageId: string): Promise<PlayListing> 
   }
 
   const gp = await gplay();
-  let app: any;
+  let app: IAppItemFullDetail;
   try {
-    app = await gp.app({ appId: pkg, requestOptions: { timeout: PLAY_TIMEOUT_MS } });
+    // `requestOptions` is read by the library (lib/app.js) but missing from
+    // its typings for app(); passed via a variable to skip the literal check.
+    const options = { appId: pkg, requestOptions: { timeout: PLAY_TIMEOUT_MS } };
+    app = await gp.app(options);
   } catch (err) {
     // The scraper folds every failure into one error and keeps the HTTP
     // status on it; 404 is the one that means "no listing".

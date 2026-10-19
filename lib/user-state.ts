@@ -34,8 +34,6 @@ export type UserState = {
   installed: Map<string, string>;
 };
 
-const EMPTY: UserState = { saved: new Set(), installed: new Map() };
-
 /* ------------------------------------------------------------- the 18+ gate */
 
 /**

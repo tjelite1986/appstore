@@ -59,10 +59,36 @@ function headers(): Record<string, string> {
   return h;
 }
 
+/*
+ * The few fields read off GitHub's JSON. Every one is optional and `unknown`
+ * where it is coerced anyway: the answer is someone else's document, and the
+ * code below already treats it that way with `String()` and `?.`.
+ */
+type ApiAsset = { name?: unknown; browser_download_url?: unknown; size?: unknown };
+type ApiRelease = {
+  draft?: boolean;
+  prerelease?: boolean;
+  tag_name?: unknown;
+  published_at?: unknown;
+  assets?: ApiAsset[];
+} | null;
+type ApiContent = {
+  name?: unknown;
+  type?: unknown;
+  path?: unknown;
+  download_url?: unknown;
+  size?: unknown;
+} | null;
+type ApiRepo = {
+  name?: unknown;
+  description?: unknown;
+  owner?: { login?: unknown; avatar_url?: unknown };
+};
+
 async function api(
   pathname: string,
   opts: { missingIsNull?: boolean } = {}
-): Promise<any> {
+): Promise<unknown> {
   const res = await fetch(`https://api.github.com${pathname}`, {
     headers: headers(),
     signal: AbortSignal.timeout(API_TIMEOUT_MS),
@@ -143,9 +169,9 @@ export async function latestRelease(ref: RepoRef): Promise<GithubRelease | null>
   if (!Array.isArray(list)) return null;
 
   let newestPrerelease: GithubRelease | null = null;
-  for (const release of list) {
+  for (const release of list as ApiRelease[]) {
     if (release?.draft) continue;
-    const assets: GithubAsset[] = (release?.assets ?? []).map((a: any) => ({
+    const assets: GithubAsset[] = (release?.assets ?? []).map((a) => ({
       name: String(a?.name ?? ""),
       url: String(a?.browser_download_url ?? ""),
       bytes: Number(a?.size ?? 0),
@@ -192,7 +218,7 @@ export async function repoContents(
   );
   // A file path answers with an object; only a directory listing is an array.
   if (!Array.isArray(body)) return null;
-  return body.map((f: any) => ({
+  return (body as ApiContent[]).map((f) => ({
     name: String(f?.name ?? ""),
     type: f?.type === "dir" ? "dir" : "file",
     path: String(f?.path ?? ""),
@@ -315,8 +341,8 @@ export async function resolveRepoFile(
 }
 
 /** The repository itself — its description, its owner, its avatar. */
-export async function repoInfo(ref: RepoRef): Promise<any> {
-  return api(`/repos/${ref.owner}/${ref.repo}`);
+export async function repoInfo(ref: RepoRef): Promise<ApiRepo | null> {
+  return (await api(`/repos/${ref.owner}/${ref.repo}`)) as ApiRepo | null;
 }
 
 export type GithubAddResult = {
@@ -354,7 +380,7 @@ export async function addFromGitHub(input: string): Promise<GithubAddResult> {
     throw new Error(`${existing.name} is already in the catalog from that repo`);
   }
 
-  const repo = await api(`/repos/${ref.owner}/${ref.repo}`);
+  const repo = await repoInfo(ref);
   const release = await latestRelease(ref);
   if (!release) {
     throw new Error(

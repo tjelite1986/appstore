@@ -20,7 +20,7 @@ import {
   type ButtonVariant,
 } from "@/components/primitives";
 import type { ImportSummary, ReviewItem } from "@/lib/import";
-import type { PlayListing } from "@/lib/sources/play";
+import type { PlayFill, PlayListing } from "@/lib/sources/play";
 import type { ApkmbListing } from "@/lib/sources/apkmb";
 import type { TelegramCandidate, TelegramRun } from "@/lib/telegram";
 import { adminCall } from "@/lib/admin-call";
@@ -661,7 +661,7 @@ const REASONS: Record<string, string> = {
 };
 
 /** "Created Shazam — wrote 5 fields and 8 screenshots from Play." */
-function describeFill(result: any): string {
+function describeFill(result: { appName?: string; filled: PlayFill }): string {
   const f = result.filled;
   const parts: string[] = [];
   if (f.written.length) parts.push(`${f.written.length} fields`);
