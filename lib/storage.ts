@@ -6,7 +6,9 @@
  * Host root: wherever `STORE_ROOT` points — a directory outside this
  * repository, bind-mounted at /store in the container.
  *
- *   apks/         <slug>/<version>/<file>.apk|.xapk   the served binaries
+ *   apks/         <slug>/<version>/<file>.apk|.xapk   the served binaries, and
+ *                                                     any .obb/.zip game data
+ *                                                     beside them
  *   icons/        <slug>.png                          app icon
  *   banners/      <slug>.jpg                          wide header image
  *   screenshots/  <slug>/<n>.jpg                      detail-page gallery
@@ -15,6 +17,8 @@
  *                                                     category, versions)
  *   _import/                                          drop zone: new APKs
  *   _import/_review/                                  parked, needs a decision
+ *   _import/_uploads/                                 OBB/cache uploads in
+ *                                                     progress
  *   _state/                                           bookkeeping, not content
  *                                                     (the Telegram cursor)
  *
@@ -41,6 +45,8 @@ export const STORE_DIRS = {
   meta: "meta",
   import: "_import",
   review: "_import/_review",
+  /** OBB/cache uploads still arriving in chunks — see lib/extras.ts. */
+  uploads: "_import/_uploads",
   /** Not content — where a feature keeps its own bookkeeping. */
   state: "_state",
 } as const;

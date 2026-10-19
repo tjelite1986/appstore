@@ -13,6 +13,10 @@
  * neither can name a file the store does not already serve. With neither, the
  * store picks — arm64 over universal over arm32, because a 32-bit-only APK on
  * a 64-bit phone fails at install time and says nothing useful about why.
+ *
+ * `?x=<file name>` is the other kind of file a version folder holds: an OBB
+ * or a cache archive the game needs beside its APK. Matched against the
+ * version's `extras` the same way, never joined from the query.
  */
 import { promises as fs } from "node:fs";
 import { NextResponse } from "next/server";
@@ -41,6 +45,33 @@ export async function GET(
     : app.versions[0];
   if (!version) {
     return new NextResponse("No such version", { status: 404 });
+  }
+
+  const wantedExtra = query.get("x");
+  if (wantedExtra !== null) {
+    const extra = version.extras.find((x) => x.file === wantedExtra);
+    if (!extra) return new NextResponse("No such file", { status: 404 });
+    const abs = await resolveInStore(
+      STORE_DIRS.apks,
+      app.slug,
+      version.version,
+      extra.file
+    );
+    if (!abs) return new NextResponse("Not found", { status: 404 });
+    let stat;
+    try {
+      stat = await fs.stat(abs);
+    } catch {
+      return new NextResponse("Not found", { status: 404 });
+    }
+    if (!stat.isFile()) return new NextResponse("Not found", { status: 404 });
+    // An OBB keeps its own name: Android finds it by that name
+    // (main.<versionCode>.<package>.obb), so renaming it on the way out
+    // would hand someone a file the game cannot see.
+    return fileResponse(abs, stat, req, {
+      contentType: contentTypeFor(extra.file),
+      download: extra.file,
+    });
   }
 
   const wantedFile = query.get("f");

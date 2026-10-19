@@ -94,8 +94,11 @@ export function planPrune(apps: StoreApp[]): PrunePlan {
     }
     const drop = older.map((v) => ({
       version: v.version,
-      files: v.files.map((f) => f.file),
-      bytes: v.files.reduce((sum, f) => sum + f.bytes, 0),
+      // The version's OBB and cache archives go with it: they were data for
+      // that build, and a folder left holding only them would keep a
+      // gigabyte nobody can reach from the page.
+      files: [...v.files, ...v.extras].map((f) => f.file),
+      bytes: [...v.files, ...v.extras].reduce((sum, f) => sum + f.bytes, 0),
     }));
     const bytes = drop.reduce((sum, v) => sum + v.bytes, 0);
     plan.apps.push({

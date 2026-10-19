@@ -23,6 +23,8 @@ const CONTENT_TYPES: Record<string, string> = {
   ".xapk": "application/octet-stream",
   ".apks": "application/octet-stream",
   ".apkm": "application/octet-stream",
+  ".zip": "application/zip",
+  ".obb": "application/octet-stream",
 };
 
 export function contentTypeFor(file: string): string {

@@ -57,6 +57,23 @@ export type AppVersionFile = {
   href: string;
 };
 
+/**
+ * A file that goes beside the APK rather than being installed: the OBB or the
+ * cache archive a large game loads its data from. Kept in the same version
+ * folder, because it belongs to that build — a newer APK usually wants newer
+ * data, and an older one must keep the data it was made for.
+ */
+export type AppExtraFile = {
+  /** File name inside apks/<slug>/<version>/. */
+  file: string;
+  bytes: number;
+  size: string;
+  added: string;
+  /** "obb" for an expansion file, "archive" for anything to unpack by hand. */
+  kind: "obb" | "archive";
+  href: string;
+};
+
 export type AppVersion = {
   version: string;
   /**
@@ -76,6 +93,8 @@ export type AppVersion = {
   added: string;
   /** Ready-to-use href for this version, letting the store pick the build. */
   href: string;
+  /** OBB and cache archives for this version. Usually empty. */
+  extras: AppExtraFile[];
 };
 
 /**
@@ -281,6 +300,8 @@ const KNOWN_CATEGORIES: Category[] = [
 
 const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp", ".avif", ".gif"];
 const APK_EXTENSIONS = [".apk", ".xapk", ".apks", ".apkm"];
+/** What a version folder may hold beside its APKs — see `AppExtraFile`. */
+export const EXTRA_EXTENSIONS = [".obb", ".zip"];
 
 /** What a meta/<slug>.json may carry. Every field is optional on purpose. */
 type MetaFile = {
@@ -530,6 +551,29 @@ async function readVersions(slug: string): Promise<AppVersion[]> {
       (a, b) => abiRank(b.abis) - abiRank(a.abis) || a.file.localeCompare(b.file)
     );
 
+    const extras: AppExtraFile[] = [];
+    for (const file of names
+      .filter((f) => EXTRA_EXTENSIONS.includes(path.extname(f).toLowerCase()))
+      .sort()) {
+      let st;
+      try {
+        st = await fs.stat(path.join(dir, file));
+      } catch {
+        continue;
+      }
+      if (!st.isFile()) continue;
+      extras.push({
+        file,
+        bytes: st.size,
+        size: formatBytes(st.size),
+        added: new Date(st.mtimeMs).toISOString(),
+        kind: path.extname(file).toLowerCase() === ".obb" ? "obb" : "archive",
+        href: withBasePath(
+          `/api/download/${encodeURIComponent(slug)}?v=${encodeURIComponent(version)}&x=${encodeURIComponent(file)}`
+        ),
+      });
+    }
+
     const [best] = files;
     out.push({
       version,
@@ -545,6 +589,7 @@ async function readVersions(slug: string): Promise<AppVersion[]> {
       href: withBasePath(
         `/api/download/${encodeURIComponent(slug)}?v=${encodeURIComponent(version)}`
       ),
+      extras,
     });
   }
   return out.sort((a, b) => compareVersions(a.version, b.version));

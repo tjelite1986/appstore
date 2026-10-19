@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Download, ExternalLink, Star } from "lucide-react";
+import { Archive, ArrowLeft, Download, ExternalLink, Star } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Screen } from "@/components/screen";
 import CoverShelf from "@/components/cover-shelf";
@@ -21,6 +21,7 @@ import AppFamily from "@/components/app-family";
 import AppCompanions from "@/components/app-companions";
 import ShareApp from "@/components/share-app";
 import FileFeedbackCard from "@/components/file-feedback";
+import VersionExtras from "@/components/version-extras";
 import { storedText } from "@/lib/edit";
 import { abiShortLabel } from "@/lib/apk-abi";
 import { appFor, catalogFor } from "@/lib/user-state";
@@ -343,6 +344,31 @@ export default async function AppDetailPage({
         </div>
       )}
 
+      {/* The data a big game loads beside its APK. Without it the install
+          above opens to a black screen or a download prompt that no longer
+          works, so it sits right under the button rather than further down. */}
+      {latest && latest.extras.length > 0 && (
+        <div className="px-[var(--pad)] pt-3">
+          <div className={cn(CARD, "space-y-2 p-3")}>
+            <p className="text-sm font-semibold">Game data</p>
+            <p className={cn("text-xs leading-relaxed", MUTED)}>
+              {latest.extras.some((x) => x.kind === "obb")
+                ? `Copy the .obb into Android/obb/${app.packageName ?? "<package>"}/ before the first launch.`
+                : "Needed beside the APK — see the install steps under About."}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {latest.extras.map((x) => (
+                <a key={x.file} href={x.href}>
+                  <Button size="sm" variant="secondary">
+                    <Archive size={13} /> {x.file} · {x.size}
+                  </Button>
+                </a>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Nothing to install — no file here and no link out — means nothing to
           mark as installed, and the card would offer no button at all. */}
       {userId !== null && (latest || linked) && (
@@ -394,6 +420,17 @@ export default async function AppDetailPage({
             banner: app.banner,
             screenshots: app.screenshots,
           }}
+        />
+      )}
+
+      {/* Only where there is a version to attach game data to. */}
+      {viewer?.role === "admin" && app.versions.length > 0 && (
+        <VersionExtras
+          slug={app.slug}
+          versions={app.versions.map((v) => ({
+            version: v.version,
+            extras: v.extras.map((x) => ({ file: x.file, size: x.size })),
+          }))}
         />
       )}
 
@@ -549,6 +586,13 @@ export default async function AppDetailPage({
                       <Button size="sm" variant="secondary">
                         <Download size={13} />{" "}
                         {v.files.length > 1 ? abiShortLabel(f.abis) : "Get"}
+                      </Button>
+                    </a>
+                  ))}
+                  {v.extras.map((x) => (
+                    <a key={x.file} href={x.href} title={x.file}>
+                      <Button size="sm" variant="secondary">
+                        <Archive size={13} /> {x.kind === "obb" ? "OBB" : "Data"} · {x.size}
                       </Button>
                     </a>
                   ))}
