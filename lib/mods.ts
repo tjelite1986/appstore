@@ -428,6 +428,7 @@ async function replaceImage(url: string, rel: string): Promise<void> {
 
 const MAX_DESCRIPTION_IMAGES = 30;
 const MAX_SVG_BYTES = 1024 * 1024;
+const MAX_SVG_PIXELS = 4096 * 4096;
 
 /** The addresses a description's `[img]` tags show, in order, once each. */
 export function descriptionImageUrls(description: string): string[] {
@@ -456,7 +457,11 @@ async function rasterizeSvg(bytes: Buffer): Promise<Buffer | null> {
     return null;
   }
   if (bytes.byteLength > MAX_SVG_BYTES) return null;
-  return sharp(bytes, { density: 192 }).png().toBuffer();
+  // A few bytes can declare a canvas of any size; check it before drawing.
+  const image = sharp(bytes, { density: 192, limitInputPixels: MAX_SVG_PIXELS });
+  const { width, height } = await image.metadata();
+  if (!width || !height || width * height > MAX_SVG_PIXELS) return null;
+  return image.png().toBuffer();
 }
 
 /**
