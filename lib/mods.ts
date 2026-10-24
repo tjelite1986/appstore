@@ -11,6 +11,7 @@
  *   mods/<game>/<mod>/files/<file>     the archives people download
  *   mod-images/<game>.<ext>            the game's cover
  *   mod-images/<game>/<mod>.<ext>      the mod's picture
+ *   mod-images/<game>/<mod>/<hash>.<ext>  the pictures its description shows
  *
  * The same split as the apps: the files on disk say which downloads exist and
  * how big they are, the JSON only supplies words. A file whose label is
@@ -20,15 +21,17 @@
  * own — nothing here edits them by hand — so a refresh overwrites them rather
  * than filling gaps.
  */
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import sharp from "sharp";
 import { STORE_DIRS, STORE_ROOT } from "./storage";
 import { DISCARD_DIR, slugify } from "./import";
 import { formatBytes, mediaHref, seedFrom } from "./store";
 import { withBasePath } from "./base-path";
-import { saveImage } from "./sources/net";
-import type { NexusMod } from "./sources/nexus";
+import { fetchImageBytes, saveImage } from "./sources/net";
+import { sniffExtension } from "./edit";
+import { nexusModUrl, type NexusMod, type NexusRef, type NexusRequirement } from "./sources/nexus";
 import {
   appendPart,
   CHUNK_BYTES,
@@ -50,13 +53,29 @@ const MODS_DIR = path.join(STORE_ROOT, STORE_DIRS.mods);
 const IMAGES_DIR = path.join(STORE_ROOT, STORE_DIRS.modImages);
 const IMAGE_EXTS = [".webp", ".png", ".jpg", ".gif", ".avif"];
 
-/** What a mod archive can be, by the bytes it opens with. */
-const ARCHIVE_MAGIC: Record<string, string[]> = {
-  ".zip": ["504b0304", "504b0506"],
-  ".7z": ["377abcaf"],
-  ".rar": ["52617221"],
+const ZIP = ["504b0304", "504b0506"];
+
+/**
+ * What a mod can ship as, and how its first bytes must look. Most mods are an
+ * archive, but on Android a game is often modded through a launcher — an APK
+ * installed beside the game, with the mod archive imported into it — so the
+ * launcher sits on the same listing. An OBB is opaque game data: no magic.
+ */
+const MOD_FORMATS: Record<string, { kind: ModFileKind; magic: string[] | null }> = {
+  ".zip": { kind: "archive", magic: ZIP },
+  ".7z": { kind: "archive", magic: ["377abcaf"] },
+  ".rar": { kind: "archive", magic: ["52617221"] },
+  ".jar": { kind: "archive", magic: ZIP },
+  ".apk": { kind: "app", magic: ZIP },
+  ".apks": { kind: "app", magic: ZIP },
+  ".xapk": { kind: "app", magic: ZIP },
+  ".apkm": { kind: "app", magic: ZIP },
+  ".obb": { kind: "data", magic: null },
 };
-export const MOD_EXTENSIONS = Object.keys(ARCHIVE_MAGIC);
+export const MOD_EXTENSIONS = Object.keys(MOD_FORMATS);
+
+/** A mod archive, an app (a launcher, a patched game) or game data. */
+export type ModFileKind = "archive" | "app" | "data";
 
 export const ModError = UploadError;
 
@@ -78,6 +97,23 @@ export type ModFile = {
   version: string;
   added: string;
   href: string;
+  kind: ModFileKind;
+};
+
+/**
+ * One thing a mod needs, as the page shows it: where to get it — this store's
+ * own page when the mod is here, Nexus or the off-site address otherwise.
+ */
+export type ModRequirement = {
+  kind: NexusRequirement["kind"];
+  name: string;
+  notes: string;
+  /** This store's page for it. */
+  here?: string;
+  /** Where else it is found. */
+  url?: string;
+  /** The Nexus mod it is, when it is one this store could also hold. */
+  nexus?: NexusRef;
 };
 
 export type StoreMod = {
@@ -100,6 +136,9 @@ export type StoreMod = {
     downloads: number;
     updatedAt: string;
   };
+  requirements: ModRequirement[];
+  /** The description's `[img]` addresses, each to its copy in this library. */
+  images: Record<string, string>;
   files: ModFile[];
 };
 
@@ -114,6 +153,9 @@ type ModJson = {
   category?: string;
   adult?: boolean;
   nexus?: StoreMod["nexus"];
+  requirements?: NexusRequirement[];
+  /** `[img]` address → path under mod-images/. */
+  images?: Record<string, string>;
   files?: Record<string, { version?: string }>;
   added?: string;
 };
@@ -180,6 +222,7 @@ async function readMod(game: string, slug: string): Promise<StoreMod | null> {
         bytes: stat.size,
         size: formatBytes(stat.size),
         version: meta.files?.[file]?.version ?? "",
+        kind: MOD_FORMATS[path.extname(file).toLowerCase()].kind,
         added: stat.mtime.toISOString(),
         href: withBasePath(
           `/api/mods/${game}/${slug}/download?f=${encodeURIComponent(file)}`
@@ -204,7 +247,56 @@ async function readMod(game: string, slug: string): Promise<StoreMod | null> {
     picture: await imageHref(`${game}/${slug}`),
     seed: seedFrom(`${game}/${slug}`),
     nexus: meta.nexus,
+    requirements: (Array.isArray(meta.requirements) ? meta.requirements : []).map((r) => ({
+      kind: r.kind,
+      name: r.name,
+      notes: r.notes ?? "",
+      ...(r.kind === "mod" && r.ref ? { url: nexusModUrl(r.ref), nexus: r.ref } : {}),
+      ...(r.kind === "external" && r.url ? { url: r.url } : {}),
+    })),
+    images: await descriptionImageHrefs(meta.images),
     files,
+  };
+}
+
+async function descriptionImageHrefs(
+  images: Record<string, string> | undefined
+): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  if (!images || typeof images !== "object") return out;
+  for (const [url, rel] of Object.entries(images)) {
+    if (typeof rel !== "string") continue;
+    try {
+      const stat = await fs.stat(path.join(IMAGES_DIR, rel));
+      if (stat.isFile()) out[url] = mediaHref(`${STORE_DIRS.modImages}/${rel}`, stat.mtimeMs);
+    } catch {
+      /* not fetched, or gone: the page shows nothing for it */
+    }
+  }
+  return out;
+}
+
+/**
+ * Points each Nexus requirement that is also in this library at its page here,
+ * so "needs SMAPI" leads to the SMAPI download rather than off to Nexus.
+ */
+async function linkRequirementsHere(mod: StoreMod, adults: boolean): Promise<StoreMod> {
+  if (!mod.requirements.some((r) => r.nexus)) return mod;
+
+  const here = new Map<string, string>();
+  for (const game of await dirs(MODS_DIR)) {
+    for (const slug of await dirs(path.join(MODS_DIR, game))) {
+      const other = await readJson<ModJson>(path.join(MODS_DIR, game, slug, "mod.json"));
+      if (!other?.nexus || (other.adult === true && !adults)) continue;
+      here.set(`${other.nexus.domain}/${other.nexus.modId}`, `/mods/${game}/${slug}`);
+    }
+  }
+  return {
+    ...mod,
+    requirements: mod.requirements.map((r) => {
+      const at = r.nexus && here.get(`${r.nexus.domain}/${r.nexus.modId}`);
+      return at ? { ...r, here: at } : r;
+    }),
   };
 }
 
@@ -227,7 +319,7 @@ export async function findMod(
 ): Promise<StoreMod | null> {
   if (!isSlug(game) || !isSlug(slug)) return null;
   const mod = await readMod(game, slug);
-  return mod && (adults || !mod.adult) ? mod : null;
+  return mod && (adults || !mod.adult) ? linkRequirementsHere(mod, adults) : null;
 }
 
 export async function findGame(game: string, adults: boolean): Promise<ModGame | null> {
@@ -334,6 +426,78 @@ async function replaceImage(url: string, rel: string): Promise<void> {
   }
 }
 
+const MAX_DESCRIPTION_IMAGES = 30;
+const MAX_SVG_BYTES = 1024 * 1024;
+
+/** The addresses a description's `[img]` tags show, in order, once each. */
+export function descriptionImageUrls(description: string): string[] {
+  const urls = new Set<string>();
+  for (const m of description.matchAll(/\[img(?:[= ][^\]]*)?\]\s*([^\[\s]+)\s*\[\/img\]/gi)) {
+    // Keyed as the page's BBCode reader sees it, entities decoded.
+    const raw = m[1].replace(/&amp;/g, "&");
+    try {
+      const url = new URL(raw);
+      if (url.protocol === "https:" || url.protocol === "http:") urls.add(raw);
+    } catch {
+      /* not an address */
+    }
+    if (urls.size >= MAX_DESCRIPTION_IMAGES) break;
+  }
+  return [...urls];
+}
+
+/**
+ * An SVG drawn to a PNG. Served from this origin as itself, an SVG is a
+ * document that can run script when opened on its own; a PNG is only pixels.
+ */
+async function rasterizeSvg(bytes: Buffer): Promise<Buffer | null> {
+  const head = bytes.subarray(0, 512).toString("utf8").trimStart().toLowerCase();
+  if (!head.startsWith("<svg") && !(head.startsWith("<?xml") && head.includes("<svg"))) {
+    return null;
+  }
+  if (bytes.byteLength > MAX_SVG_BYTES) return null;
+  return sharp(bytes, { density: 192 }).png().toBuffer();
+}
+
+/**
+ * Copies the pictures a description shows into the library, because the page
+ * only loads images from itself. The addresses are the mod author's, not
+ * Nexus's, so every fetch goes through the guarded opener. One that fails is
+ * left out — a description is worth having without its pictures.
+ */
+async function localizeDescriptionImages(
+  game: string,
+  slug: string,
+  description: string
+): Promise<Record<string, string>> {
+  const dir = path.join(IMAGES_DIR, game, slug);
+  const images: Record<string, string> = {};
+  for (const url of descriptionImageUrls(description)) {
+    try {
+      let bytes = await fetchImageBytes(url, { tag: "nexus" });
+      let ext = sniffExtension(bytes);
+      if (!ext) {
+        const png = await rasterizeSvg(bytes);
+        if (!png) throw new Error("not an image");
+        bytes = png;
+        ext = ".png";
+      }
+      const name = createHash("sha256").update(url).digest("hex").slice(0, 16) + ext;
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(path.join(dir, name), bytes);
+      images[url] = `${game}/${slug}/${name}`;
+    } catch (err) {
+      console.error(`[nexus] description image ${url}:`, (err as Error).message);
+    }
+  }
+  // Pictures the description no longer shows go with it.
+  const keep = new Set(Object.values(images).map((rel) => path.basename(rel)));
+  for (const file of await fs.readdir(dir).catch(() => [] as string[])) {
+    if (!keep.has(file)) await fs.unlink(path.join(dir, file)).catch(() => undefined);
+  }
+  return images;
+}
+
 /** A game to file mods under, by name. */
 export async function addGame(name: unknown, nexusDomain?: string): Promise<string> {
   if (typeof name !== "string" || !name.trim()) throw new ModError("A game name is required");
@@ -365,6 +529,7 @@ function nexusWords(mod: NexusMod): ModJson {
     version: mod.version,
     category: mod.category,
     adult: mod.adult,
+    requirements: mod.requirements,
     nexus: {
       url: mod.url,
       domain: mod.ref.domain,
@@ -413,6 +578,11 @@ export async function addMod(
       added: new Date().toISOString(),
     }));
     if (input.nexus.pictureUrl) await replaceImage(input.nexus.pictureUrl, `${game}/${slug}`);
+    const images = await localizeDescriptionImages(game, slug, input.nexus.description);
+    await updateJson<ModJson>(path.join(MODS_DIR, game, slug, "mod.json"), (meta) => ({
+      ...meta,
+      images,
+    }));
     return { game, mod: slug };
   }
 
@@ -447,9 +617,11 @@ export async function refreshMod(game: string, slug: string, mod: NexusMod): Pro
   if (current?.nexus?.domain !== mod.ref.domain || current.nexus.modId !== mod.ref.modId) {
     throw new ModError("That listing is not this Nexus mod");
   }
+  const images = await localizeDescriptionImages(game, slug, mod.description);
   await updateJson<ModJson>(path.join(dir, "mod.json"), (meta) => ({
     ...meta,
     ...nexusWords(mod),
+    images,
   }));
   if (mod.pictureUrl) await replaceImage(mod.pictureUrl, `${game}/${slug}`);
 }
@@ -464,6 +636,8 @@ export async function removeMod(game: string, slug: string): Promise<void> {
   for (const ext of IMAGE_EXTS) {
     await fs.unlink(path.join(IMAGES_DIR, game, `${slug}${ext}`)).catch(() => undefined);
   }
+  // Copies of the description's pictures; a refresh fetches them again.
+  await fs.rm(path.join(IMAGES_DIR, game, slug), { recursive: true, force: true });
 }
 
 /** A file off a mod, into `_import/_discarded/` like every other removal. */
@@ -514,7 +688,7 @@ export async function startModUpload(
   const file = typeof input.file === "string" ? input.file.trim() : "";
   if (!isFileName(file)) throw new ModError("A plain file name is required");
   if (!MOD_EXTENSIONS.includes(path.extname(file).toLowerCase())) {
-    throw new ModError(`Only ${MOD_EXTENSIONS.join(", ")} archives can be added`);
+    throw new ModError(`Only ${MOD_EXTENSIONS.join(", ")} files can be added`);
   }
   const bytes = input.bytes;
   if (typeof bytes !== "number" || !Number.isSafeInteger(bytes) || bytes <= 0) {
@@ -552,12 +726,13 @@ export async function appendModChunk(
 
 async function finish(id: string, pending: Pending): Promise<string> {
   const part = partPath(id);
-  // An archive is read by whoever unpacks it, so it has to be one — decided
-  // by its bytes, never its name.
+  // A file is opened by whatever its name says it is, so it has to be that —
+  // decided by its bytes, never its name.
+  const format = MOD_FORMATS[path.extname(pending.file).toLowerCase()];
   const magic = (await head(part)).toString("hex");
-  if (!ARCHIVE_MAGIC[path.extname(pending.file).toLowerCase()]?.includes(magic)) {
+  if (!format || (format.magic && !format.magic.includes(magic))) {
     await dropPart(id);
-    throw new ModError(`That file is not a ${path.extname(pending.file)} archive`);
+    throw new ModError(`That file is not a ${path.extname(pending.file)} file`);
   }
 
   const dir = await modDir(pending.game, pending.mod);

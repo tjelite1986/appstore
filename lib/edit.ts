@@ -254,7 +254,7 @@ const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
  * catalog indexes on the extension, which means a mislabelled upload lands
  * under a name that will never render.
  */
-function sniffExtension(buf: Buffer): string | null {
+export function sniffExtension(buf: Buffer): string | null {
   if (buf.length < 12) return null;
   if (buf[0] === 0x89 && buf.toString("latin1", 1, 4) === "PNG") return ".png";
   if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return ".jpg";

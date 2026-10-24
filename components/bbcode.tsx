@@ -1,4 +1,5 @@
 import { Fragment } from "react";
+import { cn } from "@/lib/utils";
 
 /**
  * A mod description as Nexus writes it: BBCode, with `<br />` for line breaks
@@ -6,15 +7,24 @@ import { Fragment } from "react";
  *
  * Drawn as React elements, never as HTML — the text is somebody else's, and a
  * tag this does not know is dropped while its contents stay. Links keep only
- * http(s) targets. `[img]` and `[youtube]` are dropped whole: the page's CSP
- * would refuse the image anyway, and an empty frame says less than nothing.
- * Server-safe, no state.
+ * http(s) targets. `[img]` draws only a picture this library holds a copy
+ * of (`images`, address → local href) — the page's CSP refuses any other — and
+ * is dropped whole otherwise, as `[youtube]` always is: an empty frame says
+ * less than nothing. Server-safe, no state.
  */
 
 type Node = string | { tag: string; arg: string; children: Node[] };
 
-const DROPPED = new Set(["img", "youtube", "video"]);
-const TAG = /\[(\/?)([a-z*]+)(?:=([^\]]*))?\]/gi;
+const DROPPED = new Set(["youtube", "video"]);
+// `[url=…]` and `[img width=20,height=20]` both: an argument after `=` or a space.
+const TAG = /\[(\/?)([a-z*]+)(?:[= ]([^\]]*))?\]/gi;
+
+/** `width=20,height=20` → the one asked for, as a sane pixel size. */
+function dimension(arg: string, name: string): number | undefined {
+  const m = new RegExp(`\\b${name}\\s*=\\s*["']?(\\d+)`, "i").exec(arg);
+  const n = m ? Number(m[1]) : NaN;
+  return n > 0 && n <= 2000 ? n : undefined;
+}
 
 function decode(text: string): string {
   return text
@@ -77,12 +87,33 @@ function plain(nodes: Node[]): string {
   return nodes.map((n) => (typeof n === "string" ? n : plain(n.children))).join("");
 }
 
-function render(nodes: Node[], key = ""): React.ReactNode {
+function render(nodes: Node[], images: Record<string, string>, key = ""): React.ReactNode {
   return nodes.map((node, i) => {
     const k = `${key}${i}`;
     if (typeof node === "string") return <Fragment key={k}>{node}</Fragment>;
     if (DROPPED.has(node.tag)) return null;
-    const inner = render(node.children, `${k}.`);
+    if (node.tag === "img") {
+      const src = images[plain(node.children).trim()];
+      if (!src) return null;
+      const width = dimension(node.arg, "width");
+      const height = dimension(node.arg, "height");
+      return (
+        // eslint-disable-next-line @next/next/no-img-element -- a library copy, sized by the author
+        <img
+          key={k}
+          src={src}
+          alt=""
+          loading="lazy"
+          width={width}
+          height={height}
+          className={cn(
+            "max-w-full",
+            width || height ? "inline-block align-middle" : "my-1 block h-auto rounded"
+          )}
+        />
+      );
+    }
+    const inner = render(node.children, images, `${k}.`);
     switch (node.tag) {
       case "b":
         return <strong key={k}>{inner}</strong>;
@@ -149,9 +180,17 @@ function render(nodes: Node[], key = ""): React.ReactNode {
   });
 }
 
-export default function BBCode({ source, className }: { source: string; className?: string }) {
+export default function BBCode({
+  source,
+  className,
+  images = {},
+}: {
+  source: string;
+  className?: string;
+  images?: Record<string, string>;
+}) {
   // List items are blocks already; the line breaks Nexus puts between them
   // would double every gap.
   const tidy = source.replace(/\n?<br\s*\/?>\s*(?=\[\*\]|\[\/list\])/gi, "");
-  return <div className={className}>{render(parse(tidy))}</div>;
+  return <div className={className}>{render(parse(tidy), images)}</div>;
 }

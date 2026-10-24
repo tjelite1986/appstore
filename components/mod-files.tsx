@@ -52,6 +52,7 @@ export default function ModFiles({
   version,
   fromNexus,
   files,
+  accept,
 }: {
   game: string;
   mod: string;
@@ -59,6 +60,8 @@ export default function ModFiles({
   version: string;
   fromNexus: boolean;
   files: { file: string; size: string; version: string }[];
+  /** The extensions the store takes, `.zip` style. */
+  accept: string[];
 }) {
   const [open, setOpen] = useState(false);
   const [token, setToken] = useState("");
@@ -215,8 +218,10 @@ export default function ModFiles({
         </div>
 
         <p className={NOTE}>
-          Upload the mod as a .zip (or .7z/.rar). A file with the same name
-          replaces the old one, which is moved to _discarded.
+          Upload the mod as an archive ({accept.filter((e) => [".zip", ".7z", ".rar"].includes(e)).join(", ")}),
+          and beside it anything it is used with — a launcher .apk, an .obb.
+          A file with the same name replaces the old one, which is moved to
+          _discarded.
         </p>
 
         {files.length > 0 && (
@@ -250,7 +255,7 @@ export default function ModFiles({
           />
           <input
             type="file"
-            accept=".zip,.7z,.rar"
+            accept={accept.join(",")}
             disabled={busy}
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             className="min-w-0 flex-1 text-xs"

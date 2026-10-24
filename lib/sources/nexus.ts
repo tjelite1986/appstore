@@ -13,11 +13,28 @@
  * hand onto the listing this creates.
  */
 import { fetchImageDataUrl, USER_AGENT } from "./net";
+import { decodeEntities } from "./play";
 
 const GRAPHQL = "https://api.nexusmods.com/v2/graphql";
 const TIMEOUT_MS = 15_000;
 
 export type NexusRef = { domain: string; modId: number };
+
+/**
+ * What a mod needs before it does anything — the "Requirements" box on its
+ * Nexus page. Three kinds: another mod on Nexus, something off Nexus (a
+ * framework on GitHub, a loader's own site), and a piece of the game itself.
+ */
+export type NexusRequirement =
+  | {
+      kind: "mod";
+      name: string;
+      notes: string;
+      /** Null when the mod is filed under another game, whose domain Nexus does not say. */
+      ref: NexusRef | null;
+    }
+  | { kind: "external"; name: string; notes: string; url: string | null }
+  | { kind: "dlc"; name: string; notes: string };
 
 export type NexusMod = {
   ref: NexusRef;
@@ -36,6 +53,7 @@ export type NexusMod = {
   updatedAt: string;
   adult: boolean;
   pictureUrl: string | null;
+  requirements: NexusRequirement[];
   game: { name: string; domain: string; id: number; coverUrl: string };
 };
 
@@ -73,6 +91,10 @@ const QUERY = `query ($ids: [CompositeDomainWithIdInput!]!) {
       modCategory { name }
       endorsements downloads createdAt updatedAt adultContent pictureUrl
       game { name domainName id }
+      modRequirements {
+        nexusRequirements { nodes { externalRequirement gameId modId modName notes url } }
+        dlcRequirements { notes gameExpansion { name } }
+      }
     }
   }
 }`;
@@ -92,7 +114,66 @@ type Node = {
   adultContent?: boolean;
   pictureUrl?: string | null;
   game?: { name?: string; domainName?: string; id?: number } | null;
+  modRequirements?: {
+    nexusRequirements?: {
+      nodes?: {
+        externalRequirement?: boolean;
+        gameId?: string | number;
+        modId?: string | number;
+        modName?: string;
+        notes?: string;
+        url?: string;
+      }[];
+    } | null;
+    dlcRequirements?: { notes?: string; gameExpansion?: { name?: string } | null }[];
+  } | null;
 };
+
+/** An off-site address as a link, only when it is a web address at all. */
+function webUrl(raw: string | undefined): string | null {
+  try {
+    const url = new URL((raw ?? "").trim());
+    return url.protocol === "https:" || url.protocol === "http:" ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Names arrive HTML-escaped ("Saints &amp; Seducers"); notes are plain text. */
+function text(raw: string | undefined): string {
+  return decodeEntities(raw ?? "").trim().slice(0, 300);
+}
+
+function requirementsOf(node: Node, ref: NexusRef, gameId: number): NexusRequirement[] {
+  const out: NexusRequirement[] = [];
+  for (const r of node.modRequirements?.nexusRequirements?.nodes ?? []) {
+    const name = text(r.modName);
+    const notes = text(r.notes);
+    if (r.externalRequirement) {
+      const url = webUrl(r.url);
+      if (name || url) out.push({ kind: "external", name: name || url!, notes, url });
+      continue;
+    }
+    // A removed or hidden mod comes back without a name; there is nothing to show.
+    if (!name) continue;
+    const modId = Number(r.modId);
+    const sameGame = Number(r.gameId) === gameId;
+    out.push({
+      kind: "mod",
+      name,
+      notes,
+      ref:
+        sameGame && Number.isSafeInteger(modId) && modId > 0
+          ? { domain: ref.domain, modId }
+          : null,
+    });
+  }
+  for (const d of node.modRequirements?.dlcRequirements ?? []) {
+    const name = text(d.gameExpansion?.name);
+    if (name) out.push({ kind: "dlc", name, notes: text(d.notes) });
+  }
+  return out;
+}
 
 /** The mod a ref names, or a sentence saying why not. */
 export async function lookupNexusMod(ref: NexusRef): Promise<NexusMod> {
@@ -141,6 +222,7 @@ export async function lookupNexusMod(ref: NexusRef): Promise<NexusMod> {
     updatedAt: node.updatedAt ?? "",
     adult: node.adultContent === true,
     pictureUrl: node.pictureUrl || null,
+    requirements: requirementsOf(node, ref, node.game.id),
     game: {
       name: node.game.name ?? ref.domain,
       domain: node.game.domainName,
