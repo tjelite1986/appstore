@@ -632,6 +632,53 @@ export async function refreshMod(game: string, slug: string, mod: NexusMod): Pro
 }
 
 /**
+ * Point a listing at another Nexus mod — the one it should have been. The
+ * uploaded files stay; the words, picture and requirements become the new
+ * mod's, and the folder takes the new name. Answers where the listing is now.
+ */
+export async function relinkMod(
+  game: string,
+  slug: string,
+  mod: NexusMod
+): Promise<{ game: string; mod: string }> {
+  const dir = await modDir(game, slug);
+  const gameMeta = await readJson<GameJson>(path.join(MODS_DIR, game, "game.json"));
+  if (gameMeta?.nexusDomain && gameMeta.nexusDomain !== mod.ref.domain) {
+    throw new ModError(`That Nexus mod is for ${mod.game.name}, not this game`);
+  }
+  const here = await nexusModHere(mod);
+  if (here && (here.game !== game || here.mod !== slug)) throw new ModAlreadyHere(here);
+
+  let to = slug;
+  if (slugify(mod.name) !== slug) {
+    to = await uniqueDir(path.join(MODS_DIR, game), mod.name, "mod");
+    await fs.rename(dir, path.join(MODS_DIR, game, to));
+    for (const ext of IMAGE_EXTS) {
+      const old = path.join(IMAGES_DIR, game, `${slug}${ext}`);
+      if (await exists(old)) await fs.rename(old, path.join(IMAGES_DIR, game, `${to}${ext}`));
+    }
+    // The old description's pictures; the new ones are fetched below.
+    await fs.rm(path.join(IMAGES_DIR, game, slug), { recursive: true, force: true });
+  }
+
+  const images = await localizeDescriptionImages(game, to, mod.description);
+  await updateJson<ModJson>(path.join(MODS_DIR, game, to, "mod.json"), (meta) => ({
+    ...meta,
+    ...nexusWords(mod),
+    images,
+  }));
+  if (mod.pictureUrl) {
+    await replaceImage(mod.pictureUrl, `${game}/${to}`);
+  } else {
+    // The other mod's picture would say this is still that mod.
+    for (const ext of IMAGE_EXTS) {
+      await fs.unlink(path.join(IMAGES_DIR, game, `${to}${ext}`)).catch(() => undefined);
+    }
+  }
+  return { game, mod: to };
+}
+
+/**
  * Take a mod off the shelf. The folder moves to `_import/_discarded/mods/`,
  * files and all — an evening's uploads are not undone by one click.
  */

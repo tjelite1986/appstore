@@ -2,7 +2,8 @@
 
 /**
  * The admin half of a mod's page: upload its archives, take one off, pull
- * Nexus's current words again, or take the whole mod off the shelf.
+ * Nexus's current words again, point the listing at another Nexus mod, or
+ * take the whole mod off the shelf.
  *
  * Uploads go up in the chunks the store asks for, like OBB files
  * (`components/version-extras.tsx`): a failed chunk is retried from the
@@ -13,11 +14,12 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { RefreshCw, Trash2, Upload, Wrench, X } from "lucide-react";
+import { ArrowLeftRight, RefreshCw, Search, Trash2, Upload, Wrench, X } from "lucide-react";
 import { adminCall } from "@/lib/admin-call";
 import { readAdminToken } from "@/lib/admin-token";
 import { buttonClass, CARD, MUTED, NOTE } from "@/components/primitives";
 import { cn } from "@/lib/utils";
+import type { NexusMod } from "@/lib/sources/nexus";
 
 const RETRIES = 5;
 
@@ -71,6 +73,8 @@ export default function ModFiles({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
+  const [switchUrl, setSwitchUrl] = useState("");
+  const [switchTo, setSwitchTo] = useState<NexusMod | null>(null);
   const stop = useRef(false);
   const router = useRouter();
 
@@ -176,6 +180,34 @@ export default function ModFiles({
   const refresh = () =>
     void act(async () => {
       await adminCall(base, { method: "POST", body: JSON.stringify({ refresh: true }) }, token, opts);
+      router.refresh();
+    });
+
+  // Looked up and shown first, like adding one: the listing's words are about
+  // to become this mod's.
+  const lookUpSwitch = () =>
+    void act(async () => {
+      setSwitchTo(null);
+      const res = await adminCall(
+        `/api/mods/nexus?url=${encodeURIComponent(switchUrl.trim())}`,
+        undefined,
+        token,
+        opts
+      );
+      setSwitchTo(res.mod);
+    });
+
+  const switchMod = () =>
+    void act(async () => {
+      const res = await adminCall(
+        base,
+        { method: "POST", body: JSON.stringify({ nexusUrl: switchUrl.trim() }) },
+        token,
+        { ...opts, accept: [] }
+      );
+      setSwitchTo(null);
+      setSwitchUrl("");
+      router.push(`/mods/${res.game}/${res.mod}`);
       router.refresh();
     });
 
@@ -291,6 +323,49 @@ export default function ModFiles({
             >
               Pause
             </button>
+          )}
+        </div>
+
+        <div className="space-y-2 border-t border-[color:var(--border)] pt-3">
+          <p className={NOTE}>
+            {fromNexus ? "Wrong mod? Point this listing at another" : "Link this listing to"} a
+            Nexus Mods page. The uploaded files stay; the name, words and picture
+            become that mod&apos;s.
+          </p>
+          <div className="flex gap-2">
+            <input
+              value={switchUrl}
+              onChange={(e) => {
+                setSwitchUrl(e.target.value);
+                setSwitchTo(null);
+              }}
+              placeholder="https://www.nexusmods.com/<game>/mods/<id>"
+              disabled={busy}
+              className="min-w-0 flex-1 rounded-[var(--radius-sm)] border border-[color:var(--border)] bg-transparent px-2 py-1.5 text-xs"
+            />
+            <button
+              onClick={lookUpSwitch}
+              disabled={busy || !switchUrl.trim()}
+              className={cn(buttonClass("secondary", "sm"), "disabled:opacity-50")}
+            >
+              <Search size={14} /> Look up
+            </button>
+          </div>
+          {switchTo && (
+            <div className="flex items-center gap-2 text-xs">
+              <span className="min-w-0 flex-1 truncate">
+                <span className="font-semibold">{switchTo.name}</span>
+                {switchTo.author && ` · ${switchTo.author}`}
+                {switchTo.version && <span className="font-mono"> · {switchTo.version}</span>}
+              </span>
+              <button
+                onClick={switchMod}
+                disabled={busy}
+                className={cn(buttonClass("primary", "sm"), "disabled:opacity-50")}
+              >
+                <ArrowLeftRight size={14} /> Switch to this mod
+              </button>
+            </div>
           )}
         </div>
 
