@@ -13,11 +13,12 @@ import { contentTypeFor, fileResponse, resolveInStore } from "@/lib/serve";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** Only the three image directories are reachable — not meta/, not apks/. */
+/** Only the image directories are reachable — not meta/, not apks/, not mods/. */
 const SERVABLE: string[] = [
   STORE_DIRS.icons,
   STORE_DIRS.banners,
   STORE_DIRS.screenshots,
+  STORE_DIRS.modImages,
 ];
 
 export async function GET(

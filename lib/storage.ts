@@ -15,10 +15,14 @@
  *   meta/         <slug>.json                         catalog entry (name,
  *                                                     tagline, description,
  *                                                     category, versions)
+ *   mods/         <game>/game.json                    a game mods are for
+ *                 <game>/<mod>/mod.json               one mod's words
+ *                 <game>/<mod>/files/<file>.zip       its downloads
+ *   mod-images/   <game>.<ext>, <game>/<mod>.<ext>    game cover, mod picture
  *   _import/                                          drop zone: new APKs
  *   _import/_review/                                  parked, needs a decision
- *   _import/_uploads/                                 OBB/cache uploads in
- *                                                     progress
+ *   _import/_uploads/                                 OBB/cache and mod
+ *                                                     uploads in progress
  *   _state/                                           bookkeeping, not content
  *                                                     (the Telegram cursor)
  *
@@ -43,9 +47,12 @@ export const STORE_DIRS = {
   banners: "banners",
   screenshots: "screenshots",
   meta: "meta",
+  /** Game mods — kept apart from apps, and never in an F-Droid index. */
+  mods: "mods",
+  modImages: "mod-images",
   import: "_import",
   review: "_import/_review",
-  /** OBB/cache uploads still arriving in chunks — see lib/extras.ts. */
+  /** Uploads still arriving in chunks — see lib/chunks.ts. */
   uploads: "_import/_uploads",
   /** Not content — where a feature keeps its own bookkeeping. */
   state: "_state",

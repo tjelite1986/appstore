@@ -11,6 +11,7 @@ import {
   LogIn,
   Menu,
   PackageCheck,
+  Puzzle,
   Search,
   Settings,
   Wrench,
@@ -41,6 +42,7 @@ const TABS = [
  * is one row in it when nobody is.
  */
 const MENU_LINKS = [
+  { href: "/mods", label: "Game Mods", Icon: Puzzle },
   { href: "/saved", label: "Saved", Icon: Bookmark },
   { href: "/manage", label: "Manage", Icon: Wrench },
   { href: "/settings", label: "Settings", Icon: Settings },

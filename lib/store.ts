@@ -373,7 +373,7 @@ export function formatBytes(bytes: number): string {
  * by hand; a slug has to produce its own, and the same slug must always
  * produce the same one or the app changes colour between screens.
  */
-function seedFrom(slug: string): number {
+export function seedFrom(slug: string): number {
   let h = 0;
   for (let i = 0; i < slug.length; i++) h = (h * 31 + slug.charCodeAt(i)) | 0;
   return Math.abs(h) % 360;
@@ -452,7 +452,7 @@ async function listDir(abs: string): Promise<string[]> {
  * host site for them instead. `iconName()` in fdroid-shelf.ts reads only the
  * last segment, so the repository index is unaffected either way.
  */
-function mediaHref(rel: string, mtimeMs: number): string {
+export function mediaHref(rel: string, mtimeMs: number): string {
   const encoded = rel.split("/").map(encodeURIComponent).join("/");
   return withBasePath(`/api/media/${encoded}?v=${Math.round(mtimeMs).toString(36)}`);
 }
