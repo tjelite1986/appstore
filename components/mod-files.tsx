@@ -23,6 +23,7 @@ import {
   ArrowLeftRight,
   Check,
   ExternalLink,
+  ImageIcon,
   Link2,
   Pencil,
   RefreshCw,
@@ -166,6 +167,7 @@ export default function ModFiles({
   linkable,
   category,
   categories,
+  pictureByHand,
 }: {
   game: string;
   mod: string;
@@ -192,6 +194,8 @@ export default function ModFiles({
   category: string;
   /** The categories this game's mods are filed under, offered while typing. */
   categories: string[];
+  /** The picture was put here by hand and outlives a refresh. */
+  pictureByHand: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [token, setToken] = useState("");
@@ -215,6 +219,7 @@ export default function ModFiles({
   const [switchUrl, setSwitchUrl] = useState("");
   const [switchTo, setSwitchTo] = useState<NexusMod | null>(null);
   const [newCategory, setNewCategory] = useState(category);
+  const [pictureUrl, setPictureUrl] = useState("");
   const stop = useRef(false);
   const router = useRouter();
 
@@ -367,6 +372,36 @@ export default function ModFiles({
         token,
         opts
       );
+      router.refresh();
+    });
+
+  const picturePath = `${base}/picture`;
+
+  const uploadPicture = (picked: File) =>
+    void act(async () => {
+      const body = new FormData();
+      body.set("file", picked);
+      await adminCall(picturePath, { method: "POST", body }, token, opts);
+      router.refresh();
+    });
+
+  const pictureFromUrl = () =>
+    void act(async () => {
+      await adminCall(
+        picturePath,
+        { method: "POST", body: JSON.stringify({ url: pictureUrl }) },
+        token,
+        opts
+      );
+      setPictureUrl("");
+      router.refresh();
+    });
+
+  // Let go of the hand-picked one, then fetch the source's straight away.
+  const sourcePicture = () =>
+    void act(async () => {
+      await adminCall(picturePath, { method: "DELETE" }, token, opts);
+      await adminCall(base, { method: "POST", body: JSON.stringify({ refresh: true }) }, token, opts);
       router.refresh();
     });
 
@@ -641,6 +676,61 @@ export default function ModFiles({
             <button
               onClick={saveCategory}
               disabled={busy || newCategory.trim() === category}
+              className={cn(buttonClass("secondary", "sm"), "disabled:opacity-50")}
+            >
+              <Check size={14} /> Save
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-2 border-t border-[color:var(--border)] pt-3">
+          <p className={NOTE}>
+            <ImageIcon size={12} className="mr-1 inline" />
+            Picture on the card and the page. One set here stays through a refresh.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <label
+              className={cn(
+                buttonClass("secondary", "sm"),
+                "cursor-pointer",
+                busy && "pointer-events-none opacity-50"
+              )}
+            >
+              <Upload size={14} /> Pick a picture
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif,image/avif"
+                disabled={busy}
+                className="sr-only"
+                onChange={(e) => {
+                  const picked = e.target.files?.[0];
+                  e.target.value = "";
+                  if (picked) uploadPicture(picked);
+                }}
+              />
+            </label>
+            {pictureByHand && (fromNexus || fromGithub) && (
+              <button
+                onClick={sourcePicture}
+                disabled={busy}
+                className={cn(buttonClass("secondary", "sm"), "disabled:opacity-50")}
+              >
+                <RefreshCw size={14} /> Use {fromNexus ? "Nexus's" : "GitHub's"} again
+              </button>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <input
+              value={pictureUrl}
+              onChange={(e) => setPictureUrl(e.target.value)}
+              placeholder="or an image address, https://…"
+              disabled={busy}
+              aria-label="Picture address"
+              className={cn(INPUT, "min-w-0 flex-1")}
+            />
+            <button
+              onClick={pictureFromUrl}
+              disabled={busy || !pictureUrl.trim()}
               className={cn(buttonClass("secondary", "sm"), "disabled:opacity-50")}
             >
               <Check size={14} /> Save

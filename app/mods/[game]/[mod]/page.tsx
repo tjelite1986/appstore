@@ -288,6 +288,7 @@ export default async function ModPage({ params }: Params) {
           linkable={linkable}
           category={mod.category}
           categories={categories}
+          pictureByHand={mod.pictureByHand}
         />
       )}
 

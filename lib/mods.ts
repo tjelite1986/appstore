@@ -161,6 +161,8 @@ export type StoreMod = {
   category: string;
   adult: boolean;
   picture?: string;
+  /** The picture was put here by hand; a refresh or relink leaves it alone. */
+  pictureByHand: boolean;
   seed: number;
   nexus?: {
     url: string;
@@ -213,6 +215,8 @@ type ModJson = {
   category?: string;
   /** The category was set on the page; a Nexus refresh leaves it alone. */
   categoryByHand?: boolean;
+  /** Likewise the picture. */
+  pictureByHand?: boolean;
   adult?: boolean;
   nexus?: StoreMod["nexus"];
   github?: StoreMod["github"];
@@ -403,6 +407,7 @@ async function readMod(game: string, slug: string): Promise<StoreMod | null> {
     category: meta.category ?? "",
     adult: meta.adult === true,
     picture: await imageHref(`${game}/${slug}`),
+    pictureByHand: meta.pictureByHand === true,
     seed: seedFrom(`${game}/${slug}`),
     nexus: meta.nexus,
     github: meta.github,
@@ -584,12 +589,17 @@ async function uniqueDir(parent: string, name: string, fallback: string): Promis
 
 /** Replaces whatever picture was there, under the extension the new one has. */
 async function replaceImage(url: string, rel: string): Promise<void> {
+  await swapImage(rel, (tmp) => saveImage(url, tmp, "nexus"));
+}
+
+/** `write` puts the new picture at a temporary name; only then does the old one go. */
+async function swapImage(rel: string, write: (tmpNoExt: string) => Promise<boolean>): Promise<void> {
   const dest = path.join(IMAGES_DIR, rel);
   const before = await Promise.all(
     IMAGE_EXTS.map(async (ext) => ((await exists(dest + ext)) ? dest + ext : null))
   );
   const tmpRel = `${rel}.${randomBytes(4).toString("hex")}`;
-  const saved = await saveImage(url, path.join(IMAGES_DIR, tmpRel), "nexus");
+  const saved = await write(path.join(IMAGES_DIR, tmpRel));
   if (!saved) return; // keep the old picture rather than none
   for (const old of before) if (old) await fs.unlink(old).catch(() => undefined);
   for (const ext of IMAGE_EXTS) {
@@ -857,6 +867,54 @@ export async function setModCategory(game: string, slug: string, value: unknown)
   });
 }
 
+const MAX_PICTURE_BYTES = 8 * 1024 * 1024;
+
+/**
+ * A picture put on a mod by hand — for one whose source has none worth
+ * showing, like a GitHub repository without a single image. What the bytes are
+ * is read from them, as for an app's artwork (`sniffExtension`).
+ */
+export async function setModPicture(game: string, slug: string, bytes: Buffer): Promise<void> {
+  const dir = await modDir(game, slug);
+  if (bytes.byteLength === 0) throw new ModError("That file is empty");
+  if (bytes.byteLength > MAX_PICTURE_BYTES) {
+    throw new ModError(
+      `${Math.round(bytes.byteLength / 1024 / 1024)} MB is larger than the 8 MB limit`
+    );
+  }
+  const ext = sniffExtension(bytes);
+  if (!ext) throw new ModError("That file is not a PNG, JPEG, WebP, GIF or AVIF — whatever it is named");
+  await swapImage(`${game}/${slug}`, async (tmp) => {
+    await fs.mkdir(path.dirname(tmp), { recursive: true });
+    await fs.writeFile(tmp + ext, bytes);
+    return true;
+  });
+  await updateJson<ModJson>(path.join(dir, "mod.json"), (meta) => ({ ...meta, pictureByHand: true }));
+}
+
+/** The same from an address; a typed one, so it goes through the guarded opener. */
+export async function setModPictureFromUrl(game: string, slug: string, url: unknown): Promise<void> {
+  await modDir(game, slug);
+  if (typeof url !== "string" || !url.trim()) throw new ModError("An image address is required");
+  let bytes: Buffer;
+  try {
+    bytes = await fetchImageBytes(url.trim(), { tag: `mods:${slug}`, maxBytes: MAX_PICTURE_BYTES });
+  } catch (err) {
+    throw new ModError(`Could not fetch that image: ${(err as Error).message}`);
+  }
+  await setModPicture(game, slug, bytes);
+}
+
+/** Lets the next refresh bring back the source's picture. */
+export async function releaseModPicture(game: string, slug: string): Promise<void> {
+  const dir = await modDir(game, slug);
+  await updateJson<ModJson>(path.join(dir, "mod.json"), (meta) => {
+    const next = { ...meta };
+    delete next.pictureByHand;
+    return next;
+  });
+}
+
 /** Where a Nexus mod already sits in the library, if it does. */
 async function nexusModHere(mod: NexusMod): Promise<{ game: string; mod: string } | null> {
   for (const game of await dirs(MODS_DIR)) {
@@ -967,7 +1025,7 @@ export async function refreshGithubMod(game: string, slug: string, mod: GithubMo
     ...githubWords(mod),
     images,
   }));
-  if (mod.pictureUrl) await replaceImage(mod.pictureUrl, `${game}/${slug}`);
+  if (mod.pictureUrl && !current.pictureByHand) await replaceImage(mod.pictureUrl, `${game}/${slug}`);
   return fetchReleaseFiles(game, slug, mod);
 }
 
@@ -983,7 +1041,7 @@ export async function refreshMod(game: string, slug: string, mod: NexusMod): Pro
     ...withNexusWords(meta, mod),
     images,
   }));
-  if (mod.pictureUrl) await replaceImage(mod.pictureUrl, `${game}/${slug}`);
+  if (mod.pictureUrl && !current.pictureByHand) await replaceImage(mod.pictureUrl, `${game}/${slug}`);
 }
 
 /**
@@ -1003,6 +1061,7 @@ export async function relinkMod(
   }
   const here = await nexusModHere(mod);
   if (here && (here.game !== game || here.mod !== slug)) throw new ModAlreadyHere(here);
+  const byHand = (await readJson<ModJson>(path.join(dir, "mod.json")))?.pictureByHand === true;
 
   let to = slug;
   if (slugify(mod.name) !== slug) {
@@ -1021,9 +1080,10 @@ export async function relinkMod(
     ...withNexusWords(meta, mod),
     images,
   }));
-  if (mod.pictureUrl) {
+  // One picked by hand moved with the folder above and stays.
+  if (!byHand && mod.pictureUrl) {
     await replaceImage(mod.pictureUrl, `${game}/${to}`);
-  } else {
+  } else if (!byHand) {
     // The other mod's picture would say this is still that mod.
     for (const ext of IMAGE_EXTS) {
       await fs.unlink(path.join(IMAGES_DIR, game, `${to}${ext}`)).catch(() => undefined);
