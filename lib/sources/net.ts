@@ -92,16 +92,26 @@ async function fetchImage(
       throw new Error(`unexpected content-type ${type || "(none)"}`);
     }
 
-    // Counted as it arrives, like `fetchImageBytes`.
+    // Counted as it arrives, like `fetchImageBytes`. The idle timeout alone
+    // lets a server that sends a byte now and then hold this open for ever;
+    // the whole body gets the time a picture deserves.
+    const deadline = setTimeout(
+      () => res.destroy(new Error("the picture took too long")),
+      IMAGE_TIMEOUT_MS
+    );
     const chunks: Buffer[] = [];
     let bytes = 0;
-    for await (const chunk of res as AsyncIterable<Buffer>) {
-      bytes += chunk.length;
-      if (bytes > MAX_IMAGE_BYTES) {
-        res.destroy();
-        throw new Error(`the body passed ${MAX_IMAGE_BYTES} bytes`);
+    try {
+      for await (const chunk of res as AsyncIterable<Buffer>) {
+        bytes += chunk.length;
+        if (bytes > MAX_IMAGE_BYTES) {
+          res.destroy();
+          throw new Error(`the body passed ${MAX_IMAGE_BYTES} bytes`);
+        }
+        chunks.push(chunk);
       }
-      chunks.push(chunk);
+    } finally {
+      clearTimeout(deadline);
     }
     return { ext, type, body: Buffer.concat(chunks) };
   } catch (err) {
