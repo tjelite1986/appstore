@@ -308,6 +308,23 @@ function fileSource(value: unknown): string {
   return url.toString();
 }
 
+/**
+ * A file's links as read back: only what the writers above would have
+ * accepted. mod.json can be edited by hand, and these end up in an href.
+ */
+function storedLinks(entry: FileJson | undefined): { nexus?: string; source?: string } {
+  const out: { nexus?: string; source?: string } = {};
+  for (const key of ["nexus", "source"] as const) {
+    try {
+      const link = key === "nexus" ? fileNexus(entry?.[key]) : fileSource(entry?.[key]);
+      if (link) out[key] = link;
+    } catch {
+      /* not a link the page may show */
+    }
+  }
+  return out;
+}
+
 /** One file's entry in mod.json, leaving out what is empty. */
 function fileJson(f: {
   name: string;
@@ -350,8 +367,7 @@ async function readMod(game: string, slug: string): Promise<StoreMod | null> {
         section: fileSection(meta.files?.[file]?.section),
         version: meta.files?.[file]?.version || nameFromFile(file).version,
         kind: MOD_FORMATS[path.extname(file).toLowerCase()].kind,
-        ...(meta.files?.[file]?.nexus ? { nexus: meta.files[file].nexus } : {}),
-        ...(meta.files?.[file]?.source ? { source: meta.files[file].source } : {}),
+        ...storedLinks(meta.files?.[file]),
         added: stat.mtime.toISOString(),
         href: withBasePath(
           `/api/mods/${game}/${slug}/download?f=${encodeURIComponent(file)}`
