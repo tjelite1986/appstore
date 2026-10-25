@@ -61,34 +61,49 @@ const IMAGE_EXT_BY_TYPE: Record<string, string> = {
  * not. So every image failure is logged and swallowed — the meta file is the
  * part that has to land.
  *
- * The URL always comes from an upstream listing this server just read, never
- * from a request — which is what makes fetching it without a host allowlist
+ * The URL comes from an upstream listing this server just read, never from a
+ * request — which is what makes fetching it without a host allowlist
  * reasonable. `/api/sources/play/icon` takes one from the browser and has an
- * allowlist for exactly that reason.
+ * allowlist for exactly that reason. It still goes through `openGuarded`: a
+ * listing is somebody else's words, and a GitHub README's first picture can
+ * name any address, a host on this network included.
  */
 async function fetchImage(
   url: string,
   tag: string
 ): Promise<{ ext: string; type: string; body: Buffer } | null> {
   try {
-    const res = await fetch(url, {
-      headers: { "user-agent": USER_AGENT },
-      signal: AbortSignal.timeout(IMAGE_TIMEOUT_MS),
-      cache: "no-store",
+    const { res } = await openGuarded(url, {
+      idleMs: IMAGE_TIMEOUT_MS,
+      headers: { accept: "image/*,*/*" },
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const status = res.statusCode ?? 0;
+    if (status < 200 || status >= 300) {
+      res.resume();
+      throw new Error(`HTTP ${status}`);
+    }
 
-    const type = (res.headers.get("content-type") ?? "").split(";")[0].trim();
+    const type = String(res.headers["content-type"] ?? "").split(";")[0].trim();
     const ext = IMAGE_EXT_BY_TYPE[type];
     // The extension is what the catalog indexes on, so a body of unknown type
     // has nowhere to go — better absent than saved under a guessed name.
-    if (!ext) throw new Error(`unexpected content-type ${type || "(none)"}`);
-
-    const body = Buffer.from(await res.arrayBuffer());
-    if (body.byteLength > MAX_IMAGE_BYTES) {
-      throw new Error(`${body.byteLength} bytes is not a listing image`);
+    if (!ext) {
+      res.resume();
+      throw new Error(`unexpected content-type ${type || "(none)"}`);
     }
-    return { ext, type, body };
+
+    // Counted as it arrives, like `fetchImageBytes`.
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    for await (const chunk of res as AsyncIterable<Buffer>) {
+      bytes += chunk.length;
+      if (bytes > MAX_IMAGE_BYTES) {
+        res.destroy();
+        throw new Error(`the body passed ${MAX_IMAGE_BYTES} bytes`);
+      }
+      chunks.push(chunk);
+    }
+    return { ext, type, body: Buffer.concat(chunks) };
   } catch (err) {
     console.error(`[${tag}] could not fetch ${url}:`, err);
     return null;
