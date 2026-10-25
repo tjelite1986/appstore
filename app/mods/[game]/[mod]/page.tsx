@@ -9,6 +9,7 @@ import ModFiles from "@/components/mod-files";
 import {
   findGame,
   findMod,
+  gameMods,
   MOD_EXTENSIONS,
   MOD_FILE_SECTIONS,
   type ModFile,
@@ -102,11 +103,12 @@ function FileCard({ file }: { file: ModFile }) {
   );
 }
 
-const KIND_LABEL: Record<ModRequirement["kind"], string> = {
-  mod: "Mod",
-  external: "Off Nexus",
-  dlc: "DLC",
-};
+// The groups Nexus shows a mod's requirements in, in its order.
+const REQUIREMENT_GROUPS: { kind: ModRequirement["kind"]; title: string }[] = [
+  { kind: "mod", title: "Nexus requirements" },
+  { kind: "external", title: "Off-site requirements" },
+  { kind: "dlc", title: "DLC requirements" },
+];
 
 function RequirementRow({ req }: { req: ModRequirement }) {
   const body = (
@@ -114,7 +116,7 @@ function RequirementRow({ req }: { req: ModRequirement }) {
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-medium">{req.name}</span>
         <span className={cn("block text-xs", MUTED)}>
-          {[KIND_LABEL[req.kind], req.here ? "in this store" : "", req.notes]
+          {[req.here ? "In this store" : "", req.notes]
             .filter(Boolean)
             .join(" · ")}
         </span>
@@ -153,6 +155,13 @@ export default async function ModPage({ params }: Params) {
     findMod(gameSlug, slug, adults),
   ]);
   if (!game || !mod) notFound();
+  const admin = viewer?.role === "admin";
+  // What a requirement can be linked to: the game's other mods.
+  const linkable = admin
+    ? (await gameMods(game.slug, adults))
+        .filter((m) => m.slug !== mod.slug)
+        .map((m) => ({ slug: m.slug, name: m.name }))
+    : [];
 
   return (
     <Screen flush>
@@ -220,7 +229,7 @@ export default async function ModPage({ params }: Params) {
         </section>
       )}
 
-      {viewer?.role === "admin" && (
+      {admin && (
         <ModFiles
           game={mod.game}
           mod={mod.slug}
@@ -234,6 +243,13 @@ export default async function ModPage({ params }: Params) {
             version: f.version,
           }))}
           accept={MOD_EXTENSIONS}
+          requirements={mod.requirements.map((r) => ({
+            key: r.key,
+            name: r.name,
+            linkedTo: r.linked && r.here ? r.here.split("/").pop()! : "",
+            found: !r.linked && Boolean(r.here),
+          }))}
+          linkable={linkable}
         />
       )}
 
@@ -258,15 +274,27 @@ export default async function ModPage({ params }: Params) {
           <p className={cn("-mt-2 mb-3 text-xs", MUTED)}>
             Install these first — the mod does nothing without them.
           </p>
-          <div
-            className={cn(
-              CARD,
-              "divide-y divide-[color:var(--border)] overflow-hidden"
-            )}
-          >
-            {mod.requirements.map((req, i) => (
-              <RequirementRow key={`${req.kind}-${req.name}-${i}`} req={req} />
-            ))}
+          <div className="space-y-3">
+            {REQUIREMENT_GROUPS.map(({ kind, title }) => {
+              const reqs = mod.requirements.filter((r) => r.kind === kind);
+              return (
+                reqs.length > 0 && (
+                  <div key={kind}>
+                    <p className={cn("mb-1.5 text-xs font-medium", MUTED)}>{title}</p>
+                    <div
+                      className={cn(
+                        CARD,
+                        "divide-y divide-[color:var(--border)] overflow-hidden"
+                      )}
+                    >
+                      {reqs.map((req, i) => (
+                        <RequirementRow key={`${req.key}-${i}`} req={req} />
+                      ))}
+                    </div>
+                  </div>
+                )
+              );
+            })}
           </div>
         </section>
       )}

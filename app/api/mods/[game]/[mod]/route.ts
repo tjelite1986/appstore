@@ -1,10 +1,19 @@
 /**
  * POST   /api/mods/<game>/<mod>   { refresh: true }   Nexus's current words over the old
  * POST   /api/mods/<game>/<mod>   { nexusUrl }        point the listing at another Nexus mod
+ * POST   /api/mods/<game>/<mod>   { requirement, to } link a requirement to a mod of the game ("" unlinks)
  * DELETE /api/mods/<game>/<mod>                       move the mod to _discarded
  */
 import { requireAdmin } from "@/lib/admin";
-import { findMod, ModAlreadyHere, ModError, refreshMod, relinkMod, removeMod } from "@/lib/mods";
+import {
+  findMod,
+  linkRequirement,
+  ModAlreadyHere,
+  ModError,
+  refreshMod,
+  relinkMod,
+  removeMod,
+} from "@/lib/mods";
 import { lookupNexusMod, parseNexusUrl } from "@/lib/sources/nexus";
 
 export const runtime = "nodejs";
@@ -28,6 +37,14 @@ export async function POST(req: Request, { params }: Params): Promise<Response> 
 
   const { game, mod } = await params;
   const body = await req.json().catch(() => null);
+  if (body && typeof body === "object" && "requirement" in body) {
+    try {
+      await linkRequirement(game, body.requirement, body.to);
+      return Response.json({ ok: true });
+    } catch (err) {
+      return failed(err);
+    }
+  }
   if (body && typeof body === "object" && "nexusUrl" in body) {
     const ref = parseNexusUrl(typeof body.nexusUrl === "string" ? body.nexusUrl : "");
     if (!ref) {

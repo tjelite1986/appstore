@@ -20,6 +20,7 @@ import { useRouter } from "next/navigation";
 import {
   ArrowLeftRight,
   Check,
+  Link2,
   Pencil,
   RefreshCw,
   Search,
@@ -93,6 +94,8 @@ export default function ModFiles({
   fromNexus,
   files,
   accept,
+  requirements,
+  linkable,
 }: {
   game: string;
   mod: string;
@@ -102,6 +105,10 @@ export default function ModFiles({
   files: { file: string; name: string; section: Section; size: string; version: string }[];
   /** The extensions the store takes, `.zip` style. */
   accept: string[];
+  /** The mod's requirements; `linkedTo` is a mod picked by hand, `found` one matched by Nexus id. */
+  requirements: { key: string; name: string; linkedTo: string; found: boolean }[];
+  /** The game's other mods, which a requirement can be linked to. */
+  linkable: { slug: string; name: string }[];
 }) {
   const [open, setOpen] = useState(false);
   const [token, setToken] = useState("");
@@ -235,6 +242,17 @@ export default function ModFiles({
     void act(async () => {
       await adminCall(path, { method: "PATCH", body: JSON.stringify(editing) }, token, opts);
       setEditing(null);
+      router.refresh();
+    });
+
+  const linkRequirement = (key: string, to: string) =>
+    void act(async () => {
+      await adminCall(
+        base,
+        { method: "POST", body: JSON.stringify({ requirement: key, to }) },
+        token,
+        opts
+      );
       router.refresh();
     });
 
@@ -453,6 +471,37 @@ export default function ModFiles({
             </button>
           )}
         </div>
+
+        {requirements.length > 0 && (
+          <div className="space-y-2 border-t border-[color:var(--border)] pt-3">
+            <p className={NOTE}>
+              <Link2 size={12} className="mr-1 inline" />
+              Link a requirement to a mod in this store — say SMAPI to SMAPI for
+              Android. The link holds for every mod of this game that needs it.
+            </p>
+            <ul className="space-y-1.5">
+              {requirements.map((r) => (
+                <li key={r.key} className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="min-w-[8rem] flex-1 truncate">{r.name}</span>
+                  <select
+                    value={r.linkedTo}
+                    onChange={(e) => linkRequirement(r.key, e.target.value)}
+                    disabled={busy}
+                    aria-label={`Link ${r.name}`}
+                    className="max-w-[14rem] rounded-[var(--radius-sm)] border border-[color:var(--border)] bg-transparent px-2 py-1.5 text-xs"
+                  >
+                    <option value="">{r.found ? "Found here by Nexus id" : "Not linked"}</option>
+                    {linkable.map((m) => (
+                      <option key={m.slug} value={m.slug}>
+                        {m.name}
+                      </option>
+                    ))}
+                  </select>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <div className="space-y-2 border-t border-[color:var(--border)] pt-3">
           <p className={NOTE}>

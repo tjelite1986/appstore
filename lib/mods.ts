@@ -6,7 +6,7 @@
  * through `lib/store.ts`, where every rule is about those things. It has its
  * own tree instead (see `lib/storage.ts`):
  *
- *   mods/<game>/game.json              { name, nexusDomain? }
+ *   mods/<game>/game.json              { name, nexusDomain?, requirementLinks? }
  *   mods/<game>/<mod>/mod.json         the mod's words, and a label per file
  *   mods/<game>/<mod>/files/<file>     the archives people download
  *   mod-images/<game>.<ext>            the game's cover
@@ -117,6 +117,8 @@ export type ModFile = {
  * own page when the mod is here, Nexus or the off-site address otherwise.
  */
 export type ModRequirement = {
+  /** What a hand-made link is stored under — see `requirementKey`. */
+  key: string;
   kind: NexusRequirement["kind"];
   name: string;
   notes: string;
@@ -126,7 +128,16 @@ export type ModRequirement = {
   url?: string;
   /** The Nexus mod it is, when it is one this store could also hold. */
   nexus?: NexusRef;
+  /** `here` was chosen by hand rather than found by Nexus id. */
+  linked?: boolean;
 };
+
+/** A requirement's identity across refreshes: its Nexus mod, else its name. */
+function requirementKey(r: { kind: string; name: string; ref?: NexusRef | null }): string {
+  return r.kind === "mod" && r.ref
+    ? `nexus:${r.ref.domain}/${r.ref.modId}`
+    : `${r.kind}:${r.name.trim().toLowerCase()}`;
+}
 
 export type StoreMod = {
   game: string;
@@ -154,7 +165,16 @@ export type StoreMod = {
   files: ModFile[];
 };
 
-type GameJson = { name?: string; nexusDomain?: string };
+type GameJson = {
+  name?: string;
+  nexusDomain?: string;
+  /**
+   * Requirement key → a mod of this game that stands in for it. Per game, not
+   * per mod: SMAPI on Nexus is SMAPI for Android here for every mod that
+   * needs it.
+   */
+  requirementLinks?: Record<string, string>;
+};
 
 type ModJson = {
   name?: string;
@@ -290,6 +310,7 @@ async function readMod(game: string, slug: string): Promise<StoreMod | null> {
     seed: seedFrom(`${game}/${slug}`),
     nexus: meta.nexus,
     requirements: (Array.isArray(meta.requirements) ? meta.requirements : []).map((r) => ({
+      key: requirementKey(r),
       kind: r.kind,
       name: r.name,
       notes: r.notes ?? "",
@@ -323,7 +344,18 @@ async function descriptionImageHrefs(
  * so "needs SMAPI" leads to the SMAPI download rather than off to Nexus.
  */
 async function linkRequirementsHere(mod: StoreMod, adults: boolean): Promise<StoreMod> {
-  if (!mod.requirements.some((r) => r.nexus)) return mod;
+  if (mod.requirements.length === 0) return mod;
+
+  // A link made by hand wins over a match by Nexus id: it is somebody saying
+  // which build is the right one here.
+  const links =
+    (await readJson<GameJson>(path.join(MODS_DIR, mod.game, "game.json")))?.requirementLinks ?? {};
+  const linked = new Map<string, string>();
+  for (const [key, slug] of Object.entries(links)) {
+    if (!isSlug(slug)) continue;
+    const other = await readJson<ModJson>(path.join(MODS_DIR, mod.game, slug, "mod.json"));
+    if (other && (other.adult !== true || adults)) linked.set(key, `/mods/${mod.game}/${slug}`);
+  }
 
   const here = new Map<string, string>();
   for (const game of await dirs(MODS_DIR)) {
@@ -336,6 +368,8 @@ async function linkRequirementsHere(mod: StoreMod, adults: boolean): Promise<Sto
   return {
     ...mod,
     requirements: mod.requirements.map((r) => {
+      const byHand = linked.get(r.key);
+      if (byHand) return { ...r, here: byHand, linked: true };
       const at = r.nexus && here.get(`${r.nexus.domain}/${r.nexus.modId}`);
       return at ? { ...r, here: at } : r;
     }),
@@ -543,6 +577,29 @@ async function localizeDescriptionImages(
     if (!keep.has(file)) await fs.unlink(path.join(dir, file)).catch(() => undefined);
   }
   return images;
+}
+
+/**
+ * Point a requirement at one of this game's mods, for every mod of the game
+ * that needs it — or, with no mod, back to finding it by Nexus id.
+ */
+export async function linkRequirement(game: string, key: unknown, to: unknown): Promise<void> {
+  if (!isSlug(game) || !(await exists(path.join(MODS_DIR, game, "game.json")))) {
+    throw new ModError("No such game", 404);
+  }
+  if (typeof key !== "string" || !/^(nexus|mod|external|dlc):.{1,200}$/.test(key)) {
+    throw new ModError("A requirement key is required");
+  }
+  const slug = typeof to === "string" ? to : "";
+  if (slug && (!isSlug(slug) || !(await exists(path.join(MODS_DIR, game, slug, "mod.json"))))) {
+    throw new ModError("That mod is not in this game", 404);
+  }
+  await updateJson<GameJson>(path.join(MODS_DIR, game, "game.json"), (meta) => {
+    const links = { ...meta.requirementLinks };
+    if (slug) links[key] = slug;
+    else delete links[key];
+    return { ...meta, requirementLinks: links };
+  });
 }
 
 /** A game to file mods under, by name. */
