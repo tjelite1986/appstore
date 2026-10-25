@@ -1,6 +1,6 @@
 /**
- * POST   /api/mods/<game>/<mod>/files             { file, bytes, name, version } → { id, received, chunkBytes }
- * PATCH  /api/mods/<game>/<mod>/files             { file, name, version } relabel an uploaded file
+ * POST   /api/mods/<game>/<mod>/files             { file, bytes, name, version, section } → { id, received, chunkBytes }
+ * PATCH  /api/mods/<game>/<mod>/files             { file, name, version, section } relabel an uploaded file
  * GET    /api/mods/<game>/<mod>/files?id=         → { received, bytes }, to resume
  * PUT    /api/mods/<game>/<mod>/files?id=&offset= raw chunk               → { received, done, file? }
  * DELETE /api/mods/<game>/<mod>/files?id=         give up on an upload

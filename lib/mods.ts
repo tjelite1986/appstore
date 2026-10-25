@@ -77,6 +77,10 @@ export const MOD_EXTENSIONS = Object.keys(MOD_FORMATS);
 /** A mod archive, an app (a launcher, a patched game) or game data. */
 export type ModFileKind = "archive" | "app" | "data";
 
+/** Nexus's own split of a mod page's files: what most people want, and the rest. */
+export const MOD_FILE_SECTIONS = ["main", "optional"] as const;
+export type ModFileSection = (typeof MOD_FILE_SECTIONS)[number];
+
 export const ModError = UploadError;
 
 export type ModGame = {
@@ -97,6 +101,8 @@ export type ModFile = {
    * without a label the file name stands in.
    */
   name: string;
+  /** Unset in mod.json means main. */
+  section: ModFileSection;
   size: string;
   bytes: number;
   /** The label given at upload — usually the mod's version then. */
@@ -162,7 +168,7 @@ type ModJson = {
   requirements?: NexusRequirement[];
   /** `[img]` address → path under mod-images/. */
   images?: Record<string, string>;
-  files?: Record<string, { name?: string; version?: string }>;
+  files?: Record<string, { name?: string; version?: string; section?: ModFileSection }>;
   added?: string;
 };
 
@@ -226,6 +232,10 @@ export function nameFromFile(file: string): { name: string; version: string } {
 }
 
 /** A file's name label as given: trimmed and capped, empty for none. */
+function fileSection(value: unknown): ModFileSection {
+  return value === "optional" ? "optional" : "main";
+}
+
 function fileLabel(value: unknown, max: number): string {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
@@ -252,6 +262,7 @@ async function readMod(game: string, slug: string): Promise<StoreMod | null> {
         bytes: stat.size,
         size: formatBytes(stat.size),
         name: meta.files?.[file]?.name || nameFromFile(file).name,
+        section: fileSection(meta.files?.[file]?.section),
         version: meta.files?.[file]?.version || nameFromFile(file).version,
         kind: MOD_FORMATS[path.extname(file).toLowerCase()].kind,
         added: stat.mtime.toISOString(),
@@ -744,7 +755,7 @@ export async function removeModFile(game: string, slug: string, file: string): P
 export async function labelModFile(
   game: string,
   slug: string,
-  input: { file?: unknown; name?: unknown; version?: unknown }
+  input: { file?: unknown; name?: unknown; version?: unknown; section?: unknown }
 ): Promise<void> {
   const dir = await modDir(game, slug);
   const file = typeof input.file === "string" ? input.file : "";
@@ -753,9 +764,10 @@ export async function labelModFile(
   }
   const name = fileLabel(input.name, 120);
   const version = fileLabel(input.version, 40);
+  const section = fileSection(input.section);
   await updateJson<ModJson>(path.join(dir, "mod.json"), (meta) => ({
     ...meta,
-    files: { ...meta.files, [file]: { ...(name ? { name } : {}), version } },
+    files: { ...meta.files, [file]: { ...(name ? { name } : {}), version, section } },
   }));
 }
 
@@ -769,6 +781,8 @@ type Pending = {
   /** Absent in uploads started before files had names. */
   name?: string;
   version: string;
+  /** Absent in uploads started before files had sections. */
+  section?: ModFileSection;
   bytes: number;
   started: string;
 };
@@ -786,7 +800,13 @@ async function readPending(game: string, slug: string, id: string): Promise<Pend
 export async function startModUpload(
   game: string,
   slug: string,
-  input: { file?: unknown; bytes?: unknown; name?: unknown; version?: unknown }
+  input: {
+    file?: unknown;
+    bytes?: unknown;
+    name?: unknown;
+    version?: unknown;
+    section?: unknown;
+  }
 ): Promise<{ id: string; received: number; chunkBytes: number }> {
   await modDir(game, slug);
   const file = typeof input.file === "string" ? input.file.trim() : "";
@@ -801,6 +821,7 @@ export async function startModUpload(
   if (bytes > MAX_UPLOAD_BYTES) throw new ModError("That file is larger than the store accepts");
   const name = fileLabel(input.name, 120);
   const version = fileLabel(input.version, 40);
+  const section = fileSection(input.section);
 
   const id = randomUUID();
   const pending: Pending = {
@@ -810,6 +831,7 @@ export async function startModUpload(
     file,
     name,
     version,
+    section,
     bytes,
     started: new Date().toISOString(),
   };
@@ -858,6 +880,7 @@ async function finish(id: string, pending: Pending): Promise<string> {
       [pending.file]: {
         ...(pending.name ? { name: pending.name } : {}),
         version: pending.version,
+        section: fileSection(pending.section),
       },
     },
   }));

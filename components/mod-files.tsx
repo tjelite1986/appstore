@@ -34,6 +34,31 @@ import { buttonClass, CARD, MUTED, NOTE } from "@/components/primitives";
 import { cn } from "@/lib/utils";
 import type { NexusMod } from "@/lib/sources/nexus";
 
+type Section = "main" | "optional";
+
+function SectionSelect({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: Section;
+  onChange: (value: Section) => void;
+  disabled: boolean;
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value as Section)}
+      disabled={disabled}
+      aria-label="Section"
+      className="rounded-[var(--radius-sm)] border border-[color:var(--border)] bg-transparent px-2 py-1.5 text-xs"
+    >
+      <option value="main">Main files</option>
+      <option value="optional">Optional files</option>
+    </select>
+  );
+}
+
 const RETRIES = 5;
 
 function resumeKey(base: string, file: File): string {
@@ -74,7 +99,7 @@ export default function ModFiles({
   /** The mod's current version — the default label for a new file. */
   version: string;
   fromNexus: boolean;
-  files: { file: string; name: string; size: string; version: string }[];
+  files: { file: string; name: string; section: Section; size: string; version: string }[];
   /** The extensions the store takes, `.zip` style. */
   accept: string[];
 }) {
@@ -83,9 +108,13 @@ export default function ModFiles({
   const [file, setFile] = useState<File | null>(null);
   const [label, setLabel] = useState(version);
   const [name, setName] = useState("");
-  const [editing, setEditing] = useState<{ file: string; name: string; version: string } | null>(
-    null
-  );
+  const [section, setSection] = useState<Section>("main");
+  const [editing, setEditing] = useState<{
+    file: string;
+    name: string;
+    version: string;
+    section: Section;
+  } | null>(null);
   const [progress, setProgress] = useState<{ sent: number; total: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -128,7 +157,13 @@ export default function ModFiles({
           path,
           {
             method: "POST",
-            body: JSON.stringify({ file: file.name, bytes: file.size, name, version: label }),
+            body: JSON.stringify({
+              file: file.name,
+              bytes: file.size,
+              name,
+              version: label,
+              section,
+            }),
           },
           token,
           opts
@@ -301,6 +336,11 @@ export default function ModFiles({
                     disabled={busy}
                     className="w-24 rounded-[var(--radius-sm)] border border-[color:var(--border)] bg-transparent px-2 py-1.5 font-mono text-xs"
                   />
+                  <SectionSelect
+                    value={editing.section}
+                    onChange={(value) => setEditing({ ...editing, section: value })}
+                    disabled={busy}
+                  />
                   <button
                     onClick={saveLabel}
                     disabled={busy}
@@ -325,7 +365,7 @@ export default function ModFiles({
                     {f.version && <span className="font-mono"> · {f.version}</span>}
                     <span className={MUTED}>
                       {" "}
-                      · {f.file} · {f.size}
+                      · {f.section === "optional" ? "Optional" : "Main"} · {f.file} · {f.size}
                     </span>
                   </span>
                   <button
@@ -334,6 +374,7 @@ export default function ModFiles({
                         file: f.file,
                         name: f.name,
                         version: f.version,
+                        section: f.section,
                       })
                     }
                     disabled={busy}
@@ -371,6 +412,7 @@ export default function ModFiles({
             disabled={busy}
             className="w-24 rounded-[var(--radius-sm)] border border-[color:var(--border)] bg-transparent px-2 py-1.5 font-mono text-xs"
           />
+          <SectionSelect value={section} onChange={setSection} disabled={busy} />
           <input
             type="file"
             accept={accept.join(",")}

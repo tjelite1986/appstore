@@ -6,7 +6,15 @@ import { Screen } from "@/components/screen";
 import { Button, CARD, MUTED, SectionTitle, Thumb } from "@/components/primitives";
 import BBCode from "@/components/bbcode";
 import ModFiles from "@/components/mod-files";
-import { findGame, findMod, MOD_EXTENSIONS, type ModFile, type ModRequirement } from "@/lib/mods";
+import {
+  findGame,
+  findMod,
+  MOD_EXTENSIONS,
+  MOD_FILE_SECTIONS,
+  type ModFile,
+  type ModFileSection,
+  type ModRequirement,
+} from "@/lib/mods";
 import { currentUser } from "@/lib/current-user";
 import { adultsAllowed } from "@/lib/user-state";
 import { cn } from "@/lib/utils";
@@ -50,6 +58,11 @@ const FILE_KIND_LABEL: Record<ModFile["kind"], string> = {
   archive: "",
   app: "APK",
   data: "OBB",
+};
+
+const SECTION_TITLE: Record<ModFileSection, string> = {
+  main: "Main files",
+  optional: "Optional files",
 };
 
 // One card per file, all alike: a Nexus page often holds several mods, so
@@ -184,18 +197,28 @@ export default async function ModPage({ params }: Params) {
         </div>
       )}
 
-      <section className="px-[var(--pad)]">
-        <SectionTitle title="Files" />
-        {mod.files.length > 0 ? (
-          <div className="space-y-2">
-            {mod.files.map((f) => (
-              <FileCard key={f.file} file={f} />
-            ))}
-          </div>
-        ) : (
+      {mod.files.length > 0 ? (
+        MOD_FILE_SECTIONS.map((section) => {
+          const files = mod.files.filter((f) => f.section === section);
+          return (
+            files.length > 0 && (
+              <section key={section} className="px-[var(--pad)]">
+                <SectionTitle title={SECTION_TITLE[section]} />
+                <div className="space-y-2">
+                  {files.map((f) => (
+                    <FileCard key={f.file} file={f} />
+                  ))}
+                </div>
+              </section>
+            )
+          );
+        })
+      ) : (
+        <section className="px-[var(--pad)]">
+          <SectionTitle title="Files" />
           <p className={cn("text-sm", MUTED)}>No download yet.</p>
-        )}
-      </section>
+        </section>
+      )}
 
       {viewer?.role === "admin" && (
         <ModFiles
@@ -206,6 +229,7 @@ export default async function ModPage({ params }: Params) {
           files={mod.files.map((f) => ({
             file: f.file,
             name: f.name,
+            section: f.section,
             size: f.size,
             version: f.version,
           }))}
