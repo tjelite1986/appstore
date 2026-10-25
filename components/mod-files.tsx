@@ -22,6 +22,7 @@ import { useRouter } from "next/navigation";
 import {
   ArrowLeftRight,
   Check,
+  ExternalLink,
   Link2,
   Pencil,
   RefreshCw,
@@ -104,6 +105,25 @@ function LinkFields({
         className={cn(INPUT, "w-full min-w-0")}
       />
     </div>
+  );
+}
+
+function hostOf(url: string): string {
+  return new URL(url).hostname.replace(/^www\./, "");
+}
+
+// The full address in the title: the label alone does not say which repo or mod it is.
+function FileLink({ href, label }: { href: string; label: string }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer noopener"
+      title={href}
+      className="inline-flex min-w-0 items-center gap-1 truncate text-[color:var(--accent)] hover:underline"
+    >
+      <ExternalLink size={11} className="shrink-0" /> {label}
+    </a>
   );
 }
 
@@ -461,14 +481,22 @@ export default function ModFiles({
                 </li>
               ) : (
                 <li key={f.file} className="flex items-center gap-2 text-xs">
-                  <span className="min-w-0 flex-1 truncate">
-                    <span className="font-semibold">{f.name}</span>
-                    {f.version && <span className="font-mono"> · {f.version}</span>}
-                    <span className={MUTED}>
-                      {" "}
-                      · {f.section === "optional" ? "Optional" : "Main"} · {f.file} · {f.size}
-                    </span>
-                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate">
+                      <span className="font-semibold">{f.name}</span>
+                      {f.version && <span className="font-mono"> · {f.version}</span>}
+                      <span className={MUTED}>
+                        {" "}
+                        · {f.section === "optional" ? "Optional" : "Main"} · {f.file} · {f.size}
+                      </span>
+                    </p>
+                    {(f.nexus || f.source) && (
+                      <p className="mt-0.5 flex flex-wrap gap-x-3">
+                        {f.nexus && <FileLink href={f.nexus} label="Nexus" />}
+                        {f.source && <FileLink href={f.source} label={hostOf(f.source)} />}
+                      </p>
+                    )}
+                  </div>
                   <button
                     onClick={() =>
                       setEditing({
