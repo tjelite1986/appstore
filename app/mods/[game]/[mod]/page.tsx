@@ -66,6 +66,24 @@ const SECTION_TITLE: Record<ModFileSection, string> = {
   optional: "Optional files",
 };
 
+function hostOf(url: string): string {
+  return new URL(url).hostname.replace(/^www\./, "");
+}
+
+// Where a file came from, opened beside the store rather than in place of it.
+function FileLink({ href, label }: { href: string; label: string }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer noopener"
+      className="inline-flex items-center gap-1 text-[color:var(--accent)] hover:underline"
+    >
+      <ExternalLink size={12} /> {label}
+    </a>
+  );
+}
+
 // One card per file, all alike: a Nexus page often holds several mods, so
 // "newest" says nothing about which one somebody came for.
 function FileCard({ file }: { file: ModFile }) {
@@ -91,6 +109,12 @@ function FileCard({ file }: { file: ModFile }) {
             .filter(Boolean)
             .join(" · ")}
         </p>
+        {(file.nexus || file.source) && (
+          <p className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
+            {file.nexus && <FileLink href={file.nexus} label="Nexus" />}
+            {file.source && <FileLink href={file.source} label={`Source · ${hostOf(file.source)}`} />}
+          </p>
+        )}
       </div>
       {/* A plain link, so the browser's own download manager handles it and
           an interrupted transfer can resume — the route serves ranges. */}
@@ -241,6 +265,8 @@ export default async function ModPage({ params }: Params) {
             section: f.section,
             size: f.size,
             version: f.version,
+            nexus: f.nexus ?? "",
+            source: f.source ?? "",
           }))}
           accept={MOD_EXTENSIONS}
           requirements={mod.requirements.map((r) => ({

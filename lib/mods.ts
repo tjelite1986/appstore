@@ -31,7 +31,13 @@ import { formatBytes, mediaHref, seedFrom } from "./store";
 import { withBasePath } from "./base-path";
 import { fetchImageBytes, saveImage } from "./sources/net";
 import { sniffExtension } from "./edit";
-import { nexusModUrl, type NexusMod, type NexusRef, type NexusRequirement } from "./sources/nexus";
+import {
+  nexusModUrl,
+  parseNexusUrl,
+  type NexusMod,
+  type NexusRef,
+  type NexusRequirement,
+} from "./sources/nexus";
 import {
   appendPart,
   CHUNK_BYTES,
@@ -110,6 +116,10 @@ export type ModFile = {
   added: string;
   href: string;
   kind: ModFileKind;
+  /** The Nexus page this file's name and version were taken from. */
+  nexus?: string;
+  /** Where the file was downloaded from when it is not Nexus — a GitHub release, say. */
+  source?: string;
 };
 
 /**
@@ -176,6 +186,14 @@ type GameJson = {
   requirementLinks?: Record<string, string>;
 };
 
+type FileJson = {
+  name?: string;
+  version?: string;
+  section?: ModFileSection;
+  nexus?: string;
+  source?: string;
+};
+
 type ModJson = {
   name?: string;
   summary?: string;
@@ -188,7 +206,7 @@ type ModJson = {
   requirements?: NexusRequirement[];
   /** `[img]` address → path under mod-images/. */
   images?: Record<string, string>;
-  files?: Record<string, { name?: string; version?: string; section?: ModFileSection }>;
+  files?: Record<string, FileJson>;
   added?: string;
 };
 
@@ -260,6 +278,53 @@ function fileLabel(value: unknown, max: number): string {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
+/** An address pasted without its scheme — `github.com/…` — is taken as https. */
+function withScheme(raw: string): string {
+  return /^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`;
+}
+
+/** A file's Nexus page, written the one way Nexus links are; empty for none. */
+function fileNexus(value: unknown): string {
+  const raw = fileLabel(value, 300);
+  if (!raw) return "";
+  const ref = parseNexusUrl(withScheme(raw));
+  if (!ref) throw new ModError("Expected a nexusmods.com/<game>/mods/<id> address");
+  return nexusModUrl(ref);
+}
+
+/** Where a file came from: an http(s) address the page links to; empty for none. */
+function fileSource(value: unknown): string {
+  const raw = fileLabel(value, 500);
+  if (!raw) return "";
+  let url: URL;
+  try {
+    url = new URL(withScheme(raw));
+  } catch {
+    throw new ModError("The source must be a web address");
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new ModError("The source must be an http or https address");
+  }
+  return url.toString();
+}
+
+/** One file's entry in mod.json, leaving out what is empty. */
+function fileJson(f: {
+  name: string;
+  version: string;
+  section: ModFileSection;
+  nexus: string;
+  source: string;
+}): FileJson {
+  return {
+    ...(f.name ? { name: f.name } : {}),
+    version: f.version,
+    section: f.section,
+    ...(f.nexus ? { nexus: f.nexus } : {}),
+    ...(f.source ? { source: f.source } : {}),
+  };
+}
+
 async function readMod(game: string, slug: string): Promise<StoreMod | null> {
   const dir = path.join(MODS_DIR, game, slug);
   const meta = await readJson<ModJson>(path.join(dir, "mod.json"));
@@ -285,6 +350,8 @@ async function readMod(game: string, slug: string): Promise<StoreMod | null> {
         section: fileSection(meta.files?.[file]?.section),
         version: meta.files?.[file]?.version || nameFromFile(file).version,
         kind: MOD_FORMATS[path.extname(file).toLowerCase()].kind,
+        ...(meta.files?.[file]?.nexus ? { nexus: meta.files[file].nexus } : {}),
+        ...(meta.files?.[file]?.source ? { source: meta.files[file].source } : {}),
         added: stat.mtime.toISOString(),
         href: withBasePath(
           `/api/mods/${game}/${slug}/download?f=${encodeURIComponent(file)}`
@@ -808,11 +875,18 @@ export async function removeModFile(game: string, slug: string, file: string): P
   });
 }
 
-/** A file's name and version, set again without uploading it again. */
+/** A file's name, version and links, set again without uploading it again. */
 export async function labelModFile(
   game: string,
   slug: string,
-  input: { file?: unknown; name?: unknown; version?: unknown; section?: unknown }
+  input: {
+    file?: unknown;
+    name?: unknown;
+    version?: unknown;
+    section?: unknown;
+    nexus?: unknown;
+    source?: unknown;
+  }
 ): Promise<void> {
   const dir = await modDir(game, slug);
   const file = typeof input.file === "string" ? input.file : "";
@@ -822,9 +896,11 @@ export async function labelModFile(
   const name = fileLabel(input.name, 120);
   const version = fileLabel(input.version, 40);
   const section = fileSection(input.section);
+  const nexus = fileNexus(input.nexus);
+  const source = fileSource(input.source);
   await updateJson<ModJson>(path.join(dir, "mod.json"), (meta) => ({
     ...meta,
-    files: { ...meta.files, [file]: { ...(name ? { name } : {}), version, section } },
+    files: { ...meta.files, [file]: fileJson({ name, version, section, nexus, source }) },
   }));
 }
 
@@ -840,6 +916,9 @@ type Pending = {
   version: string;
   /** Absent in uploads started before files had sections. */
   section?: ModFileSection;
+  /** Absent in uploads started before files had links. */
+  nexus?: string;
+  source?: string;
   bytes: number;
   started: string;
 };
@@ -863,6 +942,8 @@ export async function startModUpload(
     name?: unknown;
     version?: unknown;
     section?: unknown;
+    nexus?: unknown;
+    source?: unknown;
   }
 ): Promise<{ id: string; received: number; chunkBytes: number }> {
   await modDir(game, slug);
@@ -879,6 +960,9 @@ export async function startModUpload(
   const name = fileLabel(input.name, 120);
   const version = fileLabel(input.version, 40);
   const section = fileSection(input.section);
+  // Checked before any byte is sent, not after the last one.
+  const nexus = fileNexus(input.nexus);
+  const source = fileSource(input.source);
 
   const id = randomUUID();
   const pending: Pending = {
@@ -889,6 +973,8 @@ export async function startModUpload(
     name,
     version,
     section,
+    nexus,
+    source,
     bytes,
     started: new Date().toISOString(),
   };
@@ -934,11 +1020,13 @@ async function finish(id: string, pending: Pending): Promise<string> {
     ...meta,
     files: {
       ...meta.files,
-      [pending.file]: {
-        ...(pending.name ? { name: pending.name } : {}),
+      [pending.file]: fileJson({
+        name: pending.name ?? "",
         version: pending.version,
         section: fileSection(pending.section),
-      },
+        nexus: pending.nexus ?? "",
+        source: pending.source ?? "",
+      }),
     },
   }));
   return pending.file;

@@ -11,7 +11,9 @@
  * so picking the same file again after a reload carries on where it stopped.
  *
  * Each file carries a name and a version of its own: one Nexus page often
- * holds several mods, and the page shows every file as its own card.
+ * holds several mods, and the page shows every file as its own card. A file
+ * can also point at the Nexus page its name and version come from, and at
+ * where it was downloaded — SpaceCore for Android is a GitHub release, say.
  *
  * Closed until asked for, like the other admin panels on a public page.
  */
@@ -60,6 +62,51 @@ function SectionSelect({
   );
 }
 
+const INPUT =
+  "rounded-[var(--radius-sm)] border border-[color:var(--border)] bg-transparent px-2 py-1.5 text-xs";
+
+type Links = { nexus: string; source: string };
+
+/** A file's two links, and a lookup that takes its name and version from the Nexus one. */
+function LinkFields({
+  value,
+  onChange,
+  onFill,
+  disabled,
+}: {
+  value: Links;
+  onChange: (value: Links) => void;
+  onFill: () => void;
+  disabled: boolean;
+}) {
+  return (
+    <div className="flex w-full flex-wrap gap-2">
+      <input
+        value={value.nexus}
+        onChange={(e) => onChange({ ...value, nexus: e.target.value })}
+        placeholder="Nexus page (optional)"
+        disabled={disabled}
+        className={cn(INPUT, "min-w-[10rem] flex-1")}
+      />
+      <button
+        onClick={onFill}
+        disabled={disabled || !value.nexus.trim()}
+        title="Take the name and version from this Nexus page"
+        className={cn(buttonClass("secondary", "sm"), "disabled:opacity-50")}
+      >
+        <Search size={14} /> Fill from Nexus
+      </button>
+      <input
+        value={value.source}
+        onChange={(e) => onChange({ ...value, source: e.target.value })}
+        placeholder="Source, where the file is from (optional)"
+        disabled={disabled}
+        className={cn(INPUT, "w-full min-w-0")}
+      />
+    </div>
+  );
+}
+
 const RETRIES = 5;
 
 function resumeKey(base: string, file: File): string {
@@ -102,7 +149,15 @@ export default function ModFiles({
   /** The mod's current version — the default label for a new file. */
   version: string;
   fromNexus: boolean;
-  files: { file: string; name: string; section: Section; size: string; version: string }[];
+  files: {
+    file: string;
+    name: string;
+    section: Section;
+    size: string;
+    version: string;
+    nexus: string;
+    source: string;
+  }[];
   /** The extensions the store takes, `.zip` style. */
   accept: string[];
   /** The mod's requirements; `linkedTo` is a mod picked by hand, `found` one matched by Nexus id. */
@@ -116,11 +171,14 @@ export default function ModFiles({
   const [label, setLabel] = useState(version);
   const [name, setName] = useState("");
   const [section, setSection] = useState<Section>("main");
+  const [links, setLinks] = useState<Links>({ nexus: "", source: "" });
   const [editing, setEditing] = useState<{
     file: string;
     name: string;
     version: string;
     section: Section;
+    nexus: string;
+    source: string;
   } | null>(null);
   const [progress, setProgress] = useState<{ sent: number; total: number } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -170,6 +228,7 @@ export default function ModFiles({
               name,
               version: label,
               section,
+              ...links,
             }),
           },
           token,
@@ -210,6 +269,7 @@ export default function ModFiles({
       setDone(file.name);
       setFile(null);
       setName("");
+      setLinks({ nexus: "", source: "" });
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -243,6 +303,19 @@ export default function ModFiles({
       await adminCall(path, { method: "PATCH", body: JSON.stringify(editing) }, token, opts);
       setEditing(null);
       router.refresh();
+    });
+
+  // Nexus's name and version for the file, put in the fields to be checked
+  // before they are saved — nothing is written by the lookup itself.
+  const fillFromNexus = (url: string, fill: (name: string, version: string) => void) =>
+    void act(async () => {
+      const res = await adminCall(
+        `/api/mods/nexus?url=${encodeURIComponent(url.trim())}`,
+        undefined,
+        token,
+        opts
+      );
+      fill(res.mod.name, res.mod.version ?? "");
     });
 
   const linkRequirement = (key: string, to: string) =>
@@ -375,6 +448,16 @@ export default function ModFiles({
                   >
                     <X size={13} />
                   </button>
+                  <LinkFields
+                    value={editing}
+                    onChange={(value) => setEditing({ ...editing, ...value })}
+                    onFill={() =>
+                      fillFromNexus(editing.nexus, (name, version) =>
+                        setEditing((e) => e && { ...e, name, version })
+                      )
+                    }
+                    disabled={busy}
+                  />
                 </li>
               ) : (
                 <li key={f.file} className="flex items-center gap-2 text-xs">
@@ -393,6 +476,8 @@ export default function ModFiles({
                         name: f.name,
                         version: f.version,
                         section: f.section,
+                        nexus: f.nexus,
+                        source: f.source,
                       })
                     }
                     disabled={busy}
@@ -431,6 +516,17 @@ export default function ModFiles({
             className="w-24 rounded-[var(--radius-sm)] border border-[color:var(--border)] bg-transparent px-2 py-1.5 font-mono text-xs"
           />
           <SectionSelect value={section} onChange={setSection} disabled={busy} />
+          <LinkFields
+            value={links}
+            onChange={setLinks}
+            onFill={() =>
+              fillFromNexus(links.nexus, (name, version) => {
+                setName(name);
+                setLabel(version);
+              })
+            }
+            disabled={busy}
+          />
           <input
             type="file"
             accept={accept.join(",")}
