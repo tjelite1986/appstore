@@ -29,15 +29,65 @@ function month(iso: string): string {
     : date.toLocaleDateString("en", { month: "short", year: "numeric", timeZone: "UTC" });
 }
 
+function day(iso: string): string {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime())
+    ? "–"
+    : date.toLocaleDateString("en-GB", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        timeZone: "Europe/Stockholm",
+      });
+}
+
 function count(n: number): string {
   return new Intl.NumberFormat("en", { notation: "compact" }).format(n);
 }
 
+// An archive is what a mod page is expected to hold; the others say so.
 const FILE_KIND_LABEL: Record<ModFile["kind"], string> = {
-  archive: "Mod",
+  archive: "",
   app: "APK",
   data: "OBB",
 };
+
+// One card per file, all alike: a Nexus page often holds several mods, so
+// "newest" says nothing about which one somebody came for.
+function FileCard({ file }: { file: ModFile }) {
+  const kind = FILE_KIND_LABEL[file.kind];
+  return (
+    <div className={cn(CARD, "flex items-center gap-3 p-3")}>
+      <div className="min-w-0 flex-1">
+        <p className="break-words text-sm font-semibold">
+          {file.name}
+          {kind && (
+            <span
+              className={cn(
+                "ml-2 rounded-full border border-[color:var(--border)] px-1.5 py-px align-middle text-[10px] font-medium",
+                MUTED
+              )}
+            >
+              {kind}
+            </span>
+          )}
+        </p>
+        <p className={cn("mt-0.5 text-xs", MUTED)}>
+          {[file.version && `v${file.version}`, `Uploaded ${day(file.added)}`, file.size]
+            .filter(Boolean)
+            .join(" · ")}
+        </p>
+      </div>
+      {/* A plain link, so the browser's own download manager handles it and
+          an interrupted transfer can resume — the route serves ranges. */}
+      <a href={file.href} className="shrink-0">
+        <Button size="sm">
+          <Download size={14} /> Download
+        </Button>
+      </a>
+    </div>
+  );
+}
 
 const KIND_LABEL: Record<ModRequirement["kind"], string> = {
   mod: "Mod",
@@ -90,15 +140,6 @@ export default async function ModPage({ params }: Params) {
     findMod(gameSlug, slug, adults),
   ]);
   if (!game || !mod) notFound();
-  // The newest file of each kind gets a button of its own: a mod used
-  // through a launcher needs both the launcher APK and the mod archive.
-  const primary: ModFile[] = [];
-  for (const f of mod.files) {
-    if (!primary.some((p) => p.kind === f.kind)) primary.push(f);
-  }
-  primary.sort((a, b) => (a.kind === "archive" ? -1 : b.kind === "archive" ? 1 : 0));
-  const older = mod.files.filter((f) => !primary.includes(f));
-  const labelled = primary.length > 1;
 
   return (
     <Screen flush>
@@ -133,50 +174,28 @@ export default async function ModPage({ params }: Params) {
         </p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 px-[var(--pad)]">
-        {primary.length > 0 ? (
-          // Plain links, so the browser's own download manager handles them and
-          // an interrupted transfer can resume — the route serves ranges.
-          primary.map((f, i) => (
-            <a key={f.file} href={f.href} className="min-w-[12rem] flex-1">
-              <Button
-                variant={i === 0 ? undefined : "secondary"}
-                className="w-full justify-center"
-              >
-                <Download size={15} /> {labelled ? FILE_KIND_LABEL[f.kind] : "Download"}
-                {f.version ? ` ${f.version}` : ""} · {f.size}
-              </Button>
-            </a>
-          ))
-        ) : (
-          <Button variant="ghost" className="flex-1 justify-center">
-            No download yet
-          </Button>
-        )}
-        {mod.nexus && (
+      {mod.nexus && (
+        <div className="px-[var(--pad)]">
           <a href={mod.nexus.url} target="_blank" rel="noreferrer noopener">
             <Button variant="secondary">
               <ExternalLink size={15} /> Nexus
             </Button>
           </a>
-        )}
-      </div>
-
-      {older.length > 0 && (
-        <div className="px-[var(--pad)]">
-          <SectionTitle title="Other files" />
-          <div className="flex flex-wrap gap-2">
-            {older.map((f) => (
-              <a key={f.file} href={f.href}>
-                <Button size="sm" variant="secondary">
-                  <Download size={13} /> {f.version ? `${f.version} · ` : ""}
-                  {f.file} · {f.size}
-                </Button>
-              </a>
-            ))}
-          </div>
         </div>
       )}
+
+      <section className="px-[var(--pad)]">
+        <SectionTitle title="Files" />
+        {mod.files.length > 0 ? (
+          <div className="space-y-2">
+            {mod.files.map((f) => (
+              <FileCard key={f.file} file={f} />
+            ))}
+          </div>
+        ) : (
+          <p className={cn("text-sm", MUTED)}>No download yet.</p>
+        )}
+      </section>
 
       {viewer?.role === "admin" && (
         <ModFiles
@@ -184,7 +203,12 @@ export default async function ModPage({ params }: Params) {
           mod={mod.slug}
           version={mod.version}
           fromNexus={Boolean(mod.nexus)}
-          files={mod.files.map((f) => ({ file: f.file, size: f.size, version: f.version }))}
+          files={mod.files.map((f) => ({
+            file: f.file,
+            name: f.name,
+            size: f.size,
+            version: f.version,
+          }))}
           accept={MOD_EXTENSIONS}
         />
       )}

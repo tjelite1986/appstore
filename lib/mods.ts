@@ -91,6 +91,12 @@ export type ModGame = {
 
 export type ModFile = {
   file: string;
+  /**
+   * What the file is, as the page names it. One Nexus page often holds
+   * several mods, so the mod's own name does not say which one this is;
+   * without a label the file name stands in.
+   */
+  name: string;
   size: string;
   bytes: number;
   /** The label given at upload — usually the mod's version then. */
@@ -156,7 +162,7 @@ type ModJson = {
   requirements?: NexusRequirement[];
   /** `[img]` address → path under mod-images/. */
   images?: Record<string, string>;
-  files?: Record<string, { version?: string }>;
+  files?: Record<string, { name?: string; version?: string }>;
   added?: string;
 };
 
@@ -200,6 +206,30 @@ async function imageHref(rel: string): Promise<string | undefined> {
 
 /* ------------------------------------------------------------------- read */
 
+/** `Better Chests-9791-2-1-0.zip` → `Better Chests-9791-2-1-0`. */
+function fileStem(file: string): string {
+  return file.slice(0, file.length - path.extname(file).length);
+}
+
+/**
+ * What a Nexus download's own name says: they are saved as
+ * `<name>-<mod id>-<version, dashes for dots>-<unix time>`, often with the
+ * version in the name as well. Anything else is only its stem.
+ */
+export function nameFromFile(file: string): { name: string; version: string } {
+  const stem = fileStem(file);
+  const m = /^(.+?)-\d+-(\d+(?:-\d+)*)-\d{9,11}$/.exec(stem);
+  if (!m) return { name: stem, version: "" };
+  const version = m[2].replace(/-/g, ".");
+  const name = m[1].replace(new RegExp(`[ _-]v?${version.replace(/\./g, "\\.")}$`, "i"), "");
+  return { name: name.trim() || stem, version };
+}
+
+/** A file's name label as given: trimmed and capped, empty for none. */
+function fileLabel(value: unknown, max: number): string {
+  return typeof value === "string" ? value.trim().slice(0, max) : "";
+}
+
 async function readMod(game: string, slug: string): Promise<StoreMod | null> {
   const dir = path.join(MODS_DIR, game, slug);
   const meta = await readJson<ModJson>(path.join(dir, "mod.json"));
@@ -221,7 +251,8 @@ async function readMod(game: string, slug: string): Promise<StoreMod | null> {
         file,
         bytes: stat.size,
         size: formatBytes(stat.size),
-        version: meta.files?.[file]?.version ?? "",
+        name: meta.files?.[file]?.name || nameFromFile(file).name,
+        version: meta.files?.[file]?.version || nameFromFile(file).version,
         kind: MOD_FORMATS[path.extname(file).toLowerCase()].kind,
         added: stat.mtime.toISOString(),
         href: withBasePath(
@@ -709,6 +740,25 @@ export async function removeModFile(game: string, slug: string, file: string): P
   });
 }
 
+/** A file's name and version, set again without uploading it again. */
+export async function labelModFile(
+  game: string,
+  slug: string,
+  input: { file?: unknown; name?: unknown; version?: unknown }
+): Promise<void> {
+  const dir = await modDir(game, slug);
+  const file = typeof input.file === "string" ? input.file : "";
+  if (!isFileName(file) || !(await exists(path.join(dir, "files", file)))) {
+    throw new ModError("No such file", 404);
+  }
+  const name = fileLabel(input.name, 120);
+  const version = fileLabel(input.version, 40);
+  await updateJson<ModJson>(path.join(dir, "mod.json"), (meta) => ({
+    ...meta,
+    files: { ...meta.files, [file]: { ...(name ? { name } : {}), version } },
+  }));
+}
+
 /* ----------------------------------------------------------------- upload */
 
 type Pending = {
@@ -716,6 +766,8 @@ type Pending = {
   game: string;
   mod: string;
   file: string;
+  /** Absent in uploads started before files had names. */
+  name?: string;
   version: string;
   bytes: number;
   started: string;
@@ -734,7 +786,7 @@ async function readPending(game: string, slug: string, id: string): Promise<Pend
 export async function startModUpload(
   game: string,
   slug: string,
-  input: { file?: unknown; bytes?: unknown; version?: unknown }
+  input: { file?: unknown; bytes?: unknown; name?: unknown; version?: unknown }
 ): Promise<{ id: string; received: number; chunkBytes: number }> {
   await modDir(game, slug);
   const file = typeof input.file === "string" ? input.file.trim() : "";
@@ -747,7 +799,8 @@ export async function startModUpload(
     throw new ModError("bytes must be the file's size");
   }
   if (bytes > MAX_UPLOAD_BYTES) throw new ModError("That file is larger than the store accepts");
-  const version = typeof input.version === "string" ? input.version.trim().slice(0, 40) : "";
+  const name = fileLabel(input.name, 120);
+  const version = fileLabel(input.version, 40);
 
   const id = randomUUID();
   const pending: Pending = {
@@ -755,6 +808,7 @@ export async function startModUpload(
     game,
     mod: slug,
     file,
+    name,
     version,
     bytes,
     started: new Date().toISOString(),
@@ -799,7 +853,13 @@ async function finish(id: string, pending: Pending): Promise<string> {
   await dropSidecar(id);
   await updateJson<ModJson>(path.join(dir, "mod.json"), (meta) => ({
     ...meta,
-    files: { ...meta.files, [pending.file]: { version: pending.version } },
+    files: {
+      ...meta.files,
+      [pending.file]: {
+        ...(pending.name ? { name: pending.name } : {}),
+        version: pending.version,
+      },
+    },
   }));
   return pending.file;
 }

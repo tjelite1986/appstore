@@ -10,11 +10,24 @@
  * offset the store says it holds, and the upload id is remembered per file,
  * so picking the same file again after a reload carries on where it stopped.
  *
+ * Each file carries a name and a version of its own: one Nexus page often
+ * holds several mods, and the page shows every file as its own card.
+ *
  * Closed until asked for, like the other admin panels on a public page.
  */
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeftRight, RefreshCw, Search, Trash2, Upload, Wrench, X } from "lucide-react";
+import {
+  ArrowLeftRight,
+  Check,
+  Pencil,
+  RefreshCw,
+  Search,
+  Trash2,
+  Upload,
+  Wrench,
+  X,
+} from "lucide-react";
 import { adminCall } from "@/lib/admin-call";
 import { readAdminToken } from "@/lib/admin-token";
 import { buttonClass, CARD, MUTED, NOTE } from "@/components/primitives";
@@ -61,7 +74,7 @@ export default function ModFiles({
   /** The mod's current version — the default label for a new file. */
   version: string;
   fromNexus: boolean;
-  files: { file: string; size: string; version: string }[];
+  files: { file: string; name: string; size: string; version: string }[];
   /** The extensions the store takes, `.zip` style. */
   accept: string[];
 }) {
@@ -69,6 +82,10 @@ export default function ModFiles({
   const [token, setToken] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [label, setLabel] = useState(version);
+  const [name, setName] = useState("");
+  const [editing, setEditing] = useState<{ file: string; name: string; version: string } | null>(
+    null
+  );
   const [progress, setProgress] = useState<{ sent: number; total: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -111,7 +128,7 @@ export default function ModFiles({
           path,
           {
             method: "POST",
-            body: JSON.stringify({ file: file.name, bytes: file.size, version: label }),
+            body: JSON.stringify({ file: file.name, bytes: file.size, name, version: label }),
           },
           token,
           opts
@@ -150,6 +167,7 @@ export default function ModFiles({
       remember(key, null);
       setDone(file.name);
       setFile(null);
+      setName("");
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -174,6 +192,14 @@ export default function ModFiles({
     window.confirm(`Remove ${name}? It is moved to _discarded, not deleted.`) &&
     void act(async () => {
       await adminCall(`${path}?file=${encodeURIComponent(name)}`, { method: "DELETE" }, token, opts);
+      router.refresh();
+    });
+
+  const saveLabel = () =>
+    editing &&
+    void act(async () => {
+      await adminCall(path, { method: "PATCH", body: JSON.stringify(editing) }, token, opts);
+      setEditing(null);
       router.refresh();
     });
 
@@ -258,26 +284,86 @@ export default function ModFiles({
 
         {files.length > 0 && (
           <ul className="space-y-1.5">
-            {files.map((f) => (
-              <li key={f.file} className="flex items-center gap-2 text-xs">
-                <span className="min-w-0 flex-1 truncate">
-                  {f.version && <span className="font-mono">{f.version} · </span>}
-                  {f.file} · {f.size}
-                </span>
-                <button
-                  onClick={() => removeFile(f.file)}
-                  disabled={busy}
-                  aria-label={`Remove ${f.file}`}
-                  className={cn("rounded-full p-1", MUTED)}
-                >
-                  <Trash2 size={13} />
-                </button>
-              </li>
-            ))}
+            {files.map((f) =>
+              editing?.file === f.file ? (
+                <li key={f.file} className="flex flex-wrap items-center gap-2 text-xs">
+                  <input
+                    value={editing.name}
+                    onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+                    placeholder="Name"
+                    disabled={busy}
+                    className="min-w-[8rem] flex-1 rounded-[var(--radius-sm)] border border-[color:var(--border)] bg-transparent px-2 py-1.5 text-xs"
+                  />
+                  <input
+                    value={editing.version}
+                    onChange={(e) => setEditing({ ...editing, version: e.target.value })}
+                    placeholder="Version"
+                    disabled={busy}
+                    className="w-24 rounded-[var(--radius-sm)] border border-[color:var(--border)] bg-transparent px-2 py-1.5 font-mono text-xs"
+                  />
+                  <button
+                    onClick={saveLabel}
+                    disabled={busy}
+                    aria-label="Save"
+                    className={cn("rounded-full p-1", MUTED)}
+                  >
+                    <Check size={13} />
+                  </button>
+                  <button
+                    onClick={() => setEditing(null)}
+                    disabled={busy}
+                    aria-label="Cancel"
+                    className={cn("rounded-full p-1", MUTED)}
+                  >
+                    <X size={13} />
+                  </button>
+                </li>
+              ) : (
+                <li key={f.file} className="flex items-center gap-2 text-xs">
+                  <span className="min-w-0 flex-1 truncate">
+                    <span className="font-semibold">{f.name}</span>
+                    {f.version && <span className="font-mono"> · {f.version}</span>}
+                    <span className={MUTED}>
+                      {" "}
+                      · {f.file} · {f.size}
+                    </span>
+                  </span>
+                  <button
+                    onClick={() =>
+                      setEditing({
+                        file: f.file,
+                        name: f.name,
+                        version: f.version,
+                      })
+                    }
+                    disabled={busy}
+                    aria-label={`Rename ${f.file}`}
+                    className={cn("rounded-full p-1", MUTED)}
+                  >
+                    <Pencil size={13} />
+                  </button>
+                  <button
+                    onClick={() => removeFile(f.file)}
+                    disabled={busy}
+                    aria-label={`Remove ${f.file}`}
+                    className={cn("rounded-full p-1", MUTED)}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </li>
+              )
+            )}
           </ul>
         )}
 
         <div className="flex flex-wrap gap-2">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Name (file name if empty)"
+            disabled={busy}
+            className="min-w-[10rem] flex-1 rounded-[var(--radius-sm)] border border-[color:var(--border)] bg-transparent px-2 py-1.5 text-xs"
+          />
           <input
             value={label}
             onChange={(e) => setLabel(e.target.value)}
@@ -290,7 +376,7 @@ export default function ModFiles({
             accept={accept.join(",")}
             disabled={busy}
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            className="min-w-0 flex-1 text-xs"
+            className="w-full min-w-0 text-xs"
           />
         </div>
 

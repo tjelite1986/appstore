@@ -1,5 +1,6 @@
 /**
- * POST   /api/mods/<game>/<mod>/files             { file, bytes, version } → { id, received, chunkBytes }
+ * POST   /api/mods/<game>/<mod>/files             { file, bytes, name, version } → { id, received, chunkBytes }
+ * PATCH  /api/mods/<game>/<mod>/files             { file, name, version } relabel an uploaded file
  * GET    /api/mods/<game>/<mod>/files?id=         → { received, bytes }, to resume
  * PUT    /api/mods/<game>/<mod>/files?id=&offset= raw chunk               → { received, done, file? }
  * DELETE /api/mods/<game>/<mod>/files?id=         give up on an upload
@@ -12,6 +13,7 @@ import { requireAdmin } from "@/lib/admin";
 import {
   appendModChunk,
   cancelModUpload,
+  labelModFile,
   ModError,
   modUploadStatus,
   removeModFile,
@@ -75,6 +77,23 @@ export async function PUT(req: Request, { params }: Params) {
   try {
     const result = await appendModChunk(game, mod, query.get("id") ?? "", offset, req.body);
     return Response.json({ ok: true, ...result });
+  } catch (err) {
+    return failed(err);
+  }
+}
+
+export async function PATCH(req: Request, { params }: Params) {
+  const refusal = await requireAdmin(req);
+  if (refusal) return refusal;
+
+  const { game, mod } = await params;
+  const body = await req.json().catch(() => null);
+  if (!body || typeof body !== "object") {
+    return Response.json({ error: "Expected a JSON body" }, { status: 400 });
+  }
+  try {
+    await labelModFile(game, mod, body);
+    return Response.json({ ok: true });
   } catch (err) {
     return failed(err);
   }
