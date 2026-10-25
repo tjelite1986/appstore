@@ -229,6 +229,15 @@ export default async function ModPage({ params }: Params) {
           </a>
         </div>
       )}
+      {mod.github && (
+        <div className="px-[var(--pad)]">
+          <a href={mod.github.url} target="_blank" rel="noreferrer noopener">
+            <Button variant="secondary">
+              <ExternalLink size={15} /> GitHub
+            </Button>
+          </a>
+        </div>
+      )}
 
       {mod.files.length > 0 ? (
         MOD_FILE_SECTIONS.map((section) => {
@@ -259,6 +268,7 @@ export default async function ModPage({ params }: Params) {
           mod={mod.slug}
           version={mod.version}
           fromNexus={Boolean(mod.nexus)}
+          fromGithub={Boolean(mod.github)}
           files={mod.files.map((f) => ({
             file: f.file,
             name: f.name,
@@ -285,6 +295,21 @@ export default async function ModPage({ params }: Params) {
             ["Downloads", count(mod.nexus.downloads)],
             ["Endorsements", count(mod.nexus.endorsements)],
             ["Updated", month(mod.nexus.updatedAt)],
+          ].map(([label, value]) => (
+            <div key={label} className={cn(CARD, "p-2.5 text-center")}>
+              <p className="text-sm font-semibold">{value}</p>
+              <p className={cn("text-[11px] uppercase tracking-wide", MUTED)}>{label}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {mod.github && (
+        <div className="grid grid-cols-3 gap-2 px-[var(--pad)]">
+          {[
+            ["Downloads", count(mod.github.downloads)],
+            ["Stars", count(mod.github.stars)],
+            ["Updated", month(mod.github.updatedAt)],
           ].map(([label, value]) => (
             <div key={label} className={cn(CARD, "p-2.5 text-center")}>
               <p className="text-sm font-semibold">{value}</p>

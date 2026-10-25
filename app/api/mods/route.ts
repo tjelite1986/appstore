@@ -1,5 +1,6 @@
 /**
  * POST /api/mods   { nexusUrl }            add a mod from Nexus Mods, game and all
+ * POST /api/mods   { githubUrl, game, category? }  add a mod that is only on GitHub, files and all
  * POST /api/mods   { game, name }          add a mod by hand to a game already here
  * POST /api/mods   { newGame }             add a game with no mods yet
  *
@@ -10,6 +11,7 @@
 import { requireAdmin } from "@/lib/admin";
 import { addGame, addMod, ModAlreadyHere, ModError } from "@/lib/mods";
 import { lookupNexusMod, parseNexusUrl } from "@/lib/sources/nexus";
+import { lookupGithubMod, parseRepoRef } from "@/lib/sources/github-mod";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,6 +44,25 @@ export async function POST(req: Request): Promise<Response> {
         return Response.json({ error: (err as Error).message }, { status: 502 });
       }
       return Response.json({ ok: true, ...(await addMod({ nexus })) });
+    }
+    if ("githubUrl" in body) {
+      const ref = parseRepoRef(typeof body.githubUrl === "string" ? body.githubUrl : "");
+      if (!ref) {
+        return Response.json(
+          { error: "Expected a github.com/<owner>/<repo> address" },
+          { status: 400 }
+        );
+      }
+      let github;
+      try {
+        github = await lookupGithubMod(ref);
+      } catch (err) {
+        return Response.json({ error: (err as Error).message }, { status: 502 });
+      }
+      return Response.json({
+        ok: true,
+        ...(await addMod({ github, game: body.game, category: body.category })),
+      });
     }
     return Response.json({ ok: true, ...(await addMod({ game: body.game, name: body.name })) });
   } catch (err) {

@@ -159,6 +159,7 @@ export default function ModFiles({
   mod,
   version,
   fromNexus,
+  fromGithub,
   files,
   accept,
   requirements,
@@ -169,6 +170,8 @@ export default function ModFiles({
   /** The mod's current version — the default label for a new file. */
   version: string;
   fromNexus: boolean;
+  /** Added from a GitHub repository: refreshed from there, release files and all. */
+  fromGithub: boolean;
   files: {
     file: string;
     name: string;
@@ -671,13 +674,13 @@ export default function ModFiles({
         </div>
 
         <div className="flex flex-wrap gap-2 border-t border-[color:var(--border)] pt-3">
-          {fromNexus && (
+          {(fromNexus || fromGithub) && (
             <button
               onClick={refresh}
               disabled={busy}
               className={cn(buttonClass("secondary", "sm"), "disabled:opacity-50")}
             >
-              <RefreshCw size={14} /> Refresh from Nexus
+              <RefreshCw size={14} /> Refresh from {fromGithub ? "GitHub" : "Nexus"}
             </button>
           )}
           <button

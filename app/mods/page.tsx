@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Screen, ScreenTitle } from "@/components/screen";
 import { CARD, MUTED, Thumb } from "@/components/primitives";
 import AddMod from "@/components/add-mod";
-import { listGames } from "@/lib/mods";
+import { gameMods, listGames } from "@/lib/mods";
 import { currentUser } from "@/lib/current-user";
 import { adultsAllowed } from "@/lib/user-state";
 import { cn } from "@/lib/utils";
@@ -15,7 +15,20 @@ export const dynamic = "force-dynamic";
  */
 export default async function ModsPage() {
   const viewer = await currentUser();
-  const games = await listGames(adultsAllowed(viewer?.id ?? null));
+  const adults = adultsAllowed(viewer?.id ?? null);
+  const games = await listGames(adults);
+  // Offered when filing a GitHub mod; Nexus mods bring their own.
+  const categories =
+    viewer?.role === "admin"
+      ? [
+          ...new Set(
+            (await Promise.all(games.map((g) => gameMods(g.slug, adults))))
+              .flat()
+              .map((m) => m.category)
+              .filter(Boolean)
+          ),
+        ].sort()
+      : [];
 
   return (
     <Screen>
@@ -40,7 +53,10 @@ export default async function ModsPage() {
       )}
 
       {viewer?.role === "admin" && (
-        <AddMod games={games.map((g) => ({ slug: g.slug, name: g.name }))} />
+        <AddMod
+          games={games.map((g) => ({ slug: g.slug, name: g.name }))}
+          categories={categories}
+        />
       )}
     </Screen>
   );

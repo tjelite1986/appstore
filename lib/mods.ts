@@ -29,7 +29,8 @@ import { STORE_DIRS, STORE_ROOT } from "./storage";
 import { DISCARD_DIR, slugify } from "./import";
 import { formatBytes, mediaHref, seedFrom } from "./store";
 import { withBasePath } from "./base-path";
-import { fetchImageBytes, saveImage } from "./sources/net";
+import { downloadFile, fetchImageBytes, saveImage } from "./sources/net";
+import type { GithubMod } from "./sources/github-mod";
 import { sniffExtension } from "./edit";
 import {
   nexusModUrl,
@@ -169,6 +170,15 @@ export type StoreMod = {
     downloads: number;
     updatedAt: string;
   };
+  /** A mod that is only on GitHub: the repository, as the page shows it. */
+  github?: {
+    url: string;
+    owner: string;
+    repo: string;
+    stars: number;
+    downloads: number;
+    updatedAt: string;
+  };
   requirements: ModRequirement[];
   /** The description's `[img]` addresses, each to its copy in this library. */
   images: Record<string, string>;
@@ -203,6 +213,7 @@ type ModJson = {
   category?: string;
   adult?: boolean;
   nexus?: StoreMod["nexus"];
+  github?: StoreMod["github"];
   requirements?: NexusRequirement[];
   /** `[img]` address → path under mod-images/. */
   images?: Record<string, string>;
@@ -392,6 +403,7 @@ async function readMod(game: string, slug: string): Promise<StoreMod | null> {
     picture: await imageHref(`${game}/${slug}`),
     seed: seedFrom(`${game}/${slug}`),
     nexus: meta.nexus,
+    github: meta.github,
     requirements: (Array.isArray(meta.requirements) ? meta.requirements : []).map((r) => ({
       key: requirementKey(r),
       kind: r.kind,
@@ -728,6 +740,96 @@ function nexusWords(mod: NexusMod): ModJson {
   };
 }
 
+/** A GitHub mod's words. No category: GitHub has none, it is picked at add. */
+function githubWords(mod: GithubMod): ModJson {
+  return {
+    name: mod.name,
+    summary: mod.summary,
+    description: mod.description,
+    author: mod.author,
+    version: mod.version,
+    github: {
+      url: mod.url,
+      owner: mod.ref.owner,
+      repo: mod.ref.repo,
+      stars: mod.stars,
+      downloads: mod.downloads,
+      updatedAt: mod.updatedAt,
+    },
+  };
+}
+
+/** Where a GitHub mod already sits in the library, if it does. */
+async function githubModHere(mod: GithubMod): Promise<{ game: string; mod: string } | null> {
+  const key = `${mod.ref.owner}/${mod.ref.repo}`.toLowerCase();
+  for (const game of await dirs(MODS_DIR)) {
+    for (const slug of await dirs(path.join(MODS_DIR, game))) {
+      const meta = await readJson<ModJson>(path.join(MODS_DIR, game, slug, "mod.json"));
+      if (meta?.github && `${meta.github.owner}/${meta.github.repo}`.toLowerCase() === key) {
+        return { game, mod: slug };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * The newest release's archives onto the mod, each labelled with the release
+ * and linked to it. A file already here under the same name is left alone —
+ * GitHub names its assets per version, so a new release is a new file.
+ */
+async function fetchReleaseFiles(game: string, slug: string, mod: GithubMod): Promise<string[]> {
+  const release = mod.release;
+  if (!release) return [];
+  const dir = path.join(MODS_DIR, game, slug, "files");
+  const added: string[] = [];
+  for (const asset of release.assets) {
+    const format = MOD_FORMATS[path.extname(asset.name).toLowerCase()];
+    if (!isFileName(asset.name) || !format) continue;
+    const dest = path.join(dir, asset.name);
+    if (await exists(dest)) continue;
+    const tmp = `${dest}.${randomBytes(4).toString("hex")}.part`;
+    try {
+      await downloadFile(asset.url, tmp, { tag: "github", maxBytes: MAX_UPLOAD_BYTES });
+      // Opened by what its name says it is, so it has to be that.
+      if (format.magic && !format.magic.includes((await head(tmp)).toString("hex"))) {
+        throw new Error(`${asset.name} is not what its name says`);
+      }
+      await fs.rename(tmp, dest);
+    } catch (err) {
+      await fs.unlink(tmp).catch(() => undefined);
+      console.error(`[github] ${asset.url}:`, err instanceof Error ? err.message : err);
+      continue;
+    }
+    const stem = fileStem(asset.name);
+    const tag = release.tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const name =
+      release.assets.length === 1
+        ? mod.name
+        : stem.replace(new RegExp(`[ ._-]v?${tag}$`, "i"), "") || stem;
+    await updateJson<ModJson>(path.join(MODS_DIR, game, slug, "mod.json"), (meta) => ({
+      ...meta,
+      files: {
+        ...meta.files,
+        [asset.name]: fileJson({
+          name,
+          version: mod.version,
+          section: "main",
+          nexus: "",
+          source: release.url,
+        }),
+      },
+    }));
+    added.push(asset.name);
+  }
+  return added;
+}
+
+/** A category typed by hand: trimmed and capped; empty for none. */
+function categoryLabel(value: unknown): string {
+  return typeof value === "string" ? value.trim().slice(0, 60) : "";
+}
+
 /** Where a Nexus mod already sits in the library, if it does. */
 async function nexusModHere(mod: NexusMod): Promise<{ game: string; mod: string } | null> {
   for (const game of await dirs(MODS_DIR)) {
@@ -752,8 +854,35 @@ export class ModAlreadyHere extends UploadError {
  * the slug of one already here.
  */
 export async function addMod(
-  input: { nexus: NexusMod } | { game: unknown; name: unknown }
+  input:
+    | { nexus: NexusMod }
+    | { github: GithubMod; game: unknown; category?: unknown }
+    | { game: unknown; name: unknown }
 ): Promise<{ game: string; mod: string }> {
+  if ("github" in input) {
+    const here = await githubModHere(input.github);
+    if (here) throw new ModAlreadyHere(here);
+    const game = typeof input.game === "string" ? input.game : "";
+    if (!isSlug(game) || !(await exists(path.join(MODS_DIR, game, "game.json")))) {
+      throw new ModError("Pick a game first");
+    }
+    const slug = await uniqueDir(path.join(MODS_DIR, game), input.github.name, "mod");
+    const category = categoryLabel(input.category);
+    await updateJson<ModJson>(path.join(MODS_DIR, game, slug, "mod.json"), () => ({
+      ...githubWords(input.github),
+      ...(category ? { category } : {}),
+      files: {},
+      added: new Date().toISOString(),
+    }));
+    if (input.github.pictureUrl) await replaceImage(input.github.pictureUrl, `${game}/${slug}`);
+    const images = await localizeDescriptionImages(game, slug, input.github.description);
+    await updateJson<ModJson>(path.join(MODS_DIR, game, slug, "mod.json"), (meta) => ({
+      ...meta,
+      images,
+    }));
+    await fetchReleaseFiles(game, slug, input.github);
+    return { game, mod: slug };
+  }
   if ("nexus" in input) {
     const here = await nexusModHere(input.nexus);
     if (here) throw new ModAlreadyHere(here);
@@ -795,6 +924,24 @@ async function modDir(game: string, slug: string): Promise<string> {
   const dir = path.join(MODS_DIR, game, slug);
   if (!(await exists(path.join(dir, "mod.json")))) throw new ModError("No such mod", 404);
   return dir;
+}
+
+/** GitHub's current words over the old ones, and the newest release's files. */
+export async function refreshGithubMod(game: string, slug: string, mod: GithubMod): Promise<string[]> {
+  const dir = await modDir(game, slug);
+  const current = await readJson<ModJson>(path.join(dir, "mod.json"));
+  const key = `${mod.ref.owner}/${mod.ref.repo}`.toLowerCase();
+  if (!current?.github || `${current.github.owner}/${current.github.repo}`.toLowerCase() !== key) {
+    throw new ModError("That listing is not this GitHub repository");
+  }
+  const images = await localizeDescriptionImages(game, slug, mod.description);
+  await updateJson<ModJson>(path.join(dir, "mod.json"), (meta) => ({
+    ...meta,
+    ...githubWords(mod),
+    images,
+  }));
+  if (mod.pictureUrl) await replaceImage(mod.pictureUrl, `${game}/${slug}`);
+  return fetchReleaseFiles(game, slug, mod);
 }
 
 /** Nexus's current words over the old ones; the file labels are kept. */

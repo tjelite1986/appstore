@@ -136,7 +136,10 @@ export default async function GameModsPage({
       )}
 
       {viewer?.role === "admin" && (
-        <AddMod games={[{ slug: game.slug, name: game.name }]} />
+        <AddMod
+          games={[{ slug: game.slug, name: game.name }]}
+          categories={groups.map(([category]) => category).filter((c) => c !== UNCATEGORISED)}
+        />
       )}
     </Screen>
   );

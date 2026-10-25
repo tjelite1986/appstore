@@ -85,7 +85,7 @@ type ApiRepo = {
   owner?: { login?: unknown; avatar_url?: unknown };
 };
 
-async function api(
+export async function api(
   pathname: string,
   opts: { missingIsNull?: boolean } = {}
 ): Promise<unknown> {

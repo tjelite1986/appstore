@@ -1,5 +1,5 @@
 /**
- * POST   /api/mods/<game>/<mod>   { refresh: true }   Nexus's current words over the old
+ * POST   /api/mods/<game>/<mod>   { refresh: true }   Nexus's (or GitHub's) current words over the old
  * POST   /api/mods/<game>/<mod>   { nexusUrl }        point the listing at another Nexus mod
  * POST   /api/mods/<game>/<mod>   { requirement, to } link a requirement to a mod of the game ("" unlinks)
  * DELETE /api/mods/<game>/<mod>                       move the mod to _discarded
@@ -10,10 +10,12 @@ import {
   linkRequirement,
   ModAlreadyHere,
   ModError,
+  refreshGithubMod,
   refreshMod,
   relinkMod,
   removeMod,
 } from "@/lib/mods";
+import { lookupGithubMod } from "@/lib/sources/github-mod";
 import { lookupNexusMod, parseNexusUrl } from "@/lib/sources/nexus";
 
 export const runtime = "nodejs";
@@ -71,6 +73,15 @@ export async function POST(req: Request, { params }: Params): Promise<Response> 
   try {
     const current = await findMod(game, mod, true);
     if (!current) return Response.json({ error: "No such mod" }, { status: 404 });
+    if (current.github) {
+      let github;
+      try {
+        github = await lookupGithubMod({ owner: current.github.owner, repo: current.github.repo });
+      } catch (err) {
+        return Response.json({ error: (err as Error).message }, { status: 502 });
+      }
+      return Response.json({ ok: true, added: await refreshGithubMod(game, mod, github) });
+    }
     if (!current.nexus) {
       return Response.json({ error: "This mod was not added from Nexus Mods" }, { status: 400 });
     }
