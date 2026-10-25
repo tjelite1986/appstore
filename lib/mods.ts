@@ -211,6 +211,8 @@ type ModJson = {
   author?: string;
   version?: string;
   category?: string;
+  /** The category was set on the page; a Nexus refresh leaves it alone. */
+  categoryByHand?: boolean;
   adult?: boolean;
   nexus?: StoreMod["nexus"];
   github?: StoreMod["github"];
@@ -830,6 +832,31 @@ function categoryLabel(value: unknown): string {
   return typeof value === "string" ? value.trim().slice(0, 60) : "";
 }
 
+/** Nexus's words over a listing's, keeping a category set by hand. */
+function withNexusWords(meta: ModJson, mod: NexusMod): ModJson {
+  return {
+    ...meta,
+    ...nexusWords(mod),
+    ...(meta.categoryByHand ? { category: meta.category } : {}),
+  };
+}
+
+/**
+ * File a mod under a category by hand. It sticks through a refresh; empty
+ * clears it, and a Nexus mod then gets Nexus's back on the next one.
+ */
+export async function setModCategory(game: string, slug: string, value: unknown): Promise<void> {
+  if (typeof value !== "string") throw new ModError("Expected a category");
+  const dir = await modDir(game, slug);
+  const category = categoryLabel(value);
+  await updateJson<ModJson>(path.join(dir, "mod.json"), (meta) => {
+    const next = { ...meta };
+    delete next.category;
+    delete next.categoryByHand;
+    return category ? { ...next, category, categoryByHand: true } : next;
+  });
+}
+
 /** Where a Nexus mod already sits in the library, if it does. */
 async function nexusModHere(mod: NexusMod): Promise<{ game: string; mod: string } | null> {
   for (const game of await dirs(MODS_DIR)) {
@@ -953,8 +980,7 @@ export async function refreshMod(game: string, slug: string, mod: NexusMod): Pro
   }
   const images = await localizeDescriptionImages(game, slug, mod.description);
   await updateJson<ModJson>(path.join(dir, "mod.json"), (meta) => ({
-    ...meta,
-    ...nexusWords(mod),
+    ...withNexusWords(meta, mod),
     images,
   }));
   if (mod.pictureUrl) await replaceImage(mod.pictureUrl, `${game}/${slug}`);
@@ -992,8 +1018,7 @@ export async function relinkMod(
 
   const images = await localizeDescriptionImages(game, to, mod.description);
   await updateJson<ModJson>(path.join(MODS_DIR, game, to, "mod.json"), (meta) => ({
-    ...meta,
-    ...nexusWords(mod),
+    ...withNexusWords(meta, mod),
     images,
   }));
   if (mod.pictureUrl) {

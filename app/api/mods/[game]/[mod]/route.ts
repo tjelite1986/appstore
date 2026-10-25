@@ -2,6 +2,7 @@
  * POST   /api/mods/<game>/<mod>   { refresh: true }   Nexus's (or GitHub's) current words over the old
  * POST   /api/mods/<game>/<mod>   { nexusUrl }        point the listing at another Nexus mod
  * POST   /api/mods/<game>/<mod>   { requirement, to } link a requirement to a mod of the game ("" unlinks)
+ * POST   /api/mods/<game>/<mod>   { category }        file the mod by hand ("" clears)
  * DELETE /api/mods/<game>/<mod>                       move the mod to _discarded
  */
 import { requireAdmin } from "@/lib/admin";
@@ -14,6 +15,7 @@ import {
   refreshMod,
   relinkMod,
   removeMod,
+  setModCategory,
 } from "@/lib/mods";
 import { lookupGithubMod } from "@/lib/sources/github-mod";
 import { lookupNexusMod, parseNexusUrl } from "@/lib/sources/nexus";
@@ -42,6 +44,14 @@ export async function POST(req: Request, { params }: Params): Promise<Response> 
   if (body && typeof body === "object" && "requirement" in body) {
     try {
       await linkRequirement(game, body.requirement, body.to);
+      return Response.json({ ok: true });
+    } catch (err) {
+      return failed(err);
+    }
+  }
+  if (body && typeof body === "object" && "category" in body) {
+    try {
+      await setModCategory(game, mod, body.category);
       return Response.json({ ok: true });
     } catch (err) {
       return failed(err);

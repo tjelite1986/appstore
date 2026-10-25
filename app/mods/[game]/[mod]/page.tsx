@@ -181,11 +181,11 @@ export default async function ModPage({ params }: Params) {
   if (!game || !mod) notFound();
   const admin = viewer?.role === "admin";
   // What a requirement can be linked to: the game's other mods.
-  const linkable = admin
-    ? (await gameMods(game.slug, adults))
-        .filter((m) => m.slug !== mod.slug)
-        .map((m) => ({ slug: m.slug, name: m.name }))
-    : [];
+  const others = admin ? await gameMods(game.slug, adults) : [];
+  const linkable = others
+    .filter((m) => m.slug !== mod.slug)
+    .map((m) => ({ slug: m.slug, name: m.name }));
+  const categories = [...new Set(others.map((m) => m.category).filter(Boolean))].sort();
 
   return (
     <Screen flush>
@@ -286,6 +286,8 @@ export default async function ModPage({ params }: Params) {
             found: !r.linked && Boolean(r.here),
           }))}
           linkable={linkable}
+          category={mod.category}
+          categories={categories}
         />
       )}
 

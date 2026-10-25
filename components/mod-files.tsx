@@ -164,6 +164,8 @@ export default function ModFiles({
   accept,
   requirements,
   linkable,
+  category,
+  categories,
 }: {
   game: string;
   mod: string;
@@ -187,6 +189,9 @@ export default function ModFiles({
   requirements: { key: string; name: string; linkedTo: string; found: boolean }[];
   /** The game's other mods, which a requirement can be linked to. */
   linkable: { slug: string; name: string }[];
+  category: string;
+  /** The categories this game's mods are filed under, offered while typing. */
+  categories: string[];
 }) {
   const [open, setOpen] = useState(false);
   const [token, setToken] = useState("");
@@ -209,11 +214,13 @@ export default function ModFiles({
   const [done, setDone] = useState<string | null>(null);
   const [switchUrl, setSwitchUrl] = useState("");
   const [switchTo, setSwitchTo] = useState<NexusMod | null>(null);
+  const [newCategory, setNewCategory] = useState(category);
   const stop = useRef(false);
   const router = useRouter();
 
   useEffect(() => setToken(readAdminToken()), []);
   useEffect(() => setLabel(version), [version]);
+  useEffect(() => setNewCategory(category), [category]);
 
   const base = `/api/mods/${game}/${mod}`;
   const path = `${base}/files`;
@@ -346,6 +353,17 @@ export default function ModFiles({
       await adminCall(
         base,
         { method: "POST", body: JSON.stringify({ requirement: key, to }) },
+        token,
+        opts
+      );
+      router.refresh();
+    });
+
+  const saveCategory = () =>
+    void act(async () => {
+      await adminCall(
+        base,
+        { method: "POST", body: JSON.stringify({ category: newCategory }) },
         token,
         opts
       );
@@ -597,6 +615,37 @@ export default function ModFiles({
               Pause
             </button>
           )}
+        </div>
+
+        <div className="space-y-2 border-t border-[color:var(--border)] pt-3">
+          <p className={NOTE}>
+            Category. One set here stays through a refresh; empty files the mod
+            under Other{fromNexus ? " until the next refresh brings Nexus's back" : ""}.
+          </p>
+          <div className="flex gap-2">
+            <input
+              value={newCategory}
+              onChange={(e) => setNewCategory(e.target.value)}
+              list="mod-file-categories"
+              placeholder="Other"
+              maxLength={60}
+              disabled={busy}
+              aria-label="Category"
+              className={cn(INPUT, "min-w-0 flex-1")}
+            />
+            <datalist id="mod-file-categories">
+              {categories.map((c) => (
+                <option key={c} value={c} />
+              ))}
+            </datalist>
+            <button
+              onClick={saveCategory}
+              disabled={busy || newCategory.trim() === category}
+              className={cn(buttonClass("secondary", "sm"), "disabled:opacity-50")}
+            >
+              <Check size={14} /> Save
+            </button>
+          </div>
         </div>
 
         {requirements.length > 0 && (
