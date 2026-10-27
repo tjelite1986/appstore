@@ -36,6 +36,8 @@ export const EDITABLE_FIELDS = [
   "iconFit",
   "family",
   "requires",
+  "modSource",
+  "modder",
 ] as const;
 
 export type EditableField = (typeof EDITABLE_FIELDS)[number];
@@ -64,6 +66,8 @@ const MAX_LENGTHS: Record<EditableField, number> = {
   // case — one companion, every YouTube mod on the shelf — without becoming a
   // place to paste prose.
   requires: 400,
+  modSource: 500,
+  modder: 120,
 };
 
 /**
@@ -83,6 +87,8 @@ export const TEXT_FIELDS = [
   "description",
   "family",
   "requires",
+  "modSource",
+  "modder",
 ] as const;
 
 export type TextField = (typeof TEXT_FIELDS)[number];
@@ -219,6 +225,15 @@ export async function editApp(slug: string, patch: unknown): Promise<void> {
         hosts.push(host.slug);
       }
       write.requires = hosts.length > 0 ? hosts : undefined;
+      continue;
+    }
+    // The page a modified build was taken from. Kept as an address because
+    // it is followed — by a person looking for the next build signed with the
+    // same key, and by the source check asking that page for its version.
+    if (field === "modSource" && trimmed) {
+      const url = normaliseModSource(trimmed);
+      if (!url) throw new EditError(`${trimmed} is not an http(s) address`);
+      write.modSource = url;
       continue;
     }
     if (field === "category" && trimmed) {
@@ -416,4 +431,13 @@ export async function removeImage(
   for (const target of targets) await fs.rm(target).catch(() => {});
   invalidateCatalog();
   return targets.length;
+}
+
+function normaliseModSource(input: string): string | null {
+  try {
+    const url = new URL(input);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
 }

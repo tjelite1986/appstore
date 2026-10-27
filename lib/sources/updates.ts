@@ -24,6 +24,7 @@ import { RefusedRelease, alreadyHeld, installFromUrl } from "@/lib/sources/insta
 import { checkGitHub, isLinked, relinkGitHub } from "@/lib/sources/github";
 import { apkUrl, buildToInstall, checkFdroid } from "@/lib/sources/fdroid";
 import { PlayNoListing, fetchPlayListing } from "@/lib/sources/play";
+import { isCheckableModSource, modSiteName, modSourceVersion } from "@/lib/sources/mod-sites";
 
 export type SourceStatus =
   | "current"
@@ -180,6 +181,7 @@ export function sourcedApps(apps: StoreApp[]): StoreApp[] {
     (a) =>
       a.source?.kind === "github" ||
       a.source?.kind === "fdroid" ||
+      isCheckableModSource(a.modSource) ||
       (a.source?.kind === "play" && !a.source.untracked)
   );
 }
@@ -304,6 +306,13 @@ async function checkOne(app: StoreApp, install: boolean): Promise<SourceCheck> {
       status: "installed",
       detail: `${installed.version}${installed.promoted ? "" : " (older than what is served)"}`,
     };
+  }
+
+  // A mod is compared with the page it came from, not with Play: Play's
+  // number belongs to the original, and the next build with this signer can
+  // only come from where this one did.
+  if (isCheckableModSource(app.modSource)) {
+    return checkMod(app, app.modSource, base);
   }
 
   if (app.source?.kind === "play") {
@@ -438,6 +447,37 @@ async function checkPlay(
 }
 
 /** The `id` a Play listing address carries, for a shelf that has no package name yet. */
+async function checkMod(
+  app: StoreApp,
+  url: string,
+  base: { slug: string; name: string; held: string | null }
+): Promise<SourceCheck> {
+  const kind = modSiteName(url);
+  const upstream = await modSourceVersion(url);
+  if (!upstream) {
+    return {
+      ...base,
+      kind,
+      upstream: null,
+      status: "unavailable",
+      detail: "the mod page names no version",
+    };
+  }
+  if (!base.held) {
+    return { ...base, kind, upstream, status: "behind", detail: "no build in the library yet" };
+  }
+  if (alreadyHeld(app.versions, upstream) || compareVersions(base.held, upstream) <= 0) {
+    return { ...base, kind, upstream, status: "current" };
+  }
+  return {
+    ...base,
+    kind,
+    upstream,
+    status: "behind",
+    detail: `${kind} offers a newer build than the library holds; fetch it from the mod page`,
+  };
+}
+
 function playPackageId(url: string | undefined): string | null {
   if (!url) return null;
   try {

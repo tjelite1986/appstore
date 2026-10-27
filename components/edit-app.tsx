@@ -60,6 +60,9 @@ export type EditText = {
   family: string;
   /** Host slugs, comma-joined — the file may hold a list, a form holds text. */
   requires: string;
+  /** The page the modified build was taken from. */
+  modSource: string;
+  modder: string;
 };
 
 const TEXT_FIELDS = [
@@ -70,6 +73,8 @@ const TEXT_FIELDS = [
   "description",
   "family",
   "requires",
+  "modSource",
+  "modder",
 ] as const;
 
 export type EditableApp = {
@@ -410,6 +415,24 @@ export default function EditApp({ app }: { app: EditableApp }) {
           placeholder="One line, under the name"
           onChange={(v) => setForm((f) => ({ ...f, tagline: v }))}
         />
+
+        {/* Where the build came from, so the next one signed with the same
+            key can be found. apkmb and modyolo pages are also checked for a
+            newer version. */}
+        <div className="grid gap-2 sm:grid-cols-[1fr_12rem]">
+          <Text
+            label="Mod page"
+            value={form.modSource}
+            placeholder="https://apkmb.com/…"
+            onChange={(v) => setForm((f) => ({ ...f, modSource: v }))}
+          />
+          <Text
+            label="Modder"
+            value={form.modder}
+            placeholder="Who modified it"
+            onChange={(v) => setForm((f) => ({ ...f, modder: v }))}
+          />
+        </div>
 
         <label className="block">
           <span className={cn("mb-1 block text-[11px]", MUTED)}>

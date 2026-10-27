@@ -26,6 +26,7 @@ import { storedText } from "@/lib/edit";
 import { abiShortLabel } from "@/lib/apk-abi";
 import { appFor, catalogFor } from "@/lib/user-state";
 import {
+  compareVersions,
   companionsOf,
   familyMembers,
   hostsOf,
@@ -37,6 +38,8 @@ import { requestOrigin } from "@/lib/origin";
 import { currentUser } from "@/lib/current-user";
 import { stateFor } from "@/lib/user-state";
 import { feedbackFor } from "@/lib/file-feedback";
+import { lastSourceReport } from "@/lib/sources/updates";
+import { modSiteName } from "@/lib/sources/mod-sites";
 
 export const dynamic = "force-dynamic";
 
@@ -232,6 +235,48 @@ export default async function AppDetailPage({
 
   const mine = stateFor(userId, app.slug);
 
+  // A newer build upstream that the library does not hold, off the last
+  // source check. Re-tested against the versions on disk because the report
+  // is only as fresh as the timer: a build imported since then answers it.
+  const lastCheck = (await lastSourceReport())?.apps.find(
+    (c) =>
+      c.slug === app.slug &&
+      (c.status === "behind" || c.status === "available") &&
+      c.upstream
+  );
+  const newer =
+    lastCheck?.upstream &&
+    !app.versions.some((v) => v.version === lastCheck.upstream) &&
+    (!latest || compareVersions(latest.version, lastCheck.upstream) > 0)
+      ? {
+          version: lastCheck.upstream,
+          site: lastCheck.kind === "play" ? "Google Play" : lastCheck.kind,
+          url:
+            lastCheck.kind === "play" || !app.modSource
+              ? app.source?.url
+              : app.modSource,
+        }
+      : null;
+
+  // Mods cluster by signer: one repacker signs dozens of apps with one key.
+  // Where the others came from is the best guess at where the next build of
+  // this one signed with the same key will be found. Admins only — it is a
+  // working note, and it names listings by their signer.
+  const sameSigner =
+    viewer?.role === "admin" && app.signingCert
+      ? visible.filter(
+          (a) => a.slug !== app.slug && a.signingCert === app.signingCert
+        )
+      : [];
+  const signerSources = [
+    ...sameSigner
+      .filter((a) => a.modSource)
+      .reduce((m, a) => {
+        const name = modSiteName(a.modSource!);
+        return m.set(name, (m.get(name) ?? 0) + 1);
+      }, new Map<string, number>()),
+  ];
+
   // Whether each build worked, and what people wrote about it — one entry per
   // version the page draws. A linked app has no file here but does have a
   // version someone installed, so it gets a card for that one.
@@ -323,6 +368,25 @@ export default async function AppDetailPage({
           externalUrl={linked?.assetUrl}
         />
       </div>
+
+      {newer && (
+        <p className="px-[var(--pad)] text-sm text-[color:var(--warn)]">
+          Version {newer.version} is out on{" "}
+          {newer.url ? (
+            <a
+              href={newer.url}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="underline"
+            >
+              {newer.site}
+            </a>
+          ) : (
+            newer.site
+          )}{" "}
+          — not in the library yet.
+        </p>
+      )}
 
       {/* A release published as separate per-ABI builds. The button above
           already installs the right one for a phone — this row is for the
@@ -541,6 +605,38 @@ export default async function AppDetailPage({
               {SOURCE_NAME[app.source.kind]}
             </a>
             {app.source.repo ? ` · ${app.source.repo}` : ""}
+          </p>
+        )}
+        {/* Where the modified build came from — `source` above is the
+            original app's upstream, which a mod is not built by. */}
+        {app.modSource && (
+          <p className={cn("mt-1 text-[11px]", MUTED)}>
+            Mod from{" "}
+            <a
+              href={app.modSource}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="underline"
+            >
+              {modSiteName(app.modSource)}
+            </a>
+            {app.modder ? ` · by ${app.modder}` : ""}
+          </p>
+        )}
+        {!app.modSource && app.modder && (
+          <p className={cn("mt-1 text-[11px]", MUTED)}>Mod by {app.modder}</p>
+        )}
+        {viewer?.role === "admin" && app.signingCert && (
+          <p className={cn("mt-1 break-all font-mono text-[11px]", MUTED)}>
+            Signer {app.signingCert.slice(0, 12)}
+            {sameSigner.length > 0
+              ? ` · same key as ${sameSigner.length} other listing${sameSigner.length === 1 ? "" : "s"}`
+              : " · no other listing uses this key"}
+            {signerSources.length > 0
+              ? ` · their mod pages: ${signerSources
+                  .map(([name, n]) => `${name} ×${n}`)
+                  .join(", ")}`
+              : ""}
           </p>
         )}
       </section>

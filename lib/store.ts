@@ -179,6 +179,17 @@ export type StoreApp = {
    * refused rather than served — see `lib/import.ts`.
    */
   signingCert?: string;
+  /**
+   * The page a modified build was taken from — apkmb, modyolo, a forum post.
+   *
+   * Not `source`: that is the original app's upstream, and a mod is numbered
+   * and signed by whoever modified it. This is where the next build signed
+   * with the same key is found, and what the source check asks for a newer
+   * version when it knows how to read the page (see `modSites`).
+   */
+  modSource?: string;
+  /** Who modified it, as the mod page names them. Free text. */
+  modder?: string;
   /** The newest version, and its size — what every list row shows. */
   version: string;
   size: string;
@@ -330,6 +341,9 @@ type MetaFile = {
   source?: AppSource;
   /** Written by the importer, not by hand. */
   signingCert?: string;
+  /** Set by hand or by an apkmb fill: where the modified build came from. */
+  modSource?: string;
+  modder?: string;
   rating?: number;
   ratingCount?: number;
   /** Overrides the date derived from the files. */
@@ -681,6 +695,14 @@ async function readFromDisk(): Promise<StoreApp[]> {
         repoHead: meta?.repoHead === true ? true : undefined,
         source,
         signingCert: meta?.signingCert,
+        modSource:
+          typeof meta?.modSource === "string" && meta.modSource.trim()
+            ? meta.modSource.trim()
+            : undefined,
+        modder:
+          typeof meta?.modder === "string" && meta.modder.trim()
+            ? meta.modder.trim()
+            : undefined,
         // A linked app holds no file, so the newest version and its size are
         // what the release carried when it was last checked. Falling back here
         // rather than in each caller keeps tiles, search and the detail page

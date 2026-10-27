@@ -454,7 +454,10 @@ export async function apkmbDownloadFiles(input: string): Promise<ApkmbDownloadFi
   for (const m of list[1].matchAll(/<a\b[^>]*\bhref=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
     let url: URL;
     try {
-      url = new URL(decodeEntities(m[1]), step);
+      // A file link carries no fragment, but a file name can carry a "#":
+      // "IPTV# (Lazy IPTV Deluxe) v3.16 Mod.apk". Read as a fragment it cut
+      // the path at "IPTV" and the download answered 404.
+      url = new URL(decodeEntities(m[1]).replace(/#/g, "%23"), step);
     } catch {
       continue;
     }
@@ -589,6 +592,10 @@ export async function fillFromApkmb(
   put("rating", listing.rating);
   put("ratingCount", listing.ratingCount);
   put("packageName", listing.packageId);
+  // The page this fill read is where the build is offered too, so it is also
+  // where the next one signed with the same key will be. A page set by hand
+  // outranks it, like every other field here.
+  put("modSource", listing.url);
 
   const wantIcon =
     listing.iconUrl && (opts.overwrite || !(await hasImage(STORE_DIRS.icons, slug)));
