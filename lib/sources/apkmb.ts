@@ -379,8 +379,13 @@ export async function fetchApkmbListing(input: string): Promise<ApkmbListing> {
     .slice(0, MAX_SCREENSHOTS);
 
   // "Get it on" points at Play for an app that has a listing there, and back
-  // at apkmb for one that does not. Only the first form carries an id.
-  const play = /play\.google\.com\/store\/apps\/details\?id=([a-zA-Z0-9._]+)/i.exec(html);
+  // at apkmb for one that does not. Only the first form carries an id. Read it
+  // from that cell alone: related-app widgets elsewhere on the page link to
+  // other apps' Play listings, and the first of those is not this app.
+  const getItOn = /<div class="da-s"><b>\s*Get it on\s*<\/b><br>([\s\S]*?)<\/div>/i.exec(html);
+  const play = getItOn
+    ? /play\.google\.com\/store\/apps\/details\?id=([a-zA-Z0-9._]+)/i.exec(getItOn[1])
+    : null;
 
   const dl = /<a[^>]+href="([^"]*\/download\/?)"/i.exec(html);
 
