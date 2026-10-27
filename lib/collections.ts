@@ -1,8 +1,10 @@
 /**
- * Writing the admin-defined collections.
+ * Writing the custom categories (stored as "collections").
  *
- * A collection is a named shelf on top of the category — see `CollectionDef`
- * in `lib/store.ts`, which also reads them. The definitions (name, slug,
+ * A custom category is a named shelf on top of the built-in category — see
+ * `CollectionDef` in `lib/store.ts`, which also reads them. The UI calls them
+ * categories; the file and the meta field kept the first name so nothing on
+ * disk had to move. The definitions (name, slug,
  * order) are one file in `_state/`; membership is a `collections` list on
  * each app's meta file, edited through `editApp` like any other field.
  *
@@ -19,6 +21,8 @@ import {
   type CollectionDef,
 } from "@/lib/store";
 import { readMetaRaw, slugify, writeMeta } from "@/lib/import";
+import { ALL_CATEGORIES, categoryLabel, categorySlug } from "@/lib/categories";
+import { CUSTOM_ICONS } from "@/components/category-icons";
 import { STORE_DIRS, STORE_ROOT } from "@/lib/storage";
 
 export class CollectionError extends Error {}
@@ -54,45 +58,82 @@ async function save(defs: CollectionDef[]): Promise<void> {
   invalidateCatalog();
 }
 
+// Both share `/category/<slug>`, so a custom name must not land on a
+// built-in one's address — "Tools", or "Health and Fitness".
+const BUILT_IN_SLUGS = new Set(ALL_CATEGORIES.map(categorySlug));
+const BUILT_IN_NAMES = new Set(
+  ALL_CATEGORIES.flatMap((c) => [c.toLowerCase(), categoryLabel(c).toLowerCase()])
+);
+
 function cleanName(raw: unknown): string {
   if (typeof raw !== "string" || !raw.trim()) {
-    throw new CollectionError("A collection needs a name");
+    throw new CollectionError("A category needs a name");
   }
   const name = raw.trim().replace(/\s+/g, " ");
   if (name.length > MAX_NAME) {
     throw new CollectionError(`The name is longer than ${MAX_NAME} characters`);
   }
+  if (
+    BUILT_IN_NAMES.has(name.toLowerCase()) ||
+    BUILT_IN_SLUGS.has(categorySlug(name)) ||
+    BUILT_IN_SLUGS.has(slugify(name))
+  ) {
+    throw new CollectionError(`${name} is already a built-in category`);
+  }
   return name;
+}
+
+function cleanIcon(raw: unknown): string | undefined {
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  if (typeof raw !== "string" || !CUSTOM_ICONS.includes(raw)) {
+    throw new CollectionError("Pick one of the offered icons");
+  }
+  return raw;
 }
 
 function find(defs: CollectionDef[], slug: unknown): number {
   const at = defs.findIndex((c) => c.slug === slug);
-  if (at < 0) throw new CollectionError("No such collection");
+  if (at < 0) throw new CollectionError("No such category");
   return at;
 }
 
 /** Add one at the end of the list. Its slug is fixed from the first name. */
-export function createCollection(rawName: unknown): Promise<CollectionDef> {
+export function createCollection(
+  rawName: unknown,
+  opts: { icon?: unknown; adults?: unknown } = {}
+): Promise<CollectionDef> {
   return serialised(async () => {
     const name = cleanName(rawName);
+    const icon = cleanIcon(opts.icon);
     const defs = await readCollectionDefs();
     if (defs.length >= MAX_COLLECTIONS) {
-      throw new CollectionError(`There are already ${MAX_COLLECTIONS} collections`);
+      throw new CollectionError(`There are already ${MAX_COLLECTIONS} categories`);
     }
     if (defs.some((c) => c.name.toLowerCase() === name.toLowerCase())) {
-      throw new CollectionError(`There is already a collection called ${name}`);
+      throw new CollectionError(`There is already a category called ${name}`);
     }
-    const base = slugify(name) || "collection";
+    const base = slugify(name) || "category";
     let slug = base;
-    for (let n = 2; defs.some((c) => c.slug === slug); n++) slug = `${base}-${n}`;
-    const def = { slug, name };
+    for (
+      let n = 2;
+      defs.some((c) => c.slug === slug) || BUILT_IN_SLUGS.has(slug);
+      n++
+    ) {
+      slug = `${base}-${n}`;
+    }
+    const def: CollectionDef = {
+      slug,
+      name,
+      ...(icon ? { icon } : {}),
+      ...(opts.adults === true ? { adults: true } : {}),
+    };
     await save([...defs, def]);
     return def;
   });
 }
 
 /**
- * Change what a collection is called. The slug stays: it is what every meta
+ * Change what a category is called. The slug stays: it is what every meta
  * file holds, and renaming should not mean rewriting the library.
  */
 export function renameCollection(slug: unknown, rawName: unknown): Promise<void> {
@@ -105,9 +146,40 @@ export function renameCollection(slug: unknown, rawName: unknown): Promise<void>
         (c, i) => i !== at && c.name.toLowerCase() === name.toLowerCase()
       )
     ) {
-      throw new CollectionError(`There is already a collection called ${name}`);
+      throw new CollectionError(`There is already a category called ${name}`);
     }
     defs[at] = { ...defs[at], name };
+    await save(defs);
+  });
+}
+
+/** Pick the icon its tile and chip draw; empty goes back to the default. */
+export function setCollectionIcon(slug: unknown, rawIcon: unknown): Promise<void> {
+  return serialised(async () => {
+    const icon = cleanIcon(rawIcon);
+    const defs = await readCollectionDefs();
+    const at = find(defs, slug);
+    const next = { ...defs[at] };
+    if (icon) next.icon = icon;
+    else delete next.icon;
+    defs[at] = next;
+    await save(defs);
+  });
+}
+
+/**
+ * Mark a category 18+ or not. That hides the category itself from a viewer
+ * with the gate shut — never its apps, whose own category decides that.
+ */
+export function setCollectionAdults(slug: unknown, on: unknown): Promise<void> {
+  return serialised(async () => {
+    if (typeof on !== "boolean") throw new CollectionError("on must be true or false");
+    const defs = await readCollectionDefs();
+    const at = find(defs, slug);
+    const next = { ...defs[at] };
+    if (on) next.adults = true;
+    else delete next.adults;
+    defs[at] = next;
     await save(defs);
   });
 }
@@ -128,7 +200,7 @@ export function moveCollection(slug: unknown, step: unknown): Promise<void> {
 }
 
 /**
- * Delete a collection and take it off every listing that was filed under it.
+ * Delete a category and take it off every listing that was filed under it.
  *
  * The definition goes first, so a crash halfway leaves only dangling slugs on
  * some meta files — which `resolveCollections` already ignores — rather than a

@@ -9,7 +9,7 @@ import IconShelf from "@/components/icon-shelf";
 import QuickLinks from "@/components/quick-links";
 import { heroSlides } from "@/components/hero-slides";
 import { currentUserId } from "@/lib/current-user";
-import { adultsAllowed, shelfFor } from "@/lib/user-state";
+import { adultsAllowed, shelfFor, showEmptyCategories } from "@/lib/user-state";
 import {
   categoriesOf,
   categoryLabel,
@@ -19,6 +19,7 @@ import {
 } from "@/lib/categories";
 import { byTopRated } from "@/lib/search";
 import { getCatalog } from "@/lib/store";
+import { bulkOptions } from "@/lib/bulk-options";
 
 /** Below this a category gets no shelf of its own; its chip still leads to it. */
 const MIN_SHELF = 3;
@@ -32,6 +33,7 @@ const MIN_SHELF = 3;
 export default async function KindBrowse({ kind }: { kind: CategoryKind }) {
   const userId = await currentUserId();
   const adults = adultsAllowed(userId);
+  const showEmpty = showEmptyCategories(userId);
   const apps = (await shelfFor(userId))
     .filter((a) => kindOf(a.category) === kind)
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -46,21 +48,41 @@ export default async function KindBrowse({ kind }: { kind: CategoryKind }) {
   const hero = heroSlides(newest, 8);
   const inHero = new Set(hero.map((h) => h.slug));
   const spotlight = top.filter((a) => a.banner && !inHero.has(a.slug)).slice(0, 6);
-  // A collection is a choice somebody made, so one app is enough for a shelf.
-  // Read off the same gated, kind-cut list as everything else here: filing an
-  // Adults app under a collection does not put it on anybody's shelf.
+  // A custom category is a choice somebody made, so one app is enough for a
+  // shelf, and it goes first. Read off the same gated, kind-cut list as
+  // everything else here: filing an Adults app under one does not put it on
+  // anybody's shelf, and an 18+ one is not drawn for a viewer with the gate
+  // shut.
   const { collections } = await getCatalog();
-  const collectionShelves = collections
-    .map((c) => ({ ...c, apps: top.filter((a) => a.collections.includes(c.slug)) }))
-    .filter((s) => s.apps.length > 0);
-  const shelves = categoriesOf(kind)
-    .map((c) => ({ category: c, apps: top.filter((a) => a.category === c) }))
-    .filter((s) => s.apps.length >= MIN_SHELF);
+  const shelves = [
+    ...collections
+      .filter((c) => adults || !c.adults)
+      .map((c) => ({
+        key: `c:${c.slug}`,
+        title: c.name,
+        href: `/category/${c.slug}`,
+        apps: top.filter((a) => a.collections.includes(c.slug)),
+      }))
+      .filter((s) => s.apps.length > 0),
+    ...categoriesOf(kind)
+      .map((c) => ({
+        key: c,
+        title: categoryLabel(c),
+        href: `/category/${categorySlug(c)}`,
+        apps: top.filter((a) => a.category === c),
+      }))
+      .filter((s) => s.apps.length >= MIN_SHELF),
+  ];
 
   return (
     <Screen>
       <HeroCarousel slides={hero} />
-      <CategoryChips apps={apps} adults={adults} collections={collections} />
+      <CategoryChips
+        apps={apps}
+        adults={adults}
+        collections={collections}
+        showEmpty={showEmpty}
+      />
       {apps.length === 0 ? (
         <AppGrid apps={[]} empty={`No ${noun}s yet.`} />
       ) : (
@@ -70,37 +92,22 @@ export default async function KindBrowse({ kind }: { kind: CategoryKind }) {
             <AppColumns title="Recently added" apps={newest.slice(0, 12)} />
           )}
           <FeatureCards title="Worth a look" apps={spotlight} />
-          {collectionShelves.map((s) => (
-            <IconShelf
-              key={`c:${s.slug}`}
-              title={s.name}
-              href={`/collection/${s.slug}`}
-              apps={s.apps}
-            />
-          ))}
           {/* Alternate the two shelf shapes so a dozen categories do not read
               as one long repeated strip. */}
           {shelves.map((s, i) =>
             i % 2 === 0 ? (
-              <IconShelf
-                key={s.category}
-                title={categoryLabel(s.category)}
-                href={`/category/${categorySlug(s.category)}`}
-                apps={s.apps}
-              />
+              <IconShelf key={s.key} title={s.title} href={s.href} apps={s.apps} />
             ) : (
-              <AppColumns
-                key={s.category}
-                title={categoryLabel(s.category)}
-                href={`/category/${categorySlug(s.category)}`}
-                apps={s.apps}
-              />
+              <AppColumns key={s.key} title={s.title} href={s.href} apps={s.apps} />
             )
           )}
           <QuickLinks
             title={kind === "game" ? "Game categories" : "Categories"}
             adults={adults}
             kind={kind}
+            apps={apps}
+            collections={collections}
+            showEmpty={showEmpty}
           />
           {/* Folded: the shelves above are the way in, and the whole list
               under them made the screen a wall on a phone. A <details> needs
@@ -121,7 +128,7 @@ export default async function KindBrowse({ kind }: { kind: CategoryKind }) {
               </span>
             </summary>
             <div className="mt-[var(--gap)]">
-              <AppGrid apps={apps} />
+              <AppGrid apps={apps} bulk={await bulkOptions()} />
             </div>
           </details>
         </>

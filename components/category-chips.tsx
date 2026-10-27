@@ -1,7 +1,12 @@
 import Link from "next/link";
-import { LibraryBig, Store } from "lucide-react";
-import { ICONS } from "@/components/quick-links";
-import { categoryTiles, type CollectionDef, type StoreApp } from "@/lib/store";
+import { Store } from "lucide-react";
+import { ICONS } from "@/components/category-icons";
+import {
+  categoryTiles,
+  customTiles,
+  type CollectionDef,
+  type StoreApp,
+} from "@/lib/store";
 import { categoryLabel, categorySlug } from "@/lib/categories";
 
 /**
@@ -21,21 +26,22 @@ export default async function CategoryChips({
   apps,
   adults = false,
   collections = [],
+  showEmpty = false,
 }: {
   /** What the screen lists — the counts and which chips appear follow it. */
   apps: StoreApp[];
   adults?: boolean;
-  /** Admin-made collections, drawn first; only those holding one of `apps`. */
+  /** Custom categories, drawn first; see `customTiles` for which appear. */
   collections?: CollectionDef[];
+  /** The viewer's choice to see custom categories that hold nothing. */
+  showEmpty?: boolean;
 }) {
   const counts = new Map<string, number>();
   for (const a of apps) counts.set(a.category, (counts.get(a.category) ?? 0) + 1);
   const tiles = (await categoryTiles({ adults, kind: "all" })).filter(
     (t) => (counts.get(t.label) ?? 0) > 0
   );
-  const filed = collections
-    .map((c) => ({ ...c, count: apps.filter((a) => a.collections.includes(c.slug)).length }))
-    .filter((c) => c.count > 0);
+  const filed = customTiles(collections, apps, { adults, showEmpty });
   if (tiles.length === 0 && filed.length === 0) return null;
 
   return (
@@ -43,13 +49,16 @@ export default async function CategoryChips({
       aria-label="Categories"
       className="no-scrollbar flex gap-2 overflow-x-auto px-[var(--pad)] pb-1"
     >
-      {filed.map((c) => (
-        <Link key={`c:${c.slug}`} href={`/collection/${c.slug}`} className={CHIP}>
-          <LibraryBig size={14} className="shrink-0" />
-          <span className="whitespace-nowrap">{c.name}</span>
-          <span className={COUNT}>{c.count}</span>
-        </Link>
-      ))}
+      {filed.map((c) => {
+        const Icon = ICONS[c.icon] ?? Store;
+        return (
+          <Link key={`c:${c.slug}`} href={`/category/${c.slug}`} className={CHIP}>
+            <Icon size={14} className="shrink-0" />
+            <span className="whitespace-nowrap">{c.name}</span>
+            <span className={COUNT}>{c.count}</span>
+          </Link>
+        );
+      })}
       {tiles.map(({ label, icon }) => {
         const Icon = ICONS[icon] ?? Store;
         return (

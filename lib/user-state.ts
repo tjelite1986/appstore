@@ -64,6 +64,29 @@ export function setAdultsAllowed(userId: number, on: boolean): void {
 }
 
 /**
+ * Whether this account wants custom categories shown even when they hold
+ * nothing it can see. Off by default and for a signed-out browser: a tile
+ * that opens an empty page reads as a bug to anybody who did not ask for it.
+ */
+export function showEmptyCategories(userId: number | null): boolean {
+  if (userId === null) return false;
+  const row = db()
+    .prepare("SELECT empty_categories FROM user_prefs WHERE user_id = ?")
+    .get(userId) as { empty_categories: number } | undefined;
+  return row?.empty_categories === 1;
+}
+
+export function setShowEmptyCategories(userId: number, on: boolean): void {
+  db()
+    .prepare(
+      `INSERT INTO user_prefs (user_id, empty_categories, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT (user_id) DO UPDATE SET empty_categories = excluded.empty_categories,
+                                           updated_at = excluded.updated_at`
+    )
+    .run(userId, on ? 1 : 0, new Date().toISOString());
+}
+
+/**
  * One app, seen as this person may see it.
  *
  * A gated app answers null — exactly what a slug that does not exist answers,

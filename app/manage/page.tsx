@@ -308,11 +308,11 @@ export default async function ManagePage() {
               <Panel
                 id="collections"
                 icon={LibraryBig}
-                title="Collections"
+                title="Your categories"
                 aside={
                   collections.length > 0 ? <Pill>{collections.length}</Pill> : null
                 }
-                description="Your own shelves on top of the categories. An app can be in several; file it from the edit form on its page. The category still decides App or Game and the 18+ gate — a collection never does."
+                description="Categories of your own, drawn like the built-in ones: a tile, a chip, a shelf and a page. An app can be in several; file it from the edit form on its page, or long-press apps in a list to file many at once. Marking one 18+ hides the category itself from viewers with the gate shut — the apps in it are still gated only by their built-in category."
                 flush
               >
                 <CollectionsPanel rows={collectionRows} />

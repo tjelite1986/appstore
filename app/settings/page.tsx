@@ -15,10 +15,16 @@ import { Screen, ScreenTitle } from "@/components/screen";
 import { MUTED, NOTE, Panel, Pill } from "@/components/primitives";
 import AccountCard from "@/components/account-card";
 import AdultsToggle from "@/components/adults-toggle";
+import EmptyCategoriesToggle from "@/components/empty-categories-toggle";
 import RepoUrl from "@/components/repo-url";
 import { STORE_HOST_ROOT } from "@/lib/storage";
 import { currentUser } from "@/lib/current-user";
-import { adultsAllowed, readState, updatableApps } from "@/lib/user-state";
+import {
+  adultsAllowed,
+  readState,
+  showEmptyCategories,
+  updatableApps,
+} from "@/lib/user-state";
 import { getCatalog, pendingImports, withoutAdults } from "@/lib/store";
 import { repoTokenFor } from "@/lib/repo-token";
 import { repoFingerprint, repoSignedAt } from "@/lib/fdroid-published";
@@ -74,6 +80,10 @@ export default async function SettingsPage() {
 
           <div className="flex min-w-0 flex-col gap-[var(--gap)]">
             <AdultsToggle on={adultsAllowed(user?.id ?? null)} signedIn={!!user} />
+            <EmptyCategoriesToggle
+              on={showEmptyCategories(user?.id ?? null)}
+              signedIn={!!user}
+            />
 
             {user?.role === "admin" && (
               <StorePanel

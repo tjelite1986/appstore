@@ -252,7 +252,7 @@ export async function editApp(slug: string, patch: unknown): Promise<void> {
         const want = part.trim();
         if (!want || picked.includes(want)) continue;
         if (!defs.some((c) => c.slug === want)) {
-          throw new EditError(`${want} is not one of the collections`);
+          throw new EditError(`${want} is not one of the custom categories`);
         }
         picked.push(want);
       }

@@ -315,7 +315,7 @@ function Plan({ plan }: { plan: MergePlan }) {
     lines.push({ text: `Fills empty fields: ${plan.fills.join(", ")}` });
   }
   if (plan.joins.length) {
-    lines.push({ text: `Joins collections: ${plan.joins.join(", ")}` });
+    lines.push({ text: `Joins categories: ${plan.joins.join(", ")}` });
   }
   if (plan.users.saved || plan.users.installed) {
     lines.push({

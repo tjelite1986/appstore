@@ -432,7 +432,7 @@ export default function EditApp({ app }: { app: EditableApp }) {
         {app.collections.length > 0 && (
           <div>
             <span className={cn("mb-1 block text-[11px]", MUTED)}>
-              Collections — as many as fit
+              More categories — as many as fit
             </span>
             <span className="flex flex-wrap gap-1.5">
               {app.collections.map((c) => {

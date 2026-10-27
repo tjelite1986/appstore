@@ -301,6 +301,14 @@ export type PlaceholderApp = Omit<
 export type CollectionDef = {
   slug: string;
   name: string;
+  /** A name from `CUSTOM_ICONS` in `components/category-icons.ts`. */
+  icon?: string;
+  /**
+   * 18+: the category itself — tile, chip, shelf, page — is hidden from a
+   * viewer who has not passed the gate. The apps in it are not: the built-in
+   * category stays the only gate an app has.
+   */
+  adults?: boolean;
 };
 
 export const COLLECTIONS_FILE = path.join(
@@ -806,12 +814,44 @@ export async function readCollectionDefs(): Promise<CollectionDef[]> {
   const out: CollectionDef[] = [];
   for (const item of parsed.collections) {
     if (!item || typeof item !== "object") continue;
-    const { slug, name } = item as Record<string, unknown>;
+    const { slug, name, icon, adults } = item as Record<string, unknown>;
     if (typeof slug !== "string" || typeof name !== "string") continue;
     if (!slug.trim() || out.some((c) => c.slug === slug)) continue;
-    out.push({ slug: slug.trim(), name: name.trim() || slug.trim() });
+    out.push({
+      slug: slug.trim(),
+      name: name.trim() || slug.trim(),
+      ...(typeof icon === "string" && icon ? { icon } : {}),
+      ...(adults === true ? { adults: true } : {}),
+    });
   }
   return out;
+}
+
+/** A custom category as a tile or chip draws it, with what it holds. */
+export type CustomTile = { slug: string; name: string; icon: string; count: number };
+
+/**
+ * The custom categories one viewer gets to see, counted over `apps` — the
+ * list the screen already shows, so a count agrees with the page it opens.
+ *
+ * An 18+ category is left out for a viewer with the gate shut; the apps in it
+ * are not, they still come and go by their own category. An empty category
+ * is left out unless `showEmpty`: a tile that opens nothing reads as a bug.
+ */
+export function customTiles(
+  defs: CollectionDef[],
+  apps: StoreApp[],
+  opts: { adults: boolean; showEmpty?: boolean }
+): CustomTile[] {
+  return defs
+    .filter((c) => opts.adults || !c.adults)
+    .map((c) => ({
+      slug: c.slug,
+      name: c.name,
+      icon: c.icon ?? "library",
+      count: apps.filter((a) => a.collections.includes(c.slug)).length,
+    }))
+    .filter((c) => opts.showEmpty || c.count > 0);
 }
 
 /**

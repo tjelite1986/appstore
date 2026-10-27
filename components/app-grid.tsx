@@ -4,24 +4,30 @@ import { cn } from "@/lib/utils";
 import { ICON, MUTED, SectionTitle, Thumb, metaLine } from "@/components/primitives";
 import type { StoreApp } from "@/lib/store";
 import { categoryLabel } from "@/lib/categories";
+import { BulkSelect, SelectableCard, type BulkOptions } from "@/components/bulk-category";
 
 /**
  * The catalog grid the browse screens are built from — Apps, Games, a category
  * and the search results all show the same tile, so an app looks the same
  * wherever it is found. Two per row on a phone, more as the screen allows.
+ *
+ * With `bulk` (an admin, see `lib/bulk-options.ts`), a long press on a card
+ * starts choosing apps to file under a category together.
  */
 export default function AppGrid({
   title,
   action,
   apps,
   empty = "Nothing here yet.",
+  bulk,
 }: {
   title?: string;
   action?: string;
   apps: StoreApp[];
   empty?: string;
+  bulk?: BulkOptions;
 }) {
-  return (
+  const grid = (
     <section className="px-[var(--pad)]">
       {title ? <SectionTitle title={title} action={action} /> : null}
       {apps.length === 0 ? (
@@ -29,10 +35,11 @@ export default function AppGrid({
       ) : (
         <div className="-mx-2 grid grid-cols-2 gap-x-2 gap-y-1 sm:grid-cols-3 lg:grid-cols-4">
           {apps.map((app) => (
-            <Link
+            <Card
               key={app.slug}
-              href={`/app/${app.slug}`}
-              className="flex min-w-0 items-center gap-3 rounded-[var(--radius)] p-2 transition hover:bg-[var(--card)]"
+              bulk={!!bulk}
+              slug={app.slug}
+              category={app.category}
             >
               <Thumb
                 seed={app.seed}
@@ -77,10 +84,38 @@ export default function AppGrid({
                   </span>
                 )}
               </span>
-            </Link>
+            </Card>
           ))}
         </div>
       )}
     </section>
+  );
+  return bulk && apps.length > 0 ? <BulkSelect options={bulk}>{grid}</BulkSelect> : grid;
+}
+
+const CARD_CLASS =
+  "flex min-w-0 items-center gap-3 rounded-[var(--radius)] p-2 transition hover:bg-[var(--card)]";
+
+/** A plain link, or one a long press can select when the grid allows it. */
+function Card({
+  bulk,
+  slug,
+  category,
+  children,
+}: {
+  bulk: boolean;
+  slug: string;
+  category: string;
+  children: React.ReactNode;
+}) {
+  const href = `/app/${slug}`;
+  return bulk ? (
+    <SelectableCard slug={slug} category={category} href={href} className={CARD_CLASS}>
+      {children}
+    </SelectableCard>
+  ) : (
+    <Link href={href} className={CARD_CLASS}>
+      {children}
+    </Link>
   );
 }

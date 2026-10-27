@@ -8,11 +8,11 @@ import QuickLinks from "@/components/quick-links";
 import { heroSlides } from "@/components/hero-slides";
 import { MUTED } from "@/components/primitives";
 import { cn } from "@/lib/utils";
-import { changelog, recentlyAdded } from "@/lib/store";
+import { changelog, getCatalog, recentlyAdded } from "@/lib/store";
 import { categorySlug, kindOf } from "@/lib/categories";
 import { byTopRated } from "@/lib/search";
 import { currentUserId } from "@/lib/current-user";
-import { adultsAllowed, shelfFor } from "@/lib/user-state";
+import { adultsAllowed, shelfFor, showEmptyCategories } from "@/lib/user-state";
 
 // The catalog is a directory on disk, not a build-time constant: an app
 // imported after the last deploy has to show up without one.
@@ -31,10 +31,11 @@ export default async function HomePage() {
   // Read once and passed down: every block and the category tiles have to
   // agree about what this person may see.
   const adults = adultsAllowed(userId);
-  const [apps, recent, entries] = await Promise.all([
+  const [apps, recent, entries, { collections }] = await Promise.all([
     shelfFor(userId),
     recentlyAdded(15, { adults }),
     changelog(3, { adults }),
+    getCatalog(),
   ]);
 
   const newest = [...apps]
@@ -83,7 +84,13 @@ export default async function HomePage() {
 
       {entries.length > 0 && <Changelog title="What's new" items={entries} />}
 
-      <QuickLinks title="Categories" adults={adults} />
+      <QuickLinks
+        title="Categories"
+        adults={adults}
+        apps={apps}
+        collections={collections}
+        showEmpty={showEmptyCategories(userId)}
+      />
     </Screen>
   );
 }

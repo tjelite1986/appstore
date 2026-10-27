@@ -1,17 +1,18 @@
 "use client";
 
 /**
- * Manage's list of collections: make one, rename it, move it up or down,
- * delete it.
+ * Manage's list of custom categories: make one, rename it, give it an icon,
+ * mark it 18+, move it up or down, delete it.
  *
  * Membership is not edited here — that is a decision about one app, made on
  * its page while looking at it. This panel only shapes the list of shelves.
- * Deleting asks once inline, because it also takes the collection off every
+ * Deleting asks once inline, because it also takes the category off every
  * listing filed under it.
  */
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUp, Check, Pencil, Plus, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, Pencil, Plus, Store, Trash2, X } from "lucide-react";
+import { CUSTOM_ICONS, DEFAULT_CUSTOM_ICON, ICONS } from "@/components/category-icons";
 import { adminCall } from "@/lib/admin-call";
 import { readAdminToken } from "@/lib/admin-token";
 import { buttonClass, MUTED } from "@/components/primitives";
@@ -22,11 +23,19 @@ const INPUT_CLS =
 
 const ICON_BTN = cn("rounded-full p-1.5 disabled:opacity-30", MUTED);
 
-export type CollectionRow = { slug: string; name: string; count: number };
+export type CollectionRow = {
+  slug: string;
+  name: string;
+  icon?: string;
+  adults?: boolean;
+  count: number;
+};
 
 export default function CollectionsPanel({ rows }: { rows: CollectionRow[] }) {
   const [token, setToken] = useState("");
   const [name, setName] = useState("");
+  const [adults, setAdults] = useState(false);
+  const [picking, setPicking] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ slug: string; name: string } | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -58,7 +67,10 @@ export default function CollectionsPanel({ rows }: { rows: CollectionRow[] }) {
   async function create(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
-    if (await send({ action: "create", name })) setName("");
+    if (await send({ action: "create", name, adults })) {
+      setName("");
+      setAdults(false);
+    }
   }
 
   async function rename(e: React.FormEvent) {
@@ -82,7 +94,7 @@ export default function CollectionsPanel({ rows }: { rows: CollectionRow[] }) {
                     className={INPUT_CLS}
                     value={editing.name}
                     onChange={(e) => setEditing({ ...editing, name: e.target.value })}
-                    aria-label="Collection name"
+                    aria-label="Category name"
                   />
                   <button type="submit" disabled={busy} className={ICON_BTN} aria-label="Save name">
                     <Check size={15} />
@@ -122,9 +134,71 @@ export default function CollectionsPanel({ rows }: { rows: CollectionRow[] }) {
                     Keep
                   </button>
                 </div>
+              ) : picking === row.slug ? (
+                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+                  {CUSTOM_ICONS.map((key) => {
+                    const Icon = ICONS[key] ?? Store;
+                    const on = (row.icon ?? DEFAULT_CUSTOM_ICON) === key;
+                    return (
+                      <button
+                        key={key}
+                        disabled={busy}
+                        onClick={async () => {
+                          if (await send({ action: "icon", slug: row.slug, icon: key })) {
+                            setPicking(null);
+                          }
+                        }}
+                        aria-pressed={on}
+                        aria-label={`Use the ${key} icon`}
+                        className={cn(
+                          "rounded-full p-2",
+                          on ? "bg-[var(--accent)] text-white" : "bg-[var(--card-2)]"
+                        )}
+                      >
+                        <Icon size={16} />
+                      </button>
+                    );
+                  })}
+                  <button
+                    onClick={() => setPicking(null)}
+                    className={ICON_BTN}
+                    aria-label="Close the icons"
+                  >
+                    <X size={15} />
+                  </button>
+                </div>
               ) : (
                 <>
+                  <button
+                    disabled={busy}
+                    onClick={() => {
+                      setEditing(null);
+                      setConfirming(null);
+                      setPicking(row.slug);
+                    }}
+                    className="shrink-0 rounded-full bg-[var(--card-2)] p-2"
+                    aria-label={`Change the icon of ${row.name}`}
+                  >
+                    {(() => {
+                      const Icon = ICONS[row.icon ?? DEFAULT_CUSTOM_ICON] ?? Store;
+                      return <Icon size={16} />;
+                    })()}
+                  </button>
                   <span className="min-w-0 flex-1 truncate text-sm font-medium">{row.name}</span>
+                  <button
+                    disabled={busy}
+                    onClick={() => send({ action: "adults", slug: row.slug, on: !row.adults })}
+                    aria-pressed={!!row.adults}
+                    aria-label={`${row.adults ? "Unmark" : "Mark"} ${row.name} as 18+`}
+                    className={cn(
+                      "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold",
+                      row.adults
+                        ? "bg-[color:var(--danger)] text-white"
+                        : cn("bg-[var(--card-2)]", MUTED)
+                    )}
+                  >
+                    18+
+                  </button>
                   <span className={cn("shrink-0 text-xs tabular-nums", MUTED)}>
                     {row.count} {row.count === 1 ? "app" : "apps"}
                   </span>
@@ -148,6 +222,7 @@ export default function CollectionsPanel({ rows }: { rows: CollectionRow[] }) {
                     disabled={busy}
                     onClick={() => {
                       setConfirming(null);
+                      setPicking(null);
                       setEditing({ slug: row.slug, name: row.name });
                     }}
                     className={ICON_BTN}
@@ -159,6 +234,7 @@ export default function CollectionsPanel({ rows }: { rows: CollectionRow[] }) {
                     disabled={busy}
                     onClick={() => {
                       setEditing(null);
+                      setPicking(null);
                       setConfirming(row.slug);
                     }}
                     className={ICON_BTN}
@@ -173,15 +249,23 @@ export default function CollectionsPanel({ rows }: { rows: CollectionRow[] }) {
         </ul>
       )}
 
-      <form onSubmit={create} className="flex items-center gap-2 p-4">
+      <form onSubmit={create} className="flex flex-wrap items-center gap-2 p-4">
         <input
-          className={INPUT_CLS}
+          className={cn(INPUT_CLS, "min-w-0 flex-1 basis-48")}
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="New collection, like Favourites"
+          placeholder="New category, like Favourites"
           maxLength={60}
-          aria-label="New collection name"
+          aria-label="New category name"
         />
+        <label className="flex shrink-0 items-center gap-1.5 text-xs">
+          <input
+            type="checkbox"
+            checked={adults}
+            onChange={(e) => setAdults(e.target.checked)}
+          />
+          18+
+        </label>
         <button
           type="submit"
           disabled={busy || !name.trim()}

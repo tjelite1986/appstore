@@ -7,10 +7,10 @@
  * everywhere else.
  */
 import { sessionUser } from "@/lib/auth";
-import { catalogFor } from "@/lib/user-state";
+import { adultsAllowed, catalogFor } from "@/lib/user-state";
 import { searchApps, queryTerms, norm } from "@/lib/search";
 import { categoryLabel, categorySlug } from "@/lib/categories";
-import type { StoreApp } from "@/lib/store";
+import { customTiles, getCatalog, type StoreApp } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +36,8 @@ export type SearchResponse = {
 
 export async function GET(req: Request): Promise<Response> {
   const q = (new URL(req.url).searchParams.get("q") ?? "").slice(0, 100);
-  const apps = await catalogFor(sessionUser(req)?.id ?? null);
+  const userId = sessionUser(req)?.id ?? null;
+  const apps = await catalogFor(userId);
   const results = searchApps(apps, q);
 
   // A category is suggested when every word is in its name — "puz" offers
@@ -45,6 +46,13 @@ export async function GET(req: Request): Promise<Response> {
   const seen = new Set<string>();
   const categories: SearchResponse["categories"] = [];
   if (terms.length > 0) {
+    // Custom categories first, as they come first everywhere else.
+    const { collections } = await getCatalog();
+    for (const c of customTiles(collections, apps, { adults: adultsAllowed(userId) })) {
+      if (terms.every((t) => norm(c.name).includes(t))) {
+        categories.push({ label: c.name, slug: c.slug });
+      }
+    }
     for (const a of apps) {
       const label = categoryLabel(a.category);
       if (seen.has(label)) continue;

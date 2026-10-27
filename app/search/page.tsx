@@ -4,7 +4,14 @@ import CategoryChips from "@/components/category-chips";
 import IconShelf from "@/components/icon-shelf";
 import SearchBox from "@/components/search-box";
 import { currentUserId } from "@/lib/current-user";
-import { adultsAllowed, catalogFor, shelfFor } from "@/lib/user-state";
+import {
+  adultsAllowed,
+  catalogFor,
+  shelfFor,
+  showEmptyCategories,
+} from "@/lib/user-state";
+import { getCatalog } from "@/lib/store";
+import { bulkOptions } from "@/lib/bulk-options";
 import { byTopRated, searchApps } from "@/lib/search";
 
 export const dynamic = "force-dynamic";
@@ -39,6 +46,7 @@ export default async function SearchPage({
           title={`${results.length} ${results.length === 1 ? "result" : "results"} for "${query}"`}
           apps={results}
           empty="Nothing matched. Try fewer or shorter words."
+          bulk={await bulkOptions()}
         />
       ) : (
         <Browse userId={userId} />
@@ -49,10 +57,15 @@ export default async function SearchPage({
 
 /** Before anything is typed: the shelves to wander into instead. */
 async function Browse({ userId }: { userId: number | null }) {
-  const shelf = await shelfFor(userId);
+  const [shelf, { collections }] = await Promise.all([shelfFor(userId), getCatalog()]);
   return (
     <>
-      <CategoryChips apps={shelf} adults={adultsAllowed(userId)} />
+      <CategoryChips
+        apps={shelf}
+        adults={adultsAllowed(userId)}
+        collections={collections}
+        showEmpty={showEmptyCategories(userId)}
+      />
       <IconShelf title="Popular" apps={byTopRated(shelf).slice(0, 15)} />
     </>
   );

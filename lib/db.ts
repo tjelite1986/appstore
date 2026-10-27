@@ -205,4 +205,32 @@ function migrate(conn: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS file_comments_file ON file_comments(slug, version, id);
   `);
+
+  // Columns added after a table first shipped. `CREATE TABLE IF NOT EXISTS`
+  // never reaches a table that is already there, so each is added by hand;
+  // the app and its timers may race to it, and the loser's "duplicate column"
+  // is the answer it wanted.
+  addColumn(
+    conn,
+    "user_prefs",
+    "empty_categories",
+    // 1 shows a custom category that holds nothing this viewer can see, as a
+    // tile and a chip leading to an empty page. 0 leaves it out.
+    "INTEGER NOT NULL DEFAULT 0"
+  );
+}
+
+function addColumn(
+  conn: Database.Database,
+  table: string,
+  column: string,
+  decl: string
+): void {
+  const have = conn.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (have.some((c) => c.name === column)) return;
+  try {
+    conn.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${decl}`);
+  } catch (err) {
+    if (!/duplicate column/i.test(String(err))) throw err;
+  }
 }
