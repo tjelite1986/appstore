@@ -10,6 +10,7 @@ import {
   Layers,
   PackagePlus,
   Rss,
+  UserPen,
 } from "lucide-react";
 import { Screen, ScreenTitle } from "@/components/screen";
 import {
@@ -106,6 +107,14 @@ export default async function ManagePage() {
           })
         )
       );
+
+  // Listings that hold a build but name no modder. Release names usually
+  // carry the modder or the site at the end ("…_modded_by_X", "…-apkmb.com"),
+  // so the newest version's file names are shown whole for copying into the
+  // edit form.
+  const unattributed = placeholder
+    ? []
+    : apps.filter((a) => !a.modder && a.versions.length > 0);
 
   const files = apps.flatMap((a) => a.versions.flatMap((v) => v.files));
   const bytes = files.reduce((sum, f) => sum + f.bytes, 0);
@@ -398,6 +407,33 @@ export default async function ManagePage() {
                     </div>
                   </details>
                 )}
+              </Panel>
+            )}
+
+            {unattributed.length > 0 && (
+              <Panel
+                id="modders"
+                icon={UserPen}
+                title="No modder yet"
+                aside={<Pill>{unattributed.length}</Pill>}
+                description="Listings with a build but no modder. The newest file names are shown in full — the modder or the site it came from is usually the last part. Add it under Modder in the app's edit form."
+                flush
+              >
+                <details className="group">
+                  <summary
+                    className={cn(
+                      "flex cursor-pointer select-none items-center justify-between gap-2 px-4 py-2.5 text-xs font-medium",
+                      "text-[color:var(--muted-2)] hover:bg-[var(--card-2)] [&::-webkit-details-marker]:hidden"
+                    )}
+                  >
+                    <span>{plural(unattributed.length, "listing")} to attribute</span>
+                    <span className="group-open:hidden">Show</span>
+                    <span className="hidden group-open:inline">Hide</span>
+                  </summary>
+                  <div className="border-t border-[color:var(--border)]">
+                    <UnattributedRows apps={unattributed} />
+                  </div>
+                </details>
               </Panel>
             )}
 
@@ -721,6 +757,50 @@ function MisnamedRows({ rows }: { rows: Misnamed[] }) {
               {file}
             </code>
           </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Each listing's newest file names in full, beside a way into its edit form. */
+function UnattributedRows({ apps }: { apps: StoreApp[] }) {
+  return (
+    <ul className="divide-y divide-[color:var(--border)]">
+      {apps.map((app) => (
+        <li key={app.slug} className="flex items-center gap-3 px-4 py-2.5">
+          <Link href={`/app/${app.slug}`} className="shrink-0">
+            <Thumb
+              seed={app.seed}
+              src={app.icon}
+              background={app.iconBackground}
+              fit={app.iconFit}
+              alt={app.name}
+              className="h-10 w-10 rounded-[var(--radius-sm)]"
+            />
+          </Link>
+          <div className="min-w-0 flex-1">
+            <Link
+              href={`/app/${app.slug}`}
+              className="block truncate text-sm font-medium hover:underline"
+            >
+              {app.name}
+            </Link>
+            {app.versions[0].files.map((f) => (
+              <code
+                key={f.file}
+                className={cn("block select-all break-all text-[11px]", MUTED)}
+              >
+                {f.file}
+              </code>
+            ))}
+          </div>
+          <Link
+            href={`/app/${app.slug}`}
+            className={buttonClass("secondary", "sm")}
+          >
+            Edit
+          </Link>
         </li>
       ))}
     </ul>
