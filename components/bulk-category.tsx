@@ -5,16 +5,17 @@
  * them all at once. Admin only — `AppGrid` draws these pieces only when the
  * page hands it `bulk`.
  *
- * Any number of custom categories can be picked, and they are added beside
- * what each app already has. At most one built-in category: it moves the
- * apps there, since an app has one and it decides App or Game and the 18+
- * gate. The route (`/api/apps/bulk-category`) goes through the
+ * The picker opens on what the picked apps hold today: ticked where all of
+ * them are, outlined where some are, and only what is changed is sent. Any
+ * number of custom categories can be ticked or unticked. A built-in category
+ * is one per app and decides App or Game and the 18+ gate, so ticking one
+ * moves the apps there and unticking it moves them to Other of their kind. The route (`/api/apps/bulk-category`) goes through the
  * same validation as the edit form, one app at a time.
  */
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Check, FolderInput, Store, X } from "lucide-react";
+import { Check, FolderInput, Minus, Store, X } from "lucide-react";
 import { adminCall } from "@/lib/admin-call";
 import { readAdminToken } from "@/lib/admin-token";
 import { buttonClass, MUTED, NOTE } from "@/components/primitives";
@@ -33,7 +34,7 @@ const HOLD_MS = 450;
 /** A finger that travels further than this is scrolling, not holding. */
 const SLOP_PX = 10;
 
-type Picked = { slug: string; category: string };
+type Picked = { slug: string; category: string; collections: string[] };
 
 type Ctx = {
   selecting: boolean;
@@ -129,12 +130,14 @@ export function BulkSelect({
 export function SelectableCard({
   slug,
   category,
+  collections,
   href,
   className,
   children,
 }: {
   slug: string;
   category: string;
+  collections: string[];
   href: string;
   className: string;
   children: React.ReactNode;
@@ -179,7 +182,7 @@ export function SelectableCard({
           held.current = true;
           timer.current = null;
           navigator.vibrate?.(15);
-          toggle({ slug, category });
+          toggle({ slug, category, collections });
         }, HOLD_MS);
       }}
       onPointerMove={(e) => {
@@ -196,7 +199,7 @@ export function SelectableCard({
           held.current = false;
         } else if (selecting) {
           e.preventDefault();
-          toggle({ slug, category });
+          toggle({ slug, category, collections });
         }
       }}
     >
@@ -210,6 +213,12 @@ export function SelectableCard({
   );
 }
 
+/** Where a custom category ends up: on every picked app, on none, or as is. */
+type Pick = "on" | "off" | "keep";
+
+/** The built-in category an app lands in when it is taken out of its own. */
+const FALLBACK = { app: "Other", game: "Games" } as const;
+
 function Picker({
   options,
   picked,
@@ -221,8 +230,30 @@ function Picker({
   onClose: () => void;
   onDone: () => void;
 }) {
-  const [custom, setCustom] = useState<Set<string>>(new Set());
-  const [builtIn, setBuiltIn] = useState<{ value: string; label: string } | null>(null);
+  const n = picked.length;
+  // What the picked apps hold today, fixed when the picker opens.
+  const [held] = useState(() => {
+    const count = (list: string[]) => {
+      const m = new Map<string, number>();
+      for (const s of list) m.set(s, (m.get(s) ?? 0) + 1);
+      return m;
+    };
+    return {
+      custom: count(picked.flatMap((p) => [...new Set(p.collections)])),
+      builtIn: count(picked.map((p) => p.category)),
+    };
+  });
+  const startOf = (slug: string): Pick => {
+    const c = held.custom.get(slug) ?? 0;
+    return c === n ? "on" : c === 0 ? "off" : "keep";
+  };
+  const [custom, setCustom] = useState<Map<string, Pick>>(
+    () => new Map(options.custom.map((c) => [c.slug, startOf(c.slug)]))
+  );
+  // Where every picked app moves, or undefined to leave them where they are
+  // apart from the categories in `leave`, which they are taken out of.
+  const [builtIn, setBuiltIn] = useState<string | undefined>(undefined);
+  const [leave, setLeave] = useState<Set<string>>(new Set());
   const [newOn, setNewOn] = useState(false);
   const [newName, setNewName] = useState("");
   const [newAdults, setNewAdults] = useState(false);
@@ -230,26 +261,74 @@ function Picker({
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
 
-  const n = picked.length;
   const apps = `${n} ${n === 1 ? "app" : "apps"}`;
-  // Moving an Adults app anywhere else takes it out from behind the gate.
-  const leavingAdults =
-    builtIn && builtIn.value !== "Adults"
-      ? picked.filter((p) => p.category === "Adults").length
-      : 0;
-  const customNames = options.custom
-    .filter((c) => custom.has(c.slug))
-    .map((c) => c.name);
-  if (newOn) customNames.push(newName.trim() || "the new category");
-  const nothing = !builtIn && customNames.length === 0;
+  const builtInDef = (value: string) => options.builtIn.find((c) => c.value === value);
+  // The one built-in category every picked app shares, if there is one.
+  const shared = held.builtIn.size === 1 ? [...held.builtIn.keys()][0] : undefined;
 
-  const toggleCustom = (slug: string) =>
+  const heldState = (value: string): Pick => {
+    const c = held.builtIn.get(value) ?? 0;
+    return c === n ? "on" : c === 0 ? "off" : "keep";
+  };
+  const builtInState = (value: string): Pick => {
+    if (builtIn !== undefined) return builtIn === value ? "on" : "off";
+    return leave.has(value) ? "off" : heldState(value);
+  };
+
+  /**
+   * Ticked → taken out (to Other of its kind); taken out → back as it was;
+   * outlined or unticked → every picked app moves there.
+   */
+  const tapBuiltIn = (value: string, kind: "app" | "game") => {
+    const state = builtInState(value);
+    if (builtIn !== undefined) {
+      setBuiltIn(value === builtIn || value === shared ? undefined : value);
+      setLeave(new Set());
+      return;
+    }
+    if (state === "on") {
+      // Other has nowhere to fall back to.
+      if (value === FALLBACK[kind]) return;
+      setLeave((prev) => new Set(prev).add(value));
+    } else if (leave.has(value)) {
+      setLeave((prev) => {
+        const next = new Set(prev);
+        next.delete(value);
+        return next;
+      });
+    } else {
+      setBuiltIn(value);
+      setLeave(new Set());
+    }
+  };
+
+  const tapCustom = (slug: string) =>
     setCustom((prev) => {
-      const next = new Set(prev);
-      if (next.has(slug)) next.delete(slug);
-      else next.add(slug);
+      const next = new Map(prev);
+      const now = next.get(slug) ?? "off";
+      const start = startOf(slug);
+      // on → off → (as it was, when only some had it) → on
+      next.set(
+        slug,
+        now === "on" ? "off" : now === "off" && start === "keep" ? "keep" : "on"
+      );
       return next;
     });
+
+  // Only what differs from today is sent.
+  const add = [...custom].filter(([s, v]) => v === "on" && startOf(s) !== "on").map(([s]) => s);
+  const remove = [...custom].filter(([s, v]) => v === "off" && startOf(s) !== "off").map(([s]) => s);
+  const name = (slug: string) => options.custom.find((c) => c.slug === slug)?.name ?? slug;
+  const addNames = add.map(name);
+  if (newOn) addNames.push(newName.trim() || "the new category");
+  const nothing =
+    builtIn === undefined && leave.size === 0 && addNames.length === 0 && remove.length === 0;
+
+  // Moving an Adults app anywhere else takes it out from behind the gate.
+  const leavingAdults =
+    (builtIn !== undefined && builtIn !== "Adults") || leave.has("Adults")
+      ? picked.filter((p) => p.category === "Adults").length
+      : 0;
 
   async function apply() {
     if (nothing) return;
@@ -261,23 +340,25 @@ function Picker({
         hint: "Sign in as an admin, or unlock Manage",
       });
     try {
-      const add = [...custom];
+      const adding = [...add];
       if (newOn) {
         const made = await call("/api/collections", {
           action: "create",
           name: newName,
           adults: newAdults,
         });
-        add.push(made.collection.slug);
+        adding.push(made.collection.slug);
         // Made once: a retry after a failed filing must not make it again.
         setNewOn(false);
         setNewName("");
-        setCustom((prev) => new Set(prev).add(made.collection.slug));
+        setCustom((prev) => new Map(prev).set(made.collection.slug, "on"));
       }
       const res = await call("/api/apps/bulk-category", {
         slugs: picked.map((p) => p.slug),
-        ...(builtIn ? { category: builtIn.value } : {}),
-        ...(add.length > 0 ? { add } : {}),
+        ...(builtIn !== undefined ? { category: builtIn } : {}),
+        ...(leave.size > 0 ? { leave: [...leave] } : {}),
+        ...(adding.length > 0 ? { add: adding } : {}),
+        ...(remove.length > 0 ? { remove } : {}),
       });
       router.refresh();
       if (res.failed?.length > 0) {
@@ -295,18 +376,36 @@ function Picker({
     }
   }
 
-  const chip = (selected: boolean) =>
+  const chip = (state: Pick) =>
     cn(
       "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[13px] font-medium transition",
-      selected
+      state === "on"
         ? "bg-[var(--accent)] text-white"
-        : "bg-[var(--card-2)] text-[color:var(--muted-2)] hover:bg-[var(--pill-hover)]"
+        : state === "keep"
+          ? "bg-[var(--card-2)] text-[color:var(--fg)] ring-1 ring-inset ring-[color:var(--accent)]"
+          : "bg-[var(--card-2)] text-[color:var(--muted-2)] hover:bg-[var(--pill-hover)]"
     );
+  const mark = (state: Pick) =>
+    state === "on" ? (
+      <Check size={13} strokeWidth={3} />
+    ) : state === "keep" ? (
+      <Minus size={13} strokeWidth={3} />
+    ) : null;
 
   const groups: { title: string; kind: "app" | "game" }[] = [
     { title: "App categories", kind: "app" },
     { title: "Game categories", kind: "game" },
   ];
+
+  const summary = [
+    builtIn !== undefined && `move ${apps} to ${builtInDef(builtIn)?.label ?? builtIn}`,
+    leave.size > 0 &&
+      `take out of ${listNames([...leave].map((v) => builtInDef(v)?.label ?? v))}`,
+    addNames.length > 0 && `add to ${listNames(addNames)}`,
+    remove.length > 0 && `remove from ${listNames(remove.map(name))}`,
+  ]
+    .filter(Boolean)
+    .join(", ");
 
   return (
     <div
@@ -335,25 +434,27 @@ function Picker({
         </div>
 
         <div className="flex-1 space-y-4 overflow-y-auto px-5 pb-4">
+          <p className={NOTE}>
+            Ticked is where {n === 1 ? "the app is" : "the apps are"} now. Untick to take{" "}
+            {n === 1 ? "it" : "them"} out.
+            {n > 1 && " An outlined one holds only some of them and is left as it is."}
+          </p>
           <section>
             <h3 className="mb-1 text-[13px] font-semibold">Your categories</h3>
-            <p className={cn("mb-2", NOTE)}>
-              Pick any number. Added beside what each app already has.
-            </p>
+            <p className={cn("mb-2", NOTE)}>Any number at once.</p>
             <div className="flex flex-wrap gap-1.5">
               {options.custom.map((c) => {
                 const Icon = ICONS[c.icon ?? DEFAULT_CUSTOM_ICON] ?? Store;
-                const on = custom.has(c.slug);
+                const state = custom.get(c.slug) ?? "off";
                 return (
                   <button
                     key={c.slug}
                     type="button"
-                    onClick={() => toggleCustom(c.slug)}
-                    aria-pressed={on}
-                    className={chip(on)}
+                    onClick={() => tapCustom(c.slug)}
+                    aria-pressed={state === "keep" ? "mixed" : state === "on"}
+                    className={chip(state)}
                   >
-                    {on && <Check size={13} strokeWidth={3} />}
-                    <Icon size={14} />
+                    {mark(state) ?? <Icon size={14} />}
                     {c.name}
                     {c.adults && <span className="text-[10px] font-bold">18+</span>}
                   </button>
@@ -363,7 +464,7 @@ function Picker({
                 type="button"
                 onClick={() => setNewOn((v) => !v)}
                 aria-pressed={newOn}
-                className={chip(newOn)}
+                className={chip(newOn ? "on" : "off")}
               >
                 + New category
               </button>
@@ -396,25 +497,24 @@ function Picker({
               <h3 className="mb-1 text-[13px] font-semibold">{g.title}</h3>
               {g.kind === "app" && (
                 <p className={cn("mb-2", NOTE)}>
-                  At most one. Moves the apps: an app has one built-in category.
-                  Tap it again to leave the category as it is.
+                  One per app. Picking one moves all of them there; unticking one
+                  moves the apps in it to Other (Other games for a game).
                 </p>
               )}
               <div className="flex flex-wrap gap-1.5">
                 {options.builtIn
                   .filter((c) => c.kind === g.kind)
                   .map((c) => {
-                    const on = builtIn?.value === c.value;
+                    const state = builtInState(c.value);
                     return (
                       <button
                         key={c.value}
                         type="button"
-                        onClick={() =>
-                          setBuiltIn(on ? null : { value: c.value, label: c.label })
-                        }
-                        aria-pressed={on}
-                        className={chip(on)}
+                        onClick={() => tapBuiltIn(c.value, c.kind)}
+                        aria-pressed={state === "keep" ? "mixed" : state === "on"}
+                        className={chip(state)}
                       >
+                        {mark(state)}
                         {c.label}
                       </button>
                     );
@@ -439,15 +539,7 @@ function Picker({
             disabled={busy || nothing || (newOn && !newName.trim())}
             className={cn(buttonClass("primary", "md"), "w-full justify-center")}
           >
-            {nothing
-              ? "Pick categories"
-              : [
-                  builtIn && `Move ${apps} to ${builtIn.label}`,
-                  customNames.length > 0 &&
-                    `${builtIn ? "add to" : `Add ${apps} to`} ${listNames(customNames)}`,
-                ]
-                  .filter(Boolean)
-                  .join(", ")}
+            {nothing ? "No changes" : summary.charAt(0).toUpperCase() + summary.slice(1)}
           </button>
         </div>
       </div>

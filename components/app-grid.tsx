@@ -40,6 +40,7 @@ export default function AppGrid({
               bulk={!!bulk}
               slug={app.slug}
               category={app.category}
+              collections={app.collections}
             >
               <Thumb
                 seed={app.seed}
@@ -101,16 +102,24 @@ function Card({
   bulk,
   slug,
   category,
+  collections,
   children,
 }: {
   bulk: boolean;
   slug: string;
   category: string;
+  collections: string[];
   children: React.ReactNode;
 }) {
   const href = `/app/${slug}`;
   return bulk ? (
-    <SelectableCard slug={slug} category={category} href={href} className={CARD_CLASS}>
+    <SelectableCard
+      slug={slug}
+      category={category}
+      collections={collections}
+      href={href}
+      className={CARD_CLASS}
+    >
       {children}
     </SelectableCard>
   ) : (

@@ -1,11 +1,15 @@
 /**
  * POST /api/apps/bulk-category
- *   { slugs: string[], category?: "<built-in category>", add?: string[] }
+ *   { slugs: string[], category?: "<built-in>", leave?: string[],
+ *     add?: string[], remove?: string[] }
  *
  * File many apps at once, from a long-press selection on a list. A built-in
  * category *sets* `category` — an app has exactly one, and it is the 18+ gate
- * and the App/Game kind. Custom ones (`add`, one slug or a list) are *added*
- * beside whatever the app is already filed under. Either or both may be given.
+ * and the App/Game kind. `leave` names built-in categories to take apps out
+ * of: an app in one of them moves to Other, or Other games for a game, and
+ * the rest stay where they are. Custom ones (`add`, one slug or a list) are *added*
+ * beside whatever the app is already filed under, and `remove` takes them out.
+ * At least one of them must be given; `category` and `leave` not together.
  *
  * Every app goes through `editApp`, the same validation as the edit form, one
  * at a time; a refusal for one app is reported and does not stop the rest.
@@ -13,6 +17,7 @@
 import { requireAdmin } from "@/lib/admin";
 import { editApp, EditError, storedText } from "@/lib/edit";
 import { findApp, readCollectionDefs } from "@/lib/store";
+import { DEFAULT_GAME_CATEGORY, findCategory, kindOf } from "@/lib/categories";
 
 export const dynamic = "force-dynamic";
 
@@ -32,7 +37,7 @@ export async function POST(req: Request): Promise<Response> {
     return Response.json({ error: "Expected a JSON body" }, { status: 400 });
   }
 
-  const { slugs, category, add } = body;
+  const { slugs, category, leave, add, remove } = body;
   if (
     !Array.isArray(slugs) ||
     slugs.length === 0 ||
@@ -45,20 +50,37 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
   const setCategory = typeof category === "string" && category.trim() !== "";
-  const addList = typeof add === "string" ? [add] : add ?? [];
-  if (
-    !Array.isArray(addList) ||
-    !addList.every((s) => typeof s === "string" && s.trim() !== "")
-  ) {
+  const addTo = slugList(add);
+  const takeOut = slugList(remove);
+  const leaving = slugList(leave);
+  if (!leaving || leaving.some((c) => !findCategory(c))) {
     return Response.json(
-      { error: "add must be a custom category slug or a list of them" },
+      { error: "leave must be a list of built-in categories" },
       { status: 400 }
     );
   }
-  const addTo = [...new Set((addList as string[]).map((s) => s.trim()))];
-  if (!setCategory && addTo.length === 0) {
+  const leaveSet = new Set(leaving.map((c) => findCategory(c)));
+  if (setCategory && leaveSet.size > 0) {
     return Response.json(
-      { error: "Give a category, custom categories to add, or both" },
+      { error: "Give either category or leave, not both" },
+      { status: 400 }
+    );
+  }
+  if (!addTo || !takeOut) {
+    return Response.json(
+      { error: "add and remove must be a custom category slug or a list of them" },
+      { status: 400 }
+    );
+  }
+  if (!setCategory && leaveSet.size === 0 && addTo.length === 0 && takeOut.length === 0) {
+    return Response.json(
+      { error: "Give a category, custom categories to add or remove, or several" },
+      { status: 400 }
+    );
+  }
+  if (addTo.some((s) => takeOut.includes(s))) {
+    return Response.json(
+      { error: "A category cannot be both added and removed" },
       { status: 400 }
     );
   }
@@ -78,15 +100,22 @@ export async function POST(req: Request): Promise<Response> {
     try {
       // A slug names a file under meta/, so it is looked up in the catalog
       // before anything reads by it — the same first step `editApp` takes.
-      if (!(await findApp(slug))) throw new EditError("No such app");
+      const app = await findApp(slug);
+      if (!app) throw new EditError("No such app");
       const patch: Record<string, string> = {};
       if (setCategory) patch.category = category as string;
-      if (addTo.length > 0) {
+      if (leaveSet.has(app.category)) {
+        patch.category = kindOf(app.category) === "game" ? DEFAULT_GAME_CATEGORY : "Other";
+      }
+      if (addTo.length > 0 || takeOut.length > 0) {
         const held = (await storedText(slug)).collections
           .split(/[,\s]+/)
           .filter(Boolean);
-        const missing = addTo.filter((s) => !held.includes(s));
-        if (missing.length > 0) patch.collections = [...held, ...missing].join(", ");
+        const kept = held.filter((s) => !takeOut.includes(s));
+        const missing = addTo.filter((s) => !kept.includes(s));
+        if (missing.length > 0 || kept.length < held.length) {
+          patch.collections = [...kept, ...missing].join(", ");
+        }
       }
       if (Object.keys(patch).length === 0) continue;
       await editApp(slug, patch);
@@ -103,4 +132,13 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   return Response.json({ ok: failed.length === 0, changed, failed });
+}
+
+/** A slug or a list of them, trimmed and unique; nothing for absent; null if malformed. */
+function slugList(raw: unknown): string[] | null {
+  const list = typeof raw === "string" ? [raw] : raw ?? [];
+  if (!Array.isArray(list) || !list.every((s) => typeof s === "string" && s.trim() !== "")) {
+    return null;
+  }
+  return [...new Set((list as string[]).map((s) => s.trim()))];
 }
