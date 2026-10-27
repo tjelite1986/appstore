@@ -17,6 +17,7 @@ import InstalledControl from "@/components/installed-control";
 import EditApp from "@/components/edit-app";
 import MergeApp from "@/components/merge-app";
 import PruneVersions from "@/components/prune-versions";
+import RemoveApp from "@/components/remove-app";
 import AppFamily from "@/components/app-family";
 import AppCompanions from "@/components/app-companions";
 import ShareApp from "@/components/share-app";
@@ -515,6 +516,10 @@ export default async function AppDetailPage({
           summary={`Remove ${older.length === 1 ? "the older version" : `${older.length} older versions`}`}
         />
       )}
+
+      {/* The whole listing, files and all — deleted, not archived. See
+          components/remove-app.tsx. */}
+      {viewer?.role === "admin" && <RemoveApp slug={app.slug} />}
 
       {/* Every build of this app the shelf holds, this one marked. Renders
           nothing at all for a listing in no family. */}

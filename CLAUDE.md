@@ -140,10 +140,12 @@
   constant "dropped N" every run is a bug.
 
 ### Destructive operations
-- Displaced/discarded files move to `_import/_discarded/`. `lib/prune.ts` is
-  the deliberate exception and really deletes; don't make it archive. It skips
-  listings with placeholder versions (`compareVersions` ranks `9.9.9` and
-  `unknown` above real ones) and always shows a dry run first.
+- Displaced/discarded files move to `_import/_discarded/`. `lib/prune.ts` and
+  `lib/remove.ts` (whole listing, "Remove app" on the app page) are the
+  deliberate exceptions and really delete; don't make them archive. Remove
+  needs the slug typed as `confirm` and re-points `family`/`requires`. Prune
+  skips listings with placeholder versions (`compareVersions` ranks `9.9.9` and
+  `unknown` above real ones). Both always show a dry run first.
 
 ### PWA and F-Droid clients
 - `public/sw.js` has no fetch handler on purpose.
