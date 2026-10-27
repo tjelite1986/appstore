@@ -18,6 +18,7 @@ import {
   type CategoryKind,
 } from "@/lib/categories";
 import { byTopRated } from "@/lib/search";
+import { getCatalog } from "@/lib/store";
 
 /** Below this a category gets no shelf of its own; its chip still leads to it. */
 const MIN_SHELF = 3;
@@ -45,6 +46,13 @@ export default async function KindBrowse({ kind }: { kind: CategoryKind }) {
   const hero = heroSlides(newest, 8);
   const inHero = new Set(hero.map((h) => h.slug));
   const spotlight = top.filter((a) => a.banner && !inHero.has(a.slug)).slice(0, 6);
+  // A collection is a choice somebody made, so one app is enough for a shelf.
+  // Read off the same gated, kind-cut list as everything else here: filing an
+  // Adults app under a collection does not put it on anybody's shelf.
+  const { collections } = await getCatalog();
+  const collectionShelves = collections
+    .map((c) => ({ ...c, apps: top.filter((a) => a.collections.includes(c.slug)) }))
+    .filter((s) => s.apps.length > 0);
   const shelves = categoriesOf(kind)
     .map((c) => ({ category: c, apps: top.filter((a) => a.category === c) }))
     .filter((s) => s.apps.length >= MIN_SHELF);
@@ -52,7 +60,7 @@ export default async function KindBrowse({ kind }: { kind: CategoryKind }) {
   return (
     <Screen>
       <HeroCarousel slides={hero} />
-      <CategoryChips apps={apps} adults={adults} />
+      <CategoryChips apps={apps} adults={adults} collections={collections} />
       {apps.length === 0 ? (
         <AppGrid apps={[]} empty={`No ${noun}s yet.`} />
       ) : (
@@ -62,6 +70,14 @@ export default async function KindBrowse({ kind }: { kind: CategoryKind }) {
             <AppColumns title="Recently added" apps={newest.slice(0, 12)} />
           )}
           <FeatureCards title="Worth a look" apps={spotlight} />
+          {collectionShelves.map((s) => (
+            <IconShelf
+              key={`c:${s.slug}`}
+              title={s.name}
+              href={`/collection/${s.slug}`}
+              apps={s.apps}
+            />
+          ))}
           {/* Alternate the two shelf shapes so a dozen categories do not read
               as one long repeated strip. */}
           {shelves.map((s, i) =>

@@ -75,7 +75,8 @@ const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp", ".avif", ".gif"];
  *   category decided by the gate rule below, not by "is it missing"
  *   signingCert  decided by the caller — see `SignerChoice`
  */
-const NEVER_FILLED = ["hidden", "added", "category", "signingCert"];
+// `collections` is not a gap to fill but a set to join — see `joins`.
+const NEVER_FILLED = ["hidden", "added", "category", "signingCert", "collections"];
 
 /** What to do when the two listings pinned different certificates. */
 export type SignerChoice = "keep" | "adopt";
@@ -97,6 +98,12 @@ export type MergePlan = {
   artwork: { icon: boolean; banner: boolean; screenshots: number };
   /** Meta keys the target has no value for that the source can fill. */
   fills: string[];
+  /**
+   * Collections the source is filed under and the target is not. Joined
+   * rather than gap-filled: a merge should not take an app out of a
+   * collection just because the other listing was in a different one.
+   */
+  joins: string[];
   /** Set when the two pinned different certificates. Answer it with `signer`. */
   signerConflict: { from: string; into: string } | null;
   /** Set when the merge re-files the target — the gate rule. */
@@ -264,6 +271,7 @@ export async function planMerge(from: string, into: string): Promise<MergePlan> 
     const have = targetMeta[key];
     return have === undefined || have === null || have === "";
   });
+  const joins = source.collections.filter((c) => !target.collections.includes(c));
 
   const signerConflict =
     source.signingCert && target.signingCert &&
@@ -281,6 +289,7 @@ export async function planMerge(from: string, into: string): Promise<MergePlan> 
       screenshots: intoShots.length ? 0 : fromShots.length,
     },
     fills,
+    joins,
     signerConflict,
     refiles:
       source.category === ADULT_CATEGORY && target.category !== ADULT_CATEGORY
@@ -462,6 +471,18 @@ export async function mergeApps(
   const sourceMeta = await readMetaRaw(from);
   const patch: Record<string, unknown> = {};
   for (const key of plan.fills) patch[key] = sourceMeta[key];
+  if (plan.joins.length) {
+    // From the target's file, not the catalog: the catalog has already
+    // dropped slugs it could not resolve, and those are not this merge's to
+    // clean up.
+    const held = (await readMetaRaw(into)).collections;
+    const kept = Array.isArray(held)
+      ? held.filter((c): c is string => typeof c === "string")
+      : typeof held === "string"
+        ? held.split(/[,\s]+/).filter(Boolean)
+        : [];
+    patch.collections = [...new Set([...kept, ...plan.joins])];
+  }
   if (plan.refiles) patch.category = plan.refiles;
   if (plan.signerConflict && opts.signer === "adopt") {
     patch.signingCert = plan.signerConflict.from;

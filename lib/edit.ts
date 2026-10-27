@@ -21,6 +21,7 @@ import {
   invalidateCatalog,
   normaliseHexColor,
   normaliseIconFit,
+  readCollectionDefs,
 } from "@/lib/store";
 import { fetchImageBytes } from "@/lib/sources/net";
 import { findCategory } from "@/lib/categories";
@@ -38,6 +39,7 @@ export const EDITABLE_FIELDS = [
   "requires",
   "modSource",
   "modder",
+  "collections",
 ] as const;
 
 export type EditableField = (typeof EDITABLE_FIELDS)[number];
@@ -68,6 +70,8 @@ const MAX_LENGTHS: Record<EditableField, number> = {
   requires: 400,
   modSource: 500,
   modder: 120,
+  // Collection slugs, comma-joined like `requires`.
+  collections: 1000,
 };
 
 /**
@@ -89,6 +93,7 @@ export const TEXT_FIELDS = [
   "requires",
   "modSource",
   "modder",
+  "collections",
 ] as const;
 
 export type TextField = (typeof TEXT_FIELDS)[number];
@@ -234,6 +239,24 @@ export async function editApp(slug: string, patch: unknown): Promise<void> {
       const url = normaliseModSource(trimmed);
       if (!url) throw new EditError(`${trimmed} is not an http(s) address`);
       write.modSource = url;
+      continue;
+    }
+    // The collections this listing is filed under. Checked against the
+    // definitions so a stale form cannot file an app under one that was
+    // deleted while it was open. Never touches `category`: the gate and the
+    // kind are decided there and nowhere else.
+    if (field === "collections") {
+      const defs = await readCollectionDefs();
+      const picked: string[] = [];
+      for (const part of trimmed.split(/[,\s]+/)) {
+        const want = part.trim();
+        if (!want || picked.includes(want)) continue;
+        if (!defs.some((c) => c.slug === want)) {
+          throw new EditError(`${want} is not one of the collections`);
+        }
+        picked.push(want);
+      }
+      write.collections = picked.length > 0 ? picked : undefined;
       continue;
     }
     if (field === "category" && trimmed) {

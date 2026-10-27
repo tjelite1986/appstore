@@ -8,6 +8,7 @@ import {
   FolderInput,
   History,
   Layers,
+  LibraryBig,
   PackagePlus,
   Rss,
   UserPen,
@@ -26,6 +27,7 @@ import SourcesPanel from "@/components/sources-panel";
 import ImportPanel from "@/components/import-panel";
 import PruneVersions from "@/components/prune-versions";
 import TrackUpstreamButton from "@/components/track-upstream";
+import CollectionsPanel from "@/components/collections-panel";
 import { STORE_DIRS, STORE_HOST_ROOT } from "@/lib/storage";
 import {
   formatBytes,
@@ -66,7 +68,7 @@ const DUPLICATES_SHOWN = 4;
  * now.
  */
 export default async function ManagePage() {
-  const [{ apps: all, placeholder }, waiting, lastReport] = await Promise.all([
+  const [{ apps: all, placeholder, collections }, waiting, lastReport] = await Promise.all([
     getCatalog(),
     pendingImports(),
     lastSourceReport(),
@@ -160,6 +162,12 @@ export default async function ManagePage() {
   const failed = report ? report.apps.filter((a) => a.status === "error") : [];
   const untracked = admin ? apps.filter((a) => a.source?.untracked) : [];
   const checkedAgo = report ? relativeTime(report.at) : null;
+  // Counted off the gated list like every other number here, so an admin with
+  // the gate shut sees how many of the apps they can see are in each.
+  const collectionRows = collections.map((c) => ({
+    ...c,
+    count: apps.filter((a) => a.collections.includes(c.slug)).length,
+  }));
 
   return (
     <Screen>
@@ -295,6 +303,21 @@ export default async function ManagePage() {
                 }
               />
             </Panel>
+
+            {admin && !placeholder && (
+              <Panel
+                id="collections"
+                icon={LibraryBig}
+                title="Collections"
+                aside={
+                  collections.length > 0 ? <Pill>{collections.length}</Pill> : null
+                }
+                description="Your own shelves on top of the categories. An app can be in several; file it from the edit form on its page. The category still decides App or Game and the 18+ gate — a collection never does."
+                flush
+              >
+                <CollectionsPanel rows={collectionRows} />
+              </Panel>
+            )}
           </div>
 
           {/* Right: the state of the library. */}

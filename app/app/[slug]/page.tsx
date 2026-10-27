@@ -30,6 +30,7 @@ import {
   compareVersions,
   companionsOf,
   familyMembers,
+  getCatalog,
   hostsOf,
   withoutCompanions,
 } from "@/lib/store";
@@ -481,6 +482,7 @@ export default async function AppDetailPage({
             relatives: visible
               .filter((a) => a.slug !== app.slug)
               .map((a) => ({ slug: a.slug, name: a.name })),
+            collections: (await getCatalog()).collections,
             icon: app.icon,
             iconBackground: app.iconBackground,
             iconFit: app.iconFit,

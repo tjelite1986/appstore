@@ -63,6 +63,8 @@ export type EditText = {
   /** The page the modified build was taken from. */
   modSource: string;
   modder: string;
+  /** Collection slugs, comma-joined like `requires`. */
+  collections: string;
 };
 
 const TEXT_FIELDS = [
@@ -75,6 +77,7 @@ const TEXT_FIELDS = [
   "requires",
   "modSource",
   "modder",
+  "collections",
 ] as const;
 
 export type EditableApp = {
@@ -95,6 +98,8 @@ export type EditableApp = {
    * the slug and a person reads names.
    */
   relatives: { slug: string; name: string }[];
+  /** Every collection there is, in display order, for the toggles. */
+  collections: { slug: string; name: string }[];
   icon?: string;
   /** Empty for "no plate chosen" — the fallback gradient, keyed on `seed`. */
   iconBackground?: string;
@@ -163,6 +168,18 @@ export default function EditApp({ app }: { app: EditableApp }) {
   const hosts = form.requires.split(/[,\s]+/).filter(Boolean);
   const setHosts = (next: string[]) =>
     setForm((f) => ({ ...f, requires: next.join(", ") }));
+
+  // Collections work the same way. A toggle also drops any slug the list no
+  // longer knows — a collection deleted since — because the server would
+  // refuse the whole save over it.
+  const filedUnder = form.collections.split(/[,\s]+/).filter(Boolean);
+  const toggleCollection = (slug: string) => {
+    const known = filedUnder.filter((c) => app.collections.some((d) => d.slug === c));
+    const next = known.includes(slug)
+      ? known.filter((c) => c !== slug)
+      : app.collections.map((d) => d.slug).filter((c) => c === slug || known.includes(c));
+    setForm((f) => ({ ...f, collections: next.join(", ") }));
+  };
 
   const save = () =>
     run("save", async () => {
@@ -408,6 +425,38 @@ export default function EditApp({ app }: { app: EditableApp }) {
             </span>
           )}
         </label>
+
+        {/* Collections sit on top of the category and never replace it: the
+            category above is still what decides App or Game and the 18+
+            gate. Made and named in Manage. */}
+        {app.collections.length > 0 && (
+          <div>
+            <span className={cn("mb-1 block text-[11px]", MUTED)}>
+              Collections — as many as fit
+            </span>
+            <span className="flex flex-wrap gap-1.5">
+              {app.collections.map((c) => {
+                const on = filedUnder.includes(c.slug);
+                return (
+                  <button
+                    key={c.slug}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => toggleCollection(c.slug)}
+                    className={cn(
+                      "rounded-full border px-2.5 py-1 text-xs",
+                      on
+                        ? "border-[color:var(--accent)] bg-[var(--pill)] text-[color:var(--accent-text)]"
+                        : "border-[color:var(--border)]"
+                    )}
+                  >
+                    {c.name}
+                  </button>
+                );
+              })}
+            </span>
+          </div>
+        )}
 
         <Text
           label="Tagline"

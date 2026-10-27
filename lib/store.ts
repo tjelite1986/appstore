@@ -264,6 +264,19 @@ export type StoreApp = {
    * listing claims.
    */
   repoHead?: boolean;
+  /**
+   * The admin-defined collections this listing is filed under, by slug, in
+   * the order the collections themselves are listed.
+   *
+   * A layer on top of `category`, never instead of it: the category is the
+   * 18+ gate and decides App or Game, and a collection decides neither. So an
+   * Adults listing filed under "Favourites" is still behind the gate — every
+   * shelf built from this reads through `catalogFor` like any other.
+   *
+   * Empty — not absent — for a listing in no collection. Settled against the
+   * definitions in `resolveCollections`.
+   */
+  collections: string[];
   /** Newest first. Empty when the app has meta but no APK yet. */
   versions: AppVersion[];
   /** ISO date the app was first seen. Empty for placeholder rows. */
@@ -273,8 +286,28 @@ export type StoreApp = {
 /** What `lib/catalog.ts` holds — the same app, minus everything disk-derived. */
 export type PlaceholderApp = Omit<
   StoreApp,
-  "screenshots" | "versions" | "added" | "requires"
+  "screenshots" | "versions" | "added" | "requires" | "collections"
 >;
+
+/**
+ * One admin-defined collection: a named shelf an app can be filed under
+ * alongside its category, and as many of them as a person likes.
+ *
+ * The definitions live in `_state/collections.json`, in display order; which
+ * apps belong is written on each app's own meta file (`collections`), so that
+ * membership travels with the listing through a merge or a remove like
+ * `family` and `requires` do. Writers are in `lib/collections.ts`.
+ */
+export type CollectionDef = {
+  slug: string;
+  name: string;
+};
+
+export const COLLECTIONS_FILE = path.join(
+  STORE_ROOT,
+  STORE_DIRS.state,
+  "collections.json"
+);
 
 /**
  * The category tiles the sketch draws, in its order, then the shelves added
@@ -352,6 +385,8 @@ type MetaFile = {
   hidden?: boolean;
   /** Set by hand: what to put behind a transparent icon. */
   iconBackground?: string;
+  /** Set by hand: the collection slugs. See `collections` on StoreApp. */
+  collections?: string | string[];
   /** Set by hand: "contain" to fit the whole icon instead of filling the box. */
   iconFit?: string;
   /**
@@ -639,12 +674,18 @@ async function readMeta(slug: string): Promise<MetaFile | null> {
   }
 }
 
-async function readFromDisk(): Promise<StoreApp[]> {
-  const [metaFiles, apkDirs, icons, banners] = await Promise.all([
+async function readFromDisk(): Promise<Catalog> {
+  const [metaFiles, apkDirs, icons, banners, collections] = await Promise.all([
     listDir(path.join(STORE_ROOT, STORE_DIRS.meta)),
     listDir(path.join(STORE_ROOT, STORE_DIRS.apks)),
     indexImageDir(STORE_DIRS.icons),
     indexImageDir(STORE_DIRS.banners),
+    readCollectionDefs().catch((err) => {
+      // A damaged definitions file costs the collection shelves, not the
+      // store: the apps are still there to browse by category.
+      console.error("[store] could not read the collections:", err);
+      return [] as CollectionDef[];
+    }),
   ]);
 
   const slugs = new Set<string>();
@@ -692,6 +733,8 @@ async function readFromDisk(): Promise<StoreApp[]> {
         family: meta?.family?.trim() || undefined,
         // Likewise unresolved — `resolvePlugins` drops what names nothing.
         requires: readSlugList(meta?.requires),
+        // And `resolveCollections` drops a collection that has been deleted.
+        collections: readSlugList(meta?.collections),
         repoHead: meta?.repoHead === true ? true : undefined,
         source,
         signingCert: meta?.signingCert,
@@ -732,9 +775,65 @@ async function readFromDisk(): Promise<StoreApp[]> {
     })
   );
 
-  return resolvePlugins(
-    resolveFamilies(apps.filter((a): a is StoreApp => a !== null))
+  const resolved = resolveCollections(
+    resolvePlugins(
+      resolveFamilies(apps.filter((a): a is StoreApp => a !== null))
+    ),
+    collections
   ).sort((a, b) => a.name.localeCompare(b.name));
+  return { apps: resolved, placeholder: false, collections };
+}
+
+/**
+ * The collection definitions, in display order. Empty when none has been made.
+ *
+ * Throws on a file that exists but does not parse, rather than answering
+ * empty: the writers in `lib/collections.ts` read through here too, and an
+ * empty answer would let the next save write over every definition.
+ */
+export async function readCollectionDefs(): Promise<CollectionDef[]> {
+  let text: string;
+  try {
+    text = await fs.readFile(COLLECTIONS_FILE, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw err;
+  }
+  const parsed = JSON.parse(text) as { collections?: unknown };
+  if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.collections)) {
+    throw new Error("collections.json has no collections list");
+  }
+  const out: CollectionDef[] = [];
+  for (const item of parsed.collections) {
+    if (!item || typeof item !== "object") continue;
+    const { slug, name } = item as Record<string, unknown>;
+    if (typeof slug !== "string" || typeof name !== "string") continue;
+    if (!slug.trim() || out.some((c) => c.slug === slug)) continue;
+    out.push({ slug: slug.trim(), name: name.trim() || slug.trim() });
+  }
+  return out;
+}
+
+/**
+ * Settle each listing's `collections` against the definitions.
+ *
+ * A slug that names no collection is dropped quietly — unlike a bad `family`,
+ * it is the expected leftover of a collection deleted while some meta write
+ * was in flight, and it hides nothing. Kept in the definitions' order, so
+ * every page lists an app's collections the same way.
+ */
+function resolveCollections(
+  apps: StoreApp[],
+  defs: CollectionDef[]
+): StoreApp[] {
+  const order = new Map(defs.map((c, i) => [c.slug, i]));
+  for (const app of apps) {
+    if (app.collections.length === 0) continue;
+    app.collections = app.collections
+      .filter((c) => order.has(c))
+      .sort((a, b) => order.get(a)! - order.get(b)!);
+  }
+  return apps;
 }
 
 /**
@@ -933,6 +1032,8 @@ export type Catalog = {
   apps: StoreApp[];
   /** True when nothing is on disk and the hand-written stand-in is showing. */
   placeholder: boolean;
+  /** The collection definitions, in display order. */
+  collections: CollectionDef[];
 };
 
 const CACHE_MS = Number(process.env.STORE_CACHE_MS ?? 10_000);
@@ -942,7 +1043,14 @@ function fromPlaceholder(p: PlaceholderApp): StoreApp {
   // Nothing hand-written is anybody's companion: the placeholder catalog is
   // there to show a layout, and a listing it hid from the shelf would show the
   // wrong one.
-  return { ...p, screenshots: [], versions: [], added: "", requires: [] };
+  return {
+    ...p,
+    screenshots: [],
+    versions: [],
+    added: "",
+    requires: [],
+    collections: [],
+  };
 }
 
 /**
@@ -956,17 +1064,21 @@ export async function getCatalog(): Promise<Catalog> {
   const now = Date.now();
   if (cache && now - cache.at < CACHE_MS) return cache.value;
 
-  let apps: StoreApp[] = [];
+  let disk: Catalog | null = null;
   try {
-    apps = await readFromDisk();
+    disk = await readFromDisk();
   } catch (err) {
     console.error("[store] could not read the library:", err);
   }
 
   const value: Catalog =
-    apps.length > 0
-      ? { apps, placeholder: false }
-      : { apps: PLACEHOLDER_APPS.map(fromPlaceholder), placeholder: true };
+    disk && disk.apps.length > 0
+      ? disk
+      : {
+          apps: PLACEHOLDER_APPS.map(fromPlaceholder),
+          placeholder: true,
+          collections: [],
+        };
 
   cache = { at: now, value };
   return value;

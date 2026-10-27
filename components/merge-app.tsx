@@ -314,6 +314,9 @@ function Plan({ plan }: { plan: MergePlan }) {
   if (plan.fills.length) {
     lines.push({ text: `Fills empty fields: ${plan.fills.join(", ")}` });
   }
+  if (plan.joins.length) {
+    lines.push({ text: `Joins collections: ${plan.joins.join(", ")}` });
+  }
   if (plan.users.saved || plan.users.installed) {
     lines.push({
       text: `${plan.users.saved} saved and ${plan.users.installed} installed ${plan.users.installed === 1 ? "row" : "rows"} follow the app`,
