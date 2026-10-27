@@ -617,10 +617,12 @@ function BehindRows({
                 </Link>
               ) : null}
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
+                {/* Wraps on a phone: the pill and the button would otherwise
+                    leave the name one letter wide. */}
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   <Link
                     href={`/app/${check.slug}`}
-                    className="min-w-0 flex-1 truncate text-sm font-medium hover:underline"
+                    className="min-w-[8rem] flex-1 truncate text-sm font-medium hover:underline"
                   >
                     {check.name}
                   </Link>

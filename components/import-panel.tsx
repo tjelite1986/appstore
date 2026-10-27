@@ -50,16 +50,15 @@ import { ADMIN_TOKEN_KEY } from "@/lib/admin-token";
 
 /**
  * A block inside the Import panel: the feed, the folder, the queue. The page
- * draws the panel around them, so these are bordered sections, not cards.
+ * draws the panel around them, so these are inset sections, not cards: a
+ * shade darker than the panel instead of an outline.
  */
-const BLOCK_CLS =
-  "flex flex-col gap-2.5 rounded-[var(--radius)] border border-[color:var(--border)] p-3.5";
+const BLOCK_CLS = "flex flex-col gap-2.5 rounded-[var(--radius)] bg-black/30 p-3.5";
 /** The head of a block: icon, title, status at the right. */
 const BLOCK_HEAD_CLS = "flex items-center gap-2";
 const MUTED_CLS = MUTED;
 /** A nested card: a review item, a candidate. Tinted so it sits inside a block. */
-const CARD_CLS =
-  "bg-[var(--card-2)] rounded-[var(--radius)] border border-[color:var(--border)]";
+const CARD_CLS = "bg-[var(--card-2)] rounded-[var(--radius)]";
 
 const INPUT_CLS =
   "w-full rounded-full border border-[color:var(--border)] bg-[var(--card-2)] px-4 py-2 text-sm outline-none focus:border-[color:var(--accent)]";

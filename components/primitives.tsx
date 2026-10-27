@@ -9,8 +9,11 @@ import {
 import { cn } from "@/lib/utils";
 import ThumbImage from "@/components/thumb-image";
 
-export const CARD =
-  "bg-[var(--card)] rounded-[var(--radius)] border border-[color:var(--border)]";
+/**
+ * A surface. No outline: on the black theme the step from the page to
+ * `--card` is the edge, the way the phone stores draw their panels.
+ */
+export const CARD = "bg-[var(--card)] rounded-[var(--radius-lg)]";
 
 export const MUTED = "text-[color:var(--muted)]";
 
@@ -210,8 +213,8 @@ export function buttonClass(
     size === "sm" ? "px-3 py-1.5 text-xs" : "px-4 py-2 text-sm",
     variant === "primary" && "bg-[var(--accent)] text-white",
     variant === "secondary" &&
-      "bg-[var(--card-2)] text-[color:var(--fg)] border border-[color:var(--border)]",
-    variant === "ghost" && cn("border border-[color:var(--border)]", MUTED),
+      "bg-[var(--pill)] text-[color:var(--fg)] transition hover:bg-[var(--pill-hover)]",
+    variant === "ghost" && cn("transition hover:bg-[var(--card-2)]", MUTED),
     className
   );
 }
@@ -281,7 +284,7 @@ export function Pill({
 }
 
 /**
- * A card with a proper head: an icon in a tinted square, a title, something
+ * A card with a proper head: an icon in a round plate, a title, something
  * at the right (a count, a status) and a line saying what the card is for.
  *
  * Manage and Settings are built out of these. The explanation lives in the
@@ -313,15 +316,17 @@ export function Panel({
 }) {
   return (
     <section id={id} className={cn(CARD, "overflow-hidden scroll-mt-16", className)}>
-      <header className="flex items-start gap-3 border-b border-[color:var(--border)] px-4 py-3">
+      <header className="flex items-start gap-3 px-4 pb-1 pt-4">
         {Icon ? (
-          <span className="mt-px flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius)] bg-[var(--accent-soft)] text-[color:var(--accent-text)]">
-            <Icon size={16} />
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--pill)] text-[color:var(--accent-text)]">
+            <Icon size={17} />
           </span>
         ) : null}
         <div className="min-w-0 flex-1">
-          <div className="flex min-h-8 items-center gap-2">
-            <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{title}</h2>
+          <div className="flex min-h-9 items-center gap-2">
+            <h2 className="min-w-0 flex-1 truncate text-[17px] font-bold tracking-tight">
+              {title}
+            </h2>
             {aside}
           </div>
           {description ? <p className={cn("mt-0.5", NOTE)}>{description}</p> : null}
@@ -364,7 +369,7 @@ export function Stat({
       </span>
       <span
         className={cn(
-          "mt-1 block truncate text-xl font-semibold tabular-nums leading-tight",
+          "mt-1.5 block truncate text-2xl font-bold tabular-nums leading-tight",
           tone === "accent" && "text-[color:var(--accent-text)]",
           tone === "warn" && "text-[color:var(--warn)]"
         )}
@@ -376,7 +381,7 @@ export function Stat({
       ) : null}
     </>
   );
-  const cls = cn(CARD, "flex min-w-0 flex-col px-3.5 py-3", className);
+  const cls = cn(CARD, "flex min-w-0 flex-col px-4 py-3.5", className);
   return href ? (
     <Link href={href} className={cn(cls, "transition hover:bg-[var(--card-2)]")}>
       {body}

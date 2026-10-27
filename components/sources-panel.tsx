@@ -200,7 +200,7 @@ export default function SourcesPanel({
       {error && <p className="text-xs text-[color:var(--danger)]">{error}</p>}
 
       {ran && report && report.apps.length > 0 && (
-        <ul className="flex flex-col divide-y divide-[color:var(--border)] rounded-[var(--radius)] border border-[color:var(--border)]">
+        <ul className="flex flex-col divide-y divide-[color:var(--border)] rounded-[var(--radius)] bg-black/30">
           {report.apps.map((app) => (
             <li
               key={app.slug}
