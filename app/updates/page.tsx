@@ -1,4 +1,4 @@
-import { Screen } from "@/components/screen";
+import { Screen, ScreenTitle } from "@/components/screen";
 import AppRows from "@/components/app-rows";
 import { MUTED } from "@/components/primitives";
 import { cn } from "@/lib/utils";
@@ -29,24 +29,17 @@ export default async function UpdatesPage() {
 
   return (
     <Screen>
-      <div className="px-[var(--pad)]">
-        <h1 className="text-xl font-semibold">Updates</h1>
-        <p className={cn("mt-0.5 text-sm", MUTED)}>
-          {userId === null ? "Sign in to track your apps" : `${pending.length} waiting`}
-        </p>
-      </div>
+      <ScreenTitle
+        title="Updates"
+        subtitle={userId === null ? "Sign in to track your apps" : `${pending.length} waiting`}
+      />
 
       {pending.length > 0 && (
-        <AppRows
-          title="Available"
-          apps={pending}
-          button="Get"
-          showUpdateTarget
-        />
+        <AppRows title="Available" apps={pending} showUpdateTarget />
       )}
 
       {upToDate.length > 0 && (
-        <AppRows title="Up to date" apps={upToDate} button="Open" />
+        <AppRows id="installed" title="Up to date" apps={upToDate} />
       )}
 
       {pending.length === 0 && upToDate.length === 0 && (

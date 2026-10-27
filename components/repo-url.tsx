@@ -228,7 +228,7 @@ export default function RepoUrl({
 
         {showQr && qr && (
           <div className="flex flex-col items-center gap-2 sm:flex-row sm:items-start sm:gap-4">
-            {/* White plate on purpose: a QR code on plum does not scan. */}
+            {/* White plate on purpose: a QR code on a dark page does not scan. */}
             <div className="w-44 shrink-0 rounded-[var(--radius)] bg-white p-3">
               <svg
                 viewBox={`0 0 ${qr.n} ${qr.n}`}

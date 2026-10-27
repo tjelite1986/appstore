@@ -195,7 +195,7 @@ export default async function ModPage({ params }: Params) {
           src={mod.picture}
           className="h-44 w-full sm:h-64"
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-[#100913] via-transparent to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/10 to-transparent" />
         <Link
           href={`/mods/${game.slug}`}
           aria-label="Back"

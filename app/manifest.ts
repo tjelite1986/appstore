@@ -11,8 +11,8 @@ export default function manifest(): MetadataRoute.Manifest {
     start_url: "/",
     scope: "/",
     display: "standalone",
-    background_color: "#100913",
-    theme_color: "#100913",
+    background_color: "#000000",
+    theme_color: "#000000",
     // The ?v= is what makes a new icon reach an already-installed home screen
     // app. Android bakes the icon into a generated APK at install time and
     // only rebuilds it when it notices the manifest changed — an icon swapped

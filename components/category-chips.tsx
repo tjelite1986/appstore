@@ -31,7 +31,7 @@ export default async function CategoryChips({
   return (
     <nav
       aria-label="Categories"
-      className="flex gap-2 overflow-x-auto px-[var(--pad)] pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="no-scrollbar flex gap-2 overflow-x-auto px-[var(--pad)] pb-1"
     >
       {tiles.map(({ label, icon }) => {
         const Icon = ICONS[icon] ?? Store;
@@ -39,11 +39,11 @@ export default async function CategoryChips({
           <Link
             key={label}
             href={`/category/${categorySlug(label)}`}
-            className="flex shrink-0 items-center gap-2 rounded-full border border-[color:var(--border)] bg-[var(--card)] py-1.5 pl-3 pr-2 text-xs font-medium text-[color:var(--muted-2)] transition hover:border-[color:var(--accent)] hover:bg-[var(--accent-soft)] hover:text-[color:var(--fg)]"
+            className="flex shrink-0 items-center gap-2 rounded-full bg-[var(--card-2)] py-2 pl-3.5 pr-2.5 text-[13px] font-medium text-[color:var(--muted-2)] transition hover:bg-[var(--pill-hover)] hover:text-[color:var(--fg)]"
           >
             <Icon size={14} className="shrink-0" />
             <span className="whitespace-nowrap">{categoryLabel(label)}</span>
-            <span className="rounded-full bg-[var(--card-2)] px-1.5 text-[10px] tabular-nums leading-4">
+            <span className="rounded-full bg-black/30 px-1.5 text-[10px] tabular-nums leading-4">
               {counts.get(label)}
             </span>
           </Link>

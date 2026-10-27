@@ -22,3 +22,11 @@ body::before {
   z-index: -1;
   background: var(--app-bg);
 }
+
+/* Horizontal shelves scroll by touch or trackpad; the bar itself is noise. */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

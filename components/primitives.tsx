@@ -1,5 +1,11 @@
 import Link from "next/link";
-import type { LucideIcon } from "lucide-react";
+import {
+  ArrowDownToLine,
+  Check,
+  ChevronRight,
+  RotateCw,
+  type LucideIcon,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import ThumbImage from "@/components/thumb-image";
 
@@ -91,8 +97,9 @@ export function Thumb({
 }
 
 /**
- * Small caps section heading with an optional trailing link. Without `href`
- * the action is a label, as the sketch draws it; with one it goes somewhere.
+ * A section heading: big, white, and — when the section goes somewhere — a
+ * chevron at the right that leads there. `action` without `href` is a label
+ * the way the sketch drew it; with `href` the whole right side is the link.
  */
 export function SectionTitle({
   title,
@@ -106,20 +113,78 @@ export function SectionTitle({
   if (!title && !action) return null;
   return (
     <div className="mb-3 flex items-center justify-between gap-3">
-      <h2 className="truncate text-sm font-semibold text-[color:var(--muted-2)]">
+      <h2 className="truncate text-[19px] font-bold leading-tight tracking-tight">
         {title}
       </h2>
       {action && href ? (
         <Link
           href={href}
-          className="shrink-0 text-xs font-medium text-[color:var(--accent-text)] hover:underline"
+          aria-label={`${action}: ${title}`}
+          className={cn(
+            "-mr-1.5 flex shrink-0 items-center gap-0.5 rounded-full py-1 pl-2 pr-1 text-xs font-medium transition hover:bg-[var(--card-2)]",
+            MUTED
+          )}
         >
-          {action} &rarr;
+          {action}
+          <ChevronRight size={20} className="text-[color:var(--fg)]" />
+        </Link>
+      ) : href ? (
+        <Link
+          href={href}
+          aria-label={`See all: ${title}`}
+          className="-mr-1.5 shrink-0 rounded-full p-1 transition hover:bg-[var(--card-2)]"
+        >
+          <ChevronRight size={20} />
         </Link>
       ) : action ? (
-        <span className={cn("shrink-0 text-xs", MUTED)}>{action} &rarr;</span>
+        <span className={cn("shrink-0 text-xs", MUTED)}>{action}</span>
       ) : null}
     </div>
+  );
+}
+
+/** App icon corner, relative to the icon's own size so every size matches. */
+export const ICON = "rounded-[var(--icon-radius)]";
+
+/**
+ * The round grey button at the end of a row or under a shelf icon.
+ *
+ * A link to the app's page, not a download: everything the button could
+ * offer — the right build for the phone, an OBB beside it, the family picker,
+ * a listing that has no file yet — is decided there. The icon says what the
+ * page will offer this viewer: an update, an app they already have, or a get.
+ */
+export function GetButton({
+  app,
+  wide = false,
+  className,
+}: {
+  app: { slug: string; name: string; installed?: boolean; updateTo?: string; size: string };
+  /** Full width under a shelf icon rather than a compact pill in a row. */
+  wide?: boolean;
+  className?: string;
+}) {
+  const [Icon, verb] = app.updateTo
+    ? [RotateCw, "Update"]
+    : app.installed
+      ? [Check, "Installed"]
+      : app.size && app.size !== "—"
+        ? [ArrowDownToLine, "Get"]
+        : [ChevronRight, "Open"];
+  return (
+    <Link
+      href={`/app/${app.slug}`}
+      aria-label={`${verb} ${app.name}`}
+      title={verb}
+      className={cn(
+        "flex shrink-0 items-center justify-center rounded-full bg-[var(--pill)] transition hover:bg-[var(--pill-hover)]",
+        wide ? "h-9 w-full" : "h-9 w-14",
+        app.updateTo && "text-[color:var(--accent-text)]",
+        className
+      )}
+    >
+      <Icon size={19} strokeWidth={2.2} />
+    </Link>
   );
 }
 

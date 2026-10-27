@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowUpCircle, Bookmark, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { MUTED, SectionTitle, Thumb, metaLine } from "@/components/primitives";
+import { ICON, MUTED, SectionTitle, Thumb, metaLine } from "@/components/primitives";
 import type { StoreApp } from "@/lib/store";
 import { categoryLabel } from "@/lib/categories";
 
@@ -32,7 +32,7 @@ export default function AppGrid({
             <Link
               key={app.slug}
               href={`/app/${app.slug}`}
-              className="flex min-w-0 items-start gap-3 rounded-[var(--radius-lg)] p-2 transition hover:bg-[var(--card)]"
+              className="flex min-w-0 items-center gap-3 rounded-[var(--radius)] p-2 transition hover:bg-[var(--card)]"
             >
               <Thumb
                 seed={app.seed}
@@ -40,10 +40,10 @@ export default function AppGrid({
                 background={app.iconBackground}
                 fit={app.iconFit}
                 alt={app.name}
-                className="h-14 w-14 shrink-0 rounded-[var(--radius-sm)] shadow-lg"
+                className={cn("h-14 w-14 shrink-0 ring-1 ring-white/[0.06]", ICON)}
               />
               <span className="min-w-0 flex-1">
-                <span className="line-clamp-2 block text-sm font-medium">
+                <span className="line-clamp-2 block text-sm font-semibold leading-snug">
                   {app.name}
                 </span>
                 <span className={cn("block truncate text-[11px]", MUTED)}>

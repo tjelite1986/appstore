@@ -25,7 +25,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#100913",
+  themeColor: "#000000",
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
@@ -53,7 +53,7 @@ export default async function RootLayout({
       <body style={{ fontFamily: FONT_STACK }}>
         <TopBar email={user?.email} />
         {children}
-        <BottomNav pending={pending} email={user?.email} />
+        <BottomNav pending={pending} />
         <InstallBanner />
         <PwaRegister />
       </body>

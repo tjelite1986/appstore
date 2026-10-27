@@ -1,12 +1,16 @@
 import { Screen } from "@/components/screen";
-import CoverShelf from "@/components/cover-shelf";
-import Carousel from "@/components/carousel";
-import AppRows from "@/components/app-rows";
+import AppColumns from "@/components/app-columns";
 import Changelog from "@/components/changelog";
+import FeatureCards from "@/components/feature-card";
+import HeroCarousel from "@/components/hero-carousel";
+import IconShelf from "@/components/icon-shelf";
 import QuickLinks from "@/components/quick-links";
+import { heroSlides } from "@/components/hero-slides";
 import { MUTED } from "@/components/primitives";
 import { cn } from "@/lib/utils";
 import { changelog, recentlyAdded } from "@/lib/store";
+import { categorySlug, kindOf } from "@/lib/categories";
+import { byTopRated } from "@/lib/search";
 import { currentUserId } from "@/lib/current-user";
 import { adultsAllowed, shelfFor } from "@/lib/user-state";
 
@@ -15,30 +19,37 @@ import { adultsAllowed, shelfFor } from "@/lib/user-state";
 export const dynamic = "force-dynamic";
 
 /**
- * Home, block for block from the sketch: chips, Recently Added, the Editor
- * carousel, a Media & Entertainment card, the Communication shelf, the
- * changelog and the category tiles.
+ * Home: the newest artwork as a hero, the latest additions as big icons, a
+ * few apps given a whole card, then shelves for games and the categories
+ * people open most, and the category tiles last.
  *
- * Each block is skipped when its category is empty — a real library fills up
- * unevenly, and a heading over an empty grid reads as a bug.
+ * Each block is skipped when it is empty — a real library fills up unevenly,
+ * and a heading over an empty shelf reads as a bug.
  */
 export default async function HomePage() {
   const userId = await currentUserId();
-  // Read once and passed down: three blocks and the category tiles all have to
-  // agree about what this person may see, and asking four times invites three
-  // of them to be right.
+  // Read once and passed down: every block and the category tiles have to
+  // agree about what this person may see.
   const adults = adultsAllowed(userId);
   const [apps, recent, entries] = await Promise.all([
     shelfFor(userId),
-    recentlyAdded(6, { adults }),
+    recentlyAdded(15, { adults }),
     changelog(3, { adults }),
   ]);
 
-  const editors = apps.filter((a) => a.category === "Editor");
-  const communication = apps.filter((a) => a.category === "Communication");
-  const mediaAndEntertainment = apps
-    .filter((a) => a.category === "Media" || a.category === "Entertainment")
-    .slice(0, 4);
+  const newest = [...apps]
+    .filter((a) => a.added)
+    .sort((a, b) => b.added.localeCompare(a.added));
+  const hero = heroSlides(newest, 10);
+  const inHero = new Set(hero.map((h) => h.slug));
+  const top = byTopRated(apps);
+  const spotlight = top.filter((a) => a.banner && !inHero.has(a.slug)).slice(0, 6);
+  const games = top.filter((a) => kindOf(a.category) === "game");
+  const mediaAndEntertainment = top.filter(
+    (a) => a.category === "Media" || a.category === "Entertainment"
+  );
+  const communication = top.filter((a) => a.category === "Communication");
+  const editors = top.filter((a) => a.category === "Editor");
 
   return (
     <Screen>
@@ -48,35 +59,28 @@ export default async function HomePage() {
         </p>
       )}
 
-      {recent.length > 0 && (
-        <CoverShelf
-          title="Recently Added"
-          action="View all"
-          apps={recent}
-          columns={6}
-        />
-      )}
+      <HeroCarousel slides={hero} />
 
-      {editors.length > 0 && (
-        <Carousel title="Editor" action="See all" apps={editors} />
-      )}
+      <IconShelf title="Recently added" apps={recent} />
 
-      {mediaAndEntertainment.length > 0 && (
-        <AppRows title="Media & Entertainment" apps={mediaAndEntertainment} />
-      )}
+      <FeatureCards title="Worth a look" apps={spotlight} />
 
-      {communication.length > 0 && (
-        <CoverShelf
-          title="Communication"
-          apps={communication}
-          columns={4}
-          sub="developer"
-        />
-      )}
+      <AppColumns title="Top games" href="/games" apps={games} />
 
-      {/* The sketch's changelog block carries no heading of its own — the block
-          has no title field. One is added here so the section does not read as
-          a stray list between two headed sections. */}
+      <IconShelf
+        title="Media & Entertainment"
+        href={`/category/${categorySlug("Media")}`}
+        apps={mediaAndEntertainment}
+      />
+
+      <AppColumns
+        title="Communication"
+        href={`/category/${categorySlug("Communication")}`}
+        apps={communication}
+      />
+
+      <IconShelf title="Editors" href={`/category/${categorySlug("Editor")}`} apps={editors} />
+
       {entries.length > 0 && <Changelog title="What's new" items={entries} />}
 
       <QuickLinks title="Categories" adults={adults} />

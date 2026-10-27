@@ -252,29 +252,29 @@ export default async function AppDetailPage({
         <Thumb
           seed={app.seed + 4}
           src={app.banner}
-          className="h-40 w-full sm:h-56"
+          className="aspect-[16/9] max-h-72 w-full sm:aspect-auto sm:h-64"
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-[#100913] via-transparent to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/10 to-transparent" />
         <Link
           href="/"
           aria-label="Back"
-          className="absolute left-3 top-3 rounded-full bg-black/45 p-2 backdrop-blur"
+          className="absolute left-3 top-3 rounded-full bg-black/50 p-2.5 backdrop-blur"
         >
-          <ArrowLeft size={16} />
+          <ArrowLeft size={18} />
         </Link>
       </div>
 
-      <div className="-mt-10 flex items-end gap-3 px-[var(--pad)]">
+      <div className="-mt-12 flex items-end gap-4 px-[var(--pad)]">
         <Thumb
           seed={app.seed}
           src={app.icon}
           background={app.iconBackground}
           fit={app.iconFit}
           alt={app.name}
-          className="h-20 w-20 shrink-0 rounded-[var(--radius)] border border-[color:var(--border)] shadow-xl"
+          className="h-24 w-24 shrink-0 rounded-[var(--icon-radius)] shadow-2xl ring-1 ring-white/10"
         />
         <div className="min-w-0 flex-1 pb-1">
-          <h1 className="truncate text-lg font-semibold">{app.name}</h1>
+          <h1 className="line-clamp-2 text-[22px] font-bold leading-tight tracking-tight">{app.name}</h1>
           <p className={cn("truncate text-sm", MUTED)}>{app.developer}</p>
         </div>
       </div>
@@ -284,7 +284,7 @@ export default async function AppDetailPage({
           // A plain link, so the browser's own download manager handles it and
           // an interrupted transfer can resume — the route serves ranges.
           <a href={latest.href} className="flex-1">
-            <Button className="w-full justify-center">
+            <Button className="w-full justify-center py-3 text-[15px] font-semibold">
               <Download size={15} /> Install {latest.version}
             </Button>
           </a>
@@ -293,7 +293,7 @@ export default async function AppDetailPage({
           // file is not here to serve, and GitHub's own CDN resumes better
           // than a proxy that would only add a hop.
           <a href={linked.assetUrl} className="flex-1">
-            <Button className="w-full justify-center">
+            <Button className="w-full justify-center py-3 text-[15px] font-semibold">
               <Download size={15} /> Install {app.version}
             </Button>
           </a>
@@ -507,7 +507,7 @@ export default async function AppDetailPage({
                 seed={app.seed + i * 6}
                 src={src}
                 alt={`${app.name} screenshot ${i + 1}`}
-                className="aspect-[9/16] w-[110px] shrink-0 rounded-[var(--radius-sm)] sm:w-[140px]"
+                className="aspect-[9/16] w-[120px] shrink-0 rounded-[var(--radius)] sm:w-[150px]"
               />
             ))}
           </div>

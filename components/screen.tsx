@@ -19,8 +19,8 @@ export function Screen({
   return (
     <main
       className={cn(
-        "mx-auto flex w-full max-w-5xl flex-col gap-[var(--gap)]",
-        flush ? "pt-0" : "pt-[var(--gap)]",
+        "mx-auto flex w-full max-w-5xl flex-col gap-[calc(var(--gap)*1.6)]",
+        flush ? "pt-0" : "pt-2",
         "pb-[calc(var(--nav-h)+var(--gap)+env(safe-area-inset-bottom))]",
         className
       )}
@@ -40,7 +40,7 @@ export function ScreenTitle({
 }) {
   return (
     <div className="px-[var(--pad)]">
-      <h1 className="text-xl font-semibold">{title}</h1>
+      <h1 className="text-[28px] font-bold leading-tight tracking-tight">{title}</h1>
       {subtitle ? (
         <p className={cn("mt-0.5 text-sm", MUTED)}>{subtitle}</p>
       ) : null}

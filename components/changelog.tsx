@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import { MUTED } from "@/components/primitives";
+import { MUTED, SectionTitle } from "@/components/primitives";
 
 /**
  * The sketch's `changelog`, with `showRail: false` — no timeline rail, just
@@ -15,12 +15,8 @@ export default function Changelog({
 }) {
   return (
     <section className="px-[var(--pad)]">
-      {title ? (
-        <h2 className="mb-3 text-sm font-semibold text-[color:var(--muted-2)]">
-          {title}
-        </h2>
-      ) : null}
-      <div className="flex flex-col gap-4">
+      {title ? <SectionTitle title={title} /> : null}
+      <div className="flex flex-col gap-4 rounded-[var(--radius-lg)] bg-[var(--card)] p-4">
         {items.map((raw, i) => {
           const [version, date, summary] = raw.split("|").map((s) => s.trim());
           return (
@@ -28,7 +24,7 @@ export default function Changelog({
               <div className="flex items-center gap-2">
                 <span
                   className={cn(
-                    "rounded px-1.5 py-0.5 font-mono text-[10px]",
+                    "rounded-full px-2 py-0.5 font-mono text-[10px]",
                     i === 0
                       ? "bg-[var(--accent)] text-white"
                       : cn("bg-[var(--card-2)]", MUTED)

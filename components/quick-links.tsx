@@ -59,8 +59,8 @@ export const ICONS: Record<string, LucideIcon> = {
 };
 
 /**
- * The sketch's `quick-links`: icon tiles in a 3-column grid that jump into a
- * category.
+ * Category tiles: icon over label in a four-column panel divided by hairlines,
+ * each tile a jump into its category.
  */
 export default async function QuickLinks({
   title,
@@ -75,26 +75,31 @@ export default async function QuickLinks({
 }) {
   const categories = await categoryTiles({ adults, kind });
   if (categories.length === 0) return null;
+  // Fill the last row with blank cells so the hairline grid stays a grid.
+  const blanks = (4 - (categories.length % 4)) % 4;
 
   return (
     <section className="px-[var(--pad)]">
       <SectionTitle title={title} />
-      <div className="grid grid-cols-3 gap-[var(--gap)]">
+      <div className="grid grid-cols-4 gap-px overflow-hidden rounded-[var(--radius-lg)] bg-[#2a2a2e]">
         {categories.map(({ label, icon }) => {
           const Icon = ICONS[icon] ?? Store;
           return (
             <Link
               key={label}
               href={`/category/${categorySlug(label)}`}
-              className="flex flex-col items-center gap-2 rounded-[var(--radius)] bg-[var(--card)] px-3 py-5 text-center transition hover:bg-[var(--card-2)]"
+              className="flex min-h-[92px] flex-col items-center justify-center gap-2 bg-[var(--card)] px-0.5 py-4 text-center transition hover:bg-[var(--card-2)]"
             >
-              <Icon size={20} className="text-[color:var(--muted-2)]" />
-              <span className="text-xs font-medium text-[color:var(--muted-2)]">
+              <Icon size={24} strokeWidth={1.7} />
+              <span className="line-clamp-2 w-full text-[10.5px] leading-tight tracking-tight text-[color:var(--muted-2)]">
                 {categoryLabel(label)}
               </span>
             </Link>
           );
         })}
+        {Array.from({ length: blanks }, (_, i) => (
+          <span key={`blank-${i}`} className="bg-[var(--card)]" />
+        ))}
       </div>
     </section>
   );

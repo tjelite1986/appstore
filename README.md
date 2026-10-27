@@ -584,6 +584,25 @@ block in the sketch resolve to identical colours and spacing.
 
 `docs/` is not in this repo — it is local working space.
 
+### The 2026-10-27 restyle
+
+The look no longer follows the sketch; it follows the big phone app stores.
+The tokens keep their names, only the values changed:
+
+- **True black** page, `#161618` / `#252528` cards, 18px card radius, app
+  icons at a 24% corner (`--icon-radius`), a `#3d8bff` accent.
+- **Header**: an "App Store" wordmark, search and the account. Manage, Saved
+  and Settings moved to the new **Menu** screen (`/menu`) with Updates, My
+  apps and Game Mods as round shortcuts.
+- **Floating bottom bar** with four tabs — Home, Games, Apps, Menu. The update
+  count sits on Menu.
+- **Shelves** come in three shapes: a hero carousel of banners
+  (`hero-carousel.tsx`), big-icon shelves with a round get button under each
+  (`icon-shelf.tsx`), and paged columns of three rows (`app-columns.tsx`);
+  banner cards (`feature-card.tsx`) give single apps room. The round button is
+  a link to the app page, never a direct download (`GetButton` in
+  `primitives.tsx` says why).
+
 ### Where this diverges from the sketch, and why
 
 - **Shelf columns.** The sketch asks for 6 columns (Recently Added) and 4

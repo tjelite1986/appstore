@@ -1,9 +1,13 @@
 import { ChevronDown } from "lucide-react";
-import { Screen, ScreenTitle } from "@/components/screen";
+import { Screen } from "@/components/screen";
 import AppGrid from "@/components/app-grid";
+import AppColumns from "@/components/app-columns";
 import CategoryChips from "@/components/category-chips";
-import FeatureRail from "@/components/feature-rail";
+import FeatureCards from "@/components/feature-card";
+import HeroCarousel from "@/components/hero-carousel";
 import IconShelf from "@/components/icon-shelf";
+import QuickLinks from "@/components/quick-links";
+import { heroSlides } from "@/components/hero-slides";
 import { currentUserId } from "@/lib/current-user";
 import { adultsAllowed, shelfFor } from "@/lib/user-state";
 import {
@@ -20,9 +24,9 @@ const MIN_SHELF = 3;
 
 /**
  * Apps and Games are the same screen over a different half of the catalog:
- * category chips to jump with, a rail of banners, the best rated and the
- * newest, a shelf per category, and the whole list last for whoever wants to
- * read it top to bottom.
+ * the newest artwork as a hero, category chips to jump with, the best rated
+ * and the newest, a shelf per category, the category tiles, and the whole
+ * list last for whoever wants to read it top to bottom.
  */
 export default async function KindBrowse({ kind }: { kind: CategoryKind }) {
   const userId = await currentUserId();
@@ -36,46 +40,62 @@ export default async function KindBrowse({ kind }: { kind: CategoryKind }) {
   const newest = [...apps]
     .filter((a) => a.added)
     .sort((a, b) => b.added.localeCompare(a.added));
-  // The newest with artwork, so the rail is not the Top rated row again.
-  const featured = newest.filter((a) => a.banner).slice(0, 8);
+  // The newest with artwork lead; the best rated with artwork that did not
+  // make the hero get a card of their own further down.
+  const hero = heroSlides(newest, 8);
+  const inHero = new Set(hero.map((h) => h.slug));
+  const spotlight = top.filter((a) => a.banner && !inHero.has(a.slug)).slice(0, 6);
   const shelves = categoriesOf(kind)
     .map((c) => ({ category: c, apps: top.filter((a) => a.category === c) }))
     .filter((s) => s.apps.length >= MIN_SHELF);
 
   return (
     <Screen>
-      <ScreenTitle
-        title={kind === "game" ? "Games" : "Apps"}
-        subtitle={`${apps.length} ${noun}${apps.length === 1 ? "" : "s"} in the catalog`}
-      />
+      <HeroCarousel slides={hero} />
       <CategoryChips apps={apps} adults={adults} />
       {apps.length === 0 ? (
         <AppGrid apps={[]} empty={`No ${noun}s yet.`} />
       ) : (
         <>
-          <FeatureRail apps={featured} />
           <IconShelf title="Top rated" apps={top.slice(0, 15)} />
           {newest.length > 0 && (
-            <IconShelf title="Recently added" apps={newest.slice(0, 15)} />
+            <AppColumns title="Recently added" apps={newest.slice(0, 12)} />
           )}
-          {shelves.map((s) => (
-            <IconShelf
-              key={s.category}
-              title={categoryLabel(s.category)}
-              href={`/category/${categorySlug(s.category)}`}
-              apps={s.apps}
-            />
-          ))}
+          <FeatureCards title="Worth a look" apps={spotlight} />
+          {/* Alternate the two shelf shapes so a dozen categories do not read
+              as one long repeated strip. */}
+          {shelves.map((s, i) =>
+            i % 2 === 0 ? (
+              <IconShelf
+                key={s.category}
+                title={categoryLabel(s.category)}
+                href={`/category/${categorySlug(s.category)}`}
+                apps={s.apps}
+              />
+            ) : (
+              <AppColumns
+                key={s.category}
+                title={categoryLabel(s.category)}
+                href={`/category/${categorySlug(s.category)}`}
+                apps={s.apps}
+              />
+            )
+          )}
+          <QuickLinks
+            title={kind === "game" ? "Game categories" : "Categories"}
+            adults={adults}
+            kind={kind}
+          />
           {/* Folded: the shelves above are the way in, and the whole list
               under them made the screen a wall on a phone. A <details> needs
               no client code and keeps the list in the page for find-in-page. */}
           <details className="group">
-            <summary className="mx-[var(--pad)] flex cursor-pointer list-none items-center justify-between gap-3 rounded-[var(--radius-lg)] border border-[color:var(--border)] bg-[var(--card)] px-4 py-3 text-sm font-medium transition hover:bg-[var(--card-2)] [&::-webkit-details-marker]:hidden">
+            <summary className="mx-[var(--pad)] flex cursor-pointer list-none items-center justify-between gap-3 rounded-full bg-[var(--card-2)] px-5 py-3.5 text-sm font-semibold transition hover:bg-[var(--pill-hover)] [&::-webkit-details-marker]:hidden">
               <span>
                 All {noun}s A–Z{" "}
-                <span className="text-[color:var(--muted)]">({apps.length})</span>
+                <span className="font-normal text-[color:var(--muted)]">({apps.length})</span>
               </span>
-              <span className="flex items-center gap-1 text-xs text-[color:var(--accent-text)]">
+              <span className="flex items-center gap-1 text-xs font-medium text-[color:var(--muted-2)]">
                 <span className="group-open:hidden">Show all</span>
                 <span className="hidden group-open:inline">Hide</span>
                 <ChevronDown
