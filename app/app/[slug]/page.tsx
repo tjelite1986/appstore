@@ -321,6 +321,9 @@ export default async function AppDetailPage({
         <div className="min-w-0 flex-1 pb-1">
           <h1 className="line-clamp-2 text-[22px] font-bold leading-tight tracking-tight">{app.name}</h1>
           <p className={cn("truncate text-sm", MUTED)}>{app.developer}</p>
+          {app.modder && (
+            <p className={cn("truncate text-xs", MUTED)}>Mod by {app.modder}</p>
+          )}
         </div>
       </div>
 
@@ -620,11 +623,7 @@ export default async function AppDetailPage({
             >
               {modSiteName(app.modSource)}
             </a>
-            {app.modder ? ` · by ${app.modder}` : ""}
           </p>
-        )}
-        {!app.modSource && app.modder && (
-          <p className={cn("mt-1 text-[11px]", MUTED)}>Mod by {app.modder}</p>
         )}
         {viewer?.role === "admin" && app.signingCert && (
           <p className={cn("mt-1 break-all font-mono text-[11px]", MUTED)}>
