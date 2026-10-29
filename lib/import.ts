@@ -838,6 +838,8 @@ export async function decideImport(
       name,
       ...(item.packageName ? { packageName: item.packageName } : {}),
       ...(category ? { category } : {}),
+      // A new listing starts on the store's key — lib/store-signing.ts.
+      storeSigned: true,
     });
     invalidateCatalog();
   }

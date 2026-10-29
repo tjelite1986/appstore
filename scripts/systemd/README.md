@@ -1,8 +1,8 @@
 # Host timers
 
-Four jobs. Three are HTTP calls into the running container (see `../cron.sh`);
-the fourth signs an index and so has to be more than that (see
-`../fdroid-sign.sh`):
+Five jobs. Three are HTTP calls into the running container (see `../cron.sh`);
+the other two sign things and so have to be more than that (see
+`../fdroid-sign.sh` and `../apk-resign.sh`):
 
 | Unit | Every | What |
 |------|-------|------|
@@ -10,6 +10,7 @@ the fourth signs an index and so has to be more than that (see
 | `appstore-scan.timer` | 15 min | import whatever was dropped into `_import/` by hand |
 | `appstore-sources.timer` | 6 h | fetch newer releases for apps added from GitHub or F-Droid |
 | `appstore-fdroid.timer` | 6 h | rebuild and sign `index-v1.jar` |
+| `appstore-resign.timer` | 5 min | re-sign builds of listings set to "Sign with the store key" |
 
 A Telegram run scans by itself once it has downloaded something, so the scan
 timer only matters for files that arrive some other way.
@@ -19,7 +20,13 @@ address, and `GITHUB_TOKEN` in the compose env file is worth setting before it
 watches more than a handful of repositories — anonymous GitHub requests are 60
 an hour for the whole machine.
 
-`appstore-fdroid` is the only one with requirements of its own. It needs a JDK
+`appstore-fdroid` and `appstore-resign` are the two with requirements of
+their own. What follows is said of the first; the second needs the same, plus
+`apksigner` from the Android SDK build-tools (`APPSTORE_APKSIGNER` in
+`scripts/cron.env`), and keeps its key in `_state/apk-signing/` — which has to
+be kept out of backups the same way.
+
+`appstore-fdroid` needs a JDK
 on the host — `jar`, `jarsigner` and `keytool` — because signing is the one
 thing that cannot happen inside the container without putting the repository
 key inside the image. It also needs to read and write the library directly, so
@@ -39,7 +46,8 @@ Install:
     sudo install -m 0644 -o root -g root scripts/systemd/appstore-*.{service,timer} /etc/systemd/system/
     sudo systemctl daemon-reload
     sudo systemctl enable --now appstore-sync.timer appstore-scan.timer \
-                               appstore-sources.timer appstore-fdroid.timer
+                               appstore-sources.timer appstore-fdroid.timer \
+                               appstore-resign.timer
 
 The units here are examples: `User`, `Group` and the `ExecStart` path are facts
 about one machine, so set them to yours before installing. The same goes for

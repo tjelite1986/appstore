@@ -190,6 +190,13 @@ export type StoreApp = {
   modSource?: string;
   /** Who modified it, as the mod page names them. Free text. */
   modder?: string;
+  /**
+   * Serve this listing's builds re-signed with the store's own key, so the
+   * next build installs over the last one whoever modified it. `signingCert`
+   * stays the key the builds *arrived* with — that is what the importer's
+   * check compares a new drop against. See lib/store-signing.ts.
+   */
+  storeSigned?: boolean;
   /** The newest version, and its size — what every list row shows. */
   version: string;
   size: string;
@@ -385,6 +392,8 @@ type MetaFile = {
   /** Set by hand or by an apkmb fill: where the modified build came from. */
   modSource?: string;
   modder?: string;
+  /** Set by hand, or on by default for a new listing: see StoreApp. */
+  storeSigned?: boolean;
   rating?: number;
   ratingCount?: number;
   /** Overrides the date derived from the files. */
@@ -754,6 +763,7 @@ async function readFromDisk(): Promise<Catalog> {
           typeof meta?.modder === "string" && meta.modder.trim()
             ? meta.modder.trim()
             : undefined,
+        storeSigned: meta?.storeSigned === true ? true : undefined,
         // A linked app holds no file, so the newest version and its size are
         // what the release carried when it was last checked. Falling back here
         // rather than in each caller keeps tiles, search and the detail page

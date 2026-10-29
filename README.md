@@ -164,6 +164,41 @@ Discard moves the file to `_import/_discarded/` rather than deleting it, as
 does a version folder's previous binary when one is replaced. A wrong click on
 a 200 MB APK should not be final; the folder is trivial to empty by hand.
 
+### Signing with the store key
+
+Android only installs an update signed with the same key as the installed
+app. Mods change hands — the next build of an app is often a different
+modder's, signed with a different key — and every switch costs an uninstall
+and the app's data. A listing set to **Sign with the store key** (the switch
+in its edit form; on by default for listings created from now on) is served
+re-signed with one key the store holds, so once the store's build is on a
+phone, every later build installs over it, whoever made it.
+
+The split is the F-Droid index's: the key and the JDK stay on the host.
+`scripts/apk-resign.sh` (every 5 minutes, and first thing in every index
+build) asks `GET /api/store-signing` which `.apk` files of such listings do not
+carry the store's key yet, signs each with `apksigner`, checks the copy
+verifies with that key, keeps the original as a hard link under
+`_originals/<slug>/<version>/`, and renames the signed copy over the served
+file. It writes the key's fingerprint to `_state/apk-signing/signer.sha256`,
+where the app reads it.
+
+Until a file is signed it is not served: the download route and the F-Droid
+APK route answer 503, and the signed indexes leave it out. A phone that got
+the modder's copy in the meantime could never take the next build over it,
+which is the one thing the setting is for.
+
+What does not change is the importer's check. `signingCert` in the meta file
+stays the key the builds *arrived* with, and the next drop is compared against
+that — so a repackaged build is still refused before it is ever signed.
+`.xapk` bundles are served as they came; their splits are signed one by one
+and re-signing them means unpacking. Turning the setting off stops new
+signing and leaves files already signed as they are; the originals are in
+`_originals/`.
+
+Some apps check their own signature and break when re-signed. That is what
+the switch is per listing for.
+
 ### Adding an app from a source
 
 Manage's "Add an app" takes one address and works out who it belongs to

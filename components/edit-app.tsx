@@ -105,6 +105,8 @@ export type EditableApp = {
   iconBackground?: string;
   /** Absent means "cover", which is what an icon does untold. */
   iconFit?: "cover" | "contain";
+  /** Builds are served re-signed with the store's key — lib/store-signing.ts. */
+  storeSigned: boolean;
   /** Only so the preview here shows the same gradient the store does. */
   seed: number;
   banner?: string;
@@ -124,6 +126,9 @@ export default function EditApp({ app }: { app: EditableApp }) {
   // be odd for "Save text" to be the button that applies a colour.
   const [iconBg, setIconBg] = useState(app.iconBackground ?? "");
   const [iconFit, setIconFit] = useState(app.iconFit ?? "cover");
+  // Saved the moment it is flipped, like the icon controls: it decides which
+  // bytes phones are handed, not how the listing reads.
+  const [storeSigned, setStoreSigned] = useState(app.storeSigned);
   const [art, setArt] = useState<ArtworkFind | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -219,6 +224,15 @@ export default function EditApp({ app }: { app: EditableApp }) {
         body: JSON.stringify({ iconFit: value }),
       });
       setIconFit(value);
+    });
+
+  const saveStoreSigned = (on: boolean) =>
+    run("storesigned", async () => {
+      await call(`/api/apps/${app.slug}`, {
+        method: "PATCH",
+        body: JSON.stringify({ storeSigned: on ? "on" : "" }),
+      });
+      setStoreSigned(on);
     });
 
   const upload = (kind: string, file: File) =>
@@ -482,6 +496,27 @@ export default function EditApp({ app }: { app: EditableApp }) {
             onChange={(v) => setForm((f) => ({ ...f, modder: v }))}
           />
         </div>
+
+        {/* One key for every build of this listing, whoever modified it, so
+            the next one installs over the last. The first switch still costs
+            one uninstall on a phone holding the modder's build. */}
+        <label className="flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={storeSigned}
+            disabled={busy === "storesigned"}
+            onChange={(e) => saveStoreSigned(e.target.checked)}
+          />
+          <span>
+            Sign with the store key
+            <span className={cn("block text-[11px]", MUTED)}>
+              Every build is re-signed with one key, so updates install whoever
+              made them. A phone with the original build has to uninstall it
+              once. Turning it off keeps files already signed as they are.
+            </span>
+          </span>
+        </label>
 
         <label className="block">
           <span className={cn("mb-1 block text-[11px]", MUTED)}>

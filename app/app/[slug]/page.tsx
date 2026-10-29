@@ -24,6 +24,7 @@ import ShareApp from "@/components/share-app";
 import FileFeedbackCard from "@/components/file-feedback";
 import VersionExtras from "@/components/version-extras";
 import { storedText } from "@/lib/edit";
+import { pendingStoreSigning, storeSigner } from "@/lib/store-signing";
 import { abiShortLabel } from "@/lib/apk-abi";
 import { appFor, catalogFor } from "@/lib/user-state";
 import {
@@ -279,6 +280,16 @@ export default async function AppDetailPage({
       }, new Map<string, number>()),
   ];
 
+  // How far the host script has got with this listing, for the line under
+  // the signer. Admins only, like the signer itself.
+  const storeSigning =
+    viewer?.role === "admin" && app.storeSigned
+      ? {
+          key: await storeSigner(),
+          waiting: (await pendingStoreSigning([app])).length,
+        }
+      : null;
+
   // Whether each build worked, and what people wrote about it — one entry per
   // version the page draws. A linked app has no file here but does have a
   // version someone installed, so it gets a card for that one.
@@ -486,6 +497,7 @@ export default async function AppDetailPage({
             icon: app.icon,
             iconBackground: app.iconBackground,
             iconFit: app.iconFit,
+            storeSigned: app.storeSigned === true,
             seed: app.seed,
             banner: app.banner,
             screenshots: app.screenshots,
@@ -643,6 +655,15 @@ export default async function AppDetailPage({
                   .map(([name, n]) => `${name} ×${n}`)
                   .join(", ")}`
               : ""}
+          </p>
+        )}
+        {storeSigning && (
+          <p className={cn("mt-1 font-mono text-[11px]", MUTED)}>
+            {!storeSigning.key
+              ? "Store key · not created yet — scripts/apk-resign.sh makes it on its first run"
+              : storeSigning.waiting > 0
+                ? `Store key ${storeSigning.key.slice(0, 12)} · ${storeSigning.waiting} build${storeSigning.waiting === 1 ? "" : "s"} waiting to be signed`
+                : `Store key ${storeSigning.key.slice(0, 12)} · every build signed`}
           </p>
         )}
       </section>

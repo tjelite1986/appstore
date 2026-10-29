@@ -40,6 +40,7 @@ export const EDITABLE_FIELDS = [
   "modSource",
   "modder",
   "collections",
+  "storeSigned",
 ] as const;
 
 export type EditableField = (typeof EDITABLE_FIELDS)[number];
@@ -72,6 +73,7 @@ const MAX_LENGTHS: Record<EditableField, number> = {
   modder: 120,
   // Collection slugs, comma-joined like `requires`.
   collections: 1000,
+  storeSigned: 3,
 };
 
 /**
@@ -230,6 +232,16 @@ export async function editApp(slug: string, patch: unknown): Promise<void> {
         hosts.push(host.slug);
       }
       write.requires = hosts.length > 0 ? hosts : undefined;
+      continue;
+    }
+    // Serve the builds re-signed with the store's key (lib/store-signing.ts).
+    // A switch sent as text like every other field: "on" sets it, "" is the
+    // deletion, and the key only exists in the file while it is on.
+    if (field === "storeSigned") {
+      if (trimmed && trimmed !== "on") {
+        throw new EditError(`storeSigned must be "on" or empty`);
+      }
+      write.storeSigned = trimmed ? true : undefined;
       continue;
     }
     // The page a modified build was taken from. Kept as an address because

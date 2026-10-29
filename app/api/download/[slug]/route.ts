@@ -22,6 +22,7 @@ import { promises as fs } from "node:fs";
 import { NextResponse } from "next/server";
 import { STORE_DIRS } from "@/lib/storage";
 import { contentTypeFor, fileResponse, resolveInStore } from "@/lib/serve";
+import { awaitingStoreSignature, storeSigner } from "@/lib/store-signing";
 import { appFor } from "@/lib/user-state";
 import { currentUserId } from "@/lib/current-user";
 
@@ -104,6 +105,16 @@ export async function GET(
     return new NextResponse("Not found", { status: 404 });
   }
   if (!stat.isFile()) return new NextResponse("Not found", { status: 404 });
+
+  // Not served with the modder's key while the store's is on its way: a phone
+  // that installed this copy could not take the next build over it. The host
+  // script signs within minutes — see lib/store-signing.ts.
+  if (await awaitingStoreSignature(app, abs, await storeSigner())) {
+    return new NextResponse(
+      "This build is being signed with the store key — try again in a few minutes",
+      { status: 503, headers: { "Retry-After": "300" } }
+    );
+  }
 
   // The ABI belongs in the saved name when there is a choice to remember —
   // two files called tiktok-46.7.5.apk in a downloads folder are one file as

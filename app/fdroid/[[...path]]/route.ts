@@ -48,6 +48,7 @@ import { repoListings } from "@/lib/fdroid-shelf";
 import { userForRepoToken } from "@/lib/repo-token";
 import { contentTypeFor, fileResponse, resolveInStore } from "@/lib/serve";
 import { STORE_DIRS } from "@/lib/storage";
+import { awaitingStoreSignature, storeSigner } from "@/lib/store-signing";
 import { adultsAllowed, catalogFor } from "@/lib/user-state";
 import { publicOrigin, repoBaseUrl } from "@/lib/fdroid-url";
 
@@ -241,6 +242,15 @@ export async function GET(
     return notFound();
   }
   if (!stat.isFile()) return notFound();
+
+  // The signed indexes leave such a file out, but v0 names files without
+  // opening them — so the bytes are held back here too. See lib/store-signing.ts.
+  if (await awaitingStoreSignature(found.app, abs, await storeSigner())) {
+    return new NextResponse("Waiting for the store signature", {
+      status: 503,
+      headers: { "Retry-After": "300" },
+    });
+  }
 
   return fileResponse(abs, stat, req, {
     contentType: contentTypeFor(found.build.file),

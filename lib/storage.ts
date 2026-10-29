@@ -25,6 +25,9 @@
  *                                                     uploads in progress
  *   _state/                                           bookkeeping, not content
  *                                                     (the Telegram cursor)
+ *   _originals/   <slug>/<version>/<file>.apk         a build as it arrived,
+ *                                                     before the store signed
+ *                                                     it with its own key
  *
  * In a container this is one bind mount at STORE_ROOT, so the subdirectories
  * stay relative to it and nothing outside this file needs to know the host
@@ -56,4 +59,10 @@ export const STORE_DIRS = {
   uploads: "_import/_uploads",
   /** Not content — where a feature keeps its own bookkeeping. */
   state: "_state",
+  /**
+   * Builds as they arrived, kept when the store re-signs the served copy with
+   * its own key (see lib/store-signing.ts). Outside `_state/` on purpose: that
+   * is backed up, and these are APKs.
+   */
+  originals: "_originals",
 } as const;

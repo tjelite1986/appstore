@@ -1,0 +1,18 @@
+# Re-sign the builds of listings set to "Sign with the store key". Like
+# appstore-fdroid, not a bare HTTP call: it holds a key, so it needs a JDK and
+# apksigner on the host and a user that owns the library.
+[Unit]
+Description=App Store re-signing with the store key
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=appstore
+Group=appstore
+# The first run after turning the setting on for many listings signs all of
+# their builds; later ones find nothing or one new file.
+TimeoutStartSec=120min
+ExecStart=/opt/appstore/scripts/apk-resign.sh
+Nice=10
+IOSchedulingClass=idle

@@ -700,6 +700,10 @@ export async function addFromApkmb(
   const slug = await uniqueSlug(listing.name);
   // Nothing is on this slug yet, so there is no hand-written value to protect.
   const fill = await fillFromApkmb(slug, gated, { overwrite: true });
+  // A new listing starts on the store's key — lib/store-signing.ts. After the
+  // fill, not before: a first write without the category would put an adult
+  // app outside the gate until the fill caught up.
+  await writeMeta(slug, { storeSigned: true });
 
   return {
     slug,

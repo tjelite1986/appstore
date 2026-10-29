@@ -19,6 +19,7 @@ import { apkFileName } from "./fdroid-index";
 import { resolveInStore } from "./serve";
 import { STORE_DIRS, STORE_ROOT } from "./storage";
 import { compareVersions } from "./store";
+import { awaitingStoreSignature, storeSigner } from "./store-signing";
 import type { AppVersion, AppVersionFile, StoreApp } from "./store";
 
 /** One APK, as far as any index format is concerned. */
@@ -108,7 +109,8 @@ async function packageFor(
   app: StoreApp,
   version: AppVersion,
   build: AppVersionFile,
-  seen: Set<string>
+  seen: Set<string>,
+  signer: string | null
 ): Promise<{ entry: PackageEntry | null; reason?: string }> {
   // Which build a reason is about, when a version has more than one — "46.7.5:
   // unreadable" would otherwise name a version that is half on the shelf.
@@ -134,6 +136,12 @@ async function packageFor(
   }
   if (!facts.signer) {
     return { entry: null, reason: `${where}: not v2/v3-signed` };
+  }
+  // A phone that installed the modder's build could never take the store's
+  // next one over it — which is the whole reason the listing asked for the
+  // store's key. Held back until scripts/apk-resign.sh has signed it.
+  if (await awaitingStoreSignature(app, abs, signer)) {
+    return { entry: null, reason: `${where}: waiting for the store signature` };
   }
 
   return {
@@ -249,6 +257,7 @@ export function repoListings(apps: StoreApp[]): {
  */
 export async function collectShelf(apps: StoreApp[]): Promise<Shelf> {
   const seen = new Set<string>();
+  const signer = await storeSigner();
   const { listings, skipped } = repoListings(apps);
   const packages: ShelfPackage[] = [];
 
@@ -284,7 +293,7 @@ export async function collectShelf(apps: StoreApp[]): Promise<Shelf> {
       // reads no further than the first entry for a version gets the one this
       // store would have handed it.
       for (const build of version.files) {
-        const { entry, reason } = await packageFor(chosen, version, build, seen);
+        const { entry, reason } = await packageFor(chosen, version, build, seen, signer);
         if (!entry) {
           if (reason) skipped.push({ slug: chosen.slug, reason });
           continue;

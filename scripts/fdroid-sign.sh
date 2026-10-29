@@ -125,6 +125,14 @@ FINGERPRINT=$(
 )
 [ ${#FINGERPRINT} -eq 64 ] || die "could not read the certificate out of $KEYSTORE"
 
+# ------------------------------------------------------ store-signed builds
+
+# A build still waiting for the store's key is left out of the index, so sign
+# what is waiting first. Not fatal: an index without those files is still
+# right, and the resign timer reports its own failures.
+"$(dirname "${BASH_SOURCE[0]}")/apk-resign.sh" \
+  || say "re-signing failed — files still waiting are left out of this index"
+
 # --------------------------------------------------------------- the index
 
 # Prints the document to $1; fails the script on any non-2xx, and prints what

@@ -460,6 +460,8 @@ export async function addFromPlay(
   await writeMeta(slug, {
     packageName: listing.packageId,
     ...(gated.category ? { category: gated.category } : {}),
+    // A new listing starts on the store's key — lib/store-signing.ts.
+    storeSigned: true,
   });
   const fill = await fillFromPlay(slug, gated, {
     overwrite: true,

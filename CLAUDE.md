@@ -58,6 +58,11 @@
 - Signer TOFU: first APK pins the cert, a different or `unverifiable` key is
   refused, only an explicit review decision re-pins. Never widen a source to
   get past it.
+- `storeSigned` listings are served re-signed with the store's key by
+  `scripts/apk-resign.sh` (key on the host, never in the app); `signingCert`
+  stays the key builds *arrive* with, so TOFU still compares drops against the
+  modder. A file not yet signed is held back (503, left out of signed indexes):
+  never serve the modder's copy of such a listing. Originals: `_originals/`.
 - GitHub-linked apps (`isLinked`) are fetched once for version + signer, then
   served from GitHub; `relinkGitHub` verifies every new tag. Some apps stay
   mirrored on purpose. Update checks compare `source.releaseTag`, never
