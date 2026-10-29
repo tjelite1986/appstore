@@ -324,8 +324,8 @@ MTProto with a *user* session, not the Bot API and not a bot: `getFile` caps a
 bot at 20 MB and the channel posts 100–200 MB files. Credentials come from the
 environment — `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_SESSION`,
 `TELEGRAM_CHANNELS` — and an empty session makes the sync a no-op rather than
-an error. The session string is made once by `scripts/telegram-login.mjs` over
-in elite-v2; this app never logs in.
+an error. The session string is made by `scripts/telegram-login.mjs`, run
+once on the host; the app itself never logs in.
 
 `POST` returns as soon as the run starts. A run downloads up to five files of
 up to 400 MB and then sits out the importer's 60-second quiet period before
